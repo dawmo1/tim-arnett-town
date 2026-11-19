@@ -42,10 +42,12 @@ export function boxesNear(x, z, r, out = []) {
 
 const near = [];
 // Push a circle out of every wall. Returns the new position and the push normal.
-export function pushOutCircle(x, z, r) {
+// y (optional): feet height; walls whose top is below your feet don't count (walking on roofs)
+export function pushOutCircle(x, z, r, y = -Infinity) {
   let hit = false, nx = 0, nz = 0;
   boxesNear(x, z, r + 0.5, near);
   for (const b of near) {
+    if (y > b.y0 + b.h - 0.4) continue;
     const dx = x - b.cx, dz = z - b.cz;
     if (Math.abs(dx) > b.br + r || Math.abs(dz) > b.br + r) continue;
     const lu = dx * b.ux + dz * b.uz, lv = dx * b.vx + dz * b.vz;

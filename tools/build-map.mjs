@@ -14,7 +14,7 @@ fs.mkdirSync(OUT + 'tiles', { recursive: true });
 const read = (n) => JSON.parse(fs.readFileSync(here(`cache/${n}.json`))).elements;
 let seed = 12345;
 const rand = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
-const RIVER_LEVEL = 171.2; // metres above sea level; game y = elevation - RIVER_LEVEL
+const RIVER_LEVEL = 167.5; // the Mississippi's surface in the elevation data (pool 15); game y = elevation - RIVER_LEVEL
 
 // ---------- extent & raster ----------
 const [X0] = project(ORIGIN.lat, BBOX.w), [X1] = project(ORIGIN.lat, BBOX.e);
@@ -47,7 +47,8 @@ for (let j = 0; j < GH; j++) for (let i = 0; i < GW; i++) { const [la, lo] = toL
 // water = below the river surface (plus a little), then smooth the land so the DEM noise disappears
 const cls = new Uint8Array(GW * GH); // see CLASS below
 const C = { lawn: 0, water: 1, park: 2, wood: 3, parking: 4, paved: 5, industrial: 6, cemetery: 7, sand: 8, road: 9, walk: 10, building: 11, pitch: 12, farm: 13 };
-for (let k = 0; k < GW * GH; k++) if (height[k] < 0.7) cls[k] = C.water;
+const strictWet = new Uint8Array(GW * GH); // the old, generous waterline: keeps the islands and Illinois apart
+for (let k = 0; k < GW * GH; k++) { if (height[k] < 1.3) cls[k] = C.water; if (height[k] < 4.4) strictWet[k] = 1; } // the riverfront parks sit ~3 m above the water
 function blur(src, passes) {
   let a = src;
   for (let p = 0; p < passes; p++) {
@@ -77,7 +78,14 @@ const main = new Uint8Array(GW * GH);
   const [si, sj] = cellOf(0, -200), stack = [sj * GW + si]; main[stack[0]] = 1;
   while (stack.length) {
     const k = stack.pop(), i = k % GW, j = (k / GW) | 0;
-    for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const ii = i + di, jj = j + dj; if (!inGrid(ii, jj)) continue; const kk = jj * GW + ii; if (!main[kk] && cls[kk] !== C.water) { main[kk] = 1; stack.push(kk); } }
+    for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const ii = i + di, jj = j + dj; if (!inGrid(ii, jj)) continue; const kk = jj * GW + ii; if (!main[kk] && !strictWet[kk]) { main[kk] = 1; stack.push(kk); } }
+  }
+  // then grow up to 200 m into the low riverfront (parks, the ballpark) without jumping the channel
+  let front = []; for (let k = 0; k < GW * GH; k++) if (main[k]) front.push(k);
+  for (let step = 0; step < 50 && front.length; step++) {
+    const next = [];
+    for (const k of front) { const i = k % GW, j = (k / GW) | 0; for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const ii = i + di, jj = j + dj; if (!inGrid(ii, jj)) continue; const kk = jj * GW + ii; if (!main[kk] && cls[kk] !== C.water) { main[kk] = 1; next.push(kk); } } }
+    front = next;
   }
 }
 const onMain = (x, z) => { const [i, j] = cellOf(x, z); return inGrid(i, j) && main[j * GW + i] === 1; };
@@ -308,7 +316,7 @@ function addBuilding(geomPts, t) {
   else h = area > 1500 ? 8 + rand() * 6 : 6 + rand() * 4;
   const pitched = (HOUSEY.has(type) || (type === 'yes' && area < 260 && d !== 'downtown' && d !== 'north')) && area < 420 ? 1 : 0;
   // facade style: 0 brick, 1 stone, 2 siding, 3 glass/office, 4 stucco/strip mall, 5 industrial metal
-  let style = 2;
+  let style = 2; // eslint-disable-line prefer-const
   if (d === 'downtown') style = h > 30 ? 3 : rand() < 0.65 ? 0 : 1;
   else if (d === 'village') style = rand() < 0.8 ? 0 : 1;
   else if (d === 'north') style = pitched ? 2 : 4;
@@ -317,7 +325,10 @@ function addBuilding(geomPts, t) {
   let ymin = Infinity, ymax = -Infinity; for (const [x, z] of pts) { const y = heightAt(x, z); ymin = Math.min(ymin, y); ymax = Math.max(ymax, y); }
   const onLand = onMain(cx, cz);
   if (!onLand) { if (ymin > 0.5) skyline.push([Math.round(cx), Math.round(cz), Math.round(h), Math.round(Math.sqrt(area) / 2)]); return; }
-  bld.push({ pts, cx, cz, h: Math.round(h * 10) / 10, y: Math.round(ymin * 10) / 10, slope: ymax - ymin, pitched, style, name: t.name || '', type, area });
+  // kind code for the game: 0 other, 1 parking garage, 2 church, 3 school/college, 4 warehouse/industrial, 5 shop/commercial, 6 house
+  const kind = type === 'parking' || t.parking === 'multi-storey' ? 1 : type === 'church' || type === 'cathedral' || type === 'chapel' ? 2 : ['school', 'university', 'college'].includes(type) ? 3 : ['warehouse', 'industrial', 'manufacture'].includes(type) ? 4 : ['retail', 'commercial', 'supermarket', 'office'].includes(type) ? 5 : pitched ? 6 : 0;
+  if (kind === 1) { style = 1; h = Math.max(h, (+t['building:levels'] || 4) * 3); }
+  bld.push({ pts, cx, cz, h: Math.round(h * 10) / 10, y: Math.round(ymin * 10) / 10, slope: ymax - ymin, pitched, style, name: t.name || '', type, area, kind });
   fillPoly(pts, C.building, (c) => c !== C.water);
 }
 for (const e of read('buildings')) {
@@ -416,7 +427,7 @@ for (let tz = TZ0; tz <= TZ1; tz++) for (let tx = TX0; tx <= TX1; tx++) {
   for (let j = 0; j < 50; j++) for (let i = 0; i < 50; i++) { const c = clsAt(ox + i * 4 + 2, oz + j * 4 + 2); const m = onMain(ox + i * 4 + 2, oz + j * 4 + 2); CL[j * 50 + i] = m ? c : c === C.water ? C.water : C.farm; if (m) anyLand = true; }
   const tile = {
     h: b64(H), c: b64(CL),
-    b: bk.b.map((b) => [b.pts.flatMap(([x, z]) => [r1(x - ox), r1(z - oz)]), b.y, b.h, b.pitched, b.style, b.name]),
+    b: bk.b.map((b) => [b.pts.flatMap(([x, z]) => [r1(x - ox), r1(z - oz)]), b.y, b.h, b.pitched, b.style, b.name, b.kind]),
     t: bk.t.flatMap(([x, z, k, s]) => [r1(x - ox), r1(z - oz), k, Math.round(s * 10)]),
     k: bk.k.flatMap(([x, z, h, lot]) => [r1(x - ox), r1(z - oz), Math.round(h * 100) / 100, lot]),
     e: [...bk.e],
@@ -426,6 +437,41 @@ for (let tz = TZ0; tz <= TZ1; tz++) for (let tx = TX0; tx <= TX1; tx++) {
   tileCount++; totalBytes += json.length; maxBytes = Math.max(maxBytes, json.length);
   if (anyLand) tileList.push(key);
 }
+// ---------- railways ----------
+// mainline track chained into long lines (trains run on these), plus every other track for drawing
+{
+  const ways = read('rail').filter((w) => w.type === 'way' && w.geometry && w.tags && w.tags.railway === 'rail');
+  const keyOf = (p) => `${p[0].toFixed(1)},${p[1].toFixed(1)}`;
+  // only the stretches on Davenport's own land (split where a line leaves it)
+  const nearMain = (x, z) => onMain(x, z) || onMain(x + 16, z) || onMain(x - 16, z) || onMain(x, z + 16) || onMain(x, z - 16); // riverbank tracks dip into the 'water' cells
+  const pieces = (w) => { const out = []; let cur = []; for (const p of P(w.geometry)) { if (nearMain(p[0], p[1])) cur.push(p); else { if (cur.length > 1) out.push(cur); cur = []; } } if (cur.length > 1) out.push(cur); return out; };
+  const tracks = ways.flatMap(pieces);
+  // chain mainline ways end to end
+  let segs = ways.filter((w) => !w.tags.service).flatMap(pieces);
+  const lines = [];
+  while (segs.length) {
+    let line = segs.shift(), grown = true;
+    while (grown) {
+      grown = false;
+      for (let i = 0; i < segs.length; i++) {
+        const s0 = segs[i], a = keyOf(line[0]), b = keyOf(line[line.length - 1]), c = keyOf(s0[0]), d = keyOf(s0[s0.length - 1]);
+        if (b === c) line = line.concat(s0.slice(1)); else if (b === d) line = line.concat(s0.slice().reverse().slice(1));
+        else if (a === d) line = s0.concat(line.slice(1)); else if (a === c) line = s0.slice().reverse().concat(line.slice(1));
+        else continue;
+        segs.splice(i, 1); grown = true; break;
+      }
+    }
+    lines.push(line);
+  }
+  const len = (l) => l.reduce((a, p, i) => (i ? a + dist(p, l[i - 1]) : 0), 0);
+  lines.sort((a, b) => len(b) - len(a));
+  fs.writeFileSync(OUT + 'rail.json', JSON.stringify({
+    lines: lines.filter((l) => len(l) > 1500).map((l) => l.flatMap(([x, z]) => [r1(x), r1(z)])),
+    tracks: tracks.map((l) => l.flatMap(([x, z]) => [r1(x), r1(z)])),
+  }));
+  console.log(`rail: ${tracks.length} tracks, train lines ${lines.filter((l) => len(l) > 1500).map((l) => (len(l) / 1000).toFixed(1) + ' km').join(', ')}`);
+}
+
 // ---------- road graph ----------
 const roads = {
   names,

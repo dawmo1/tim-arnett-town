@@ -1,6 +1,6 @@
 // Builds the meshes and collision walls for one 200 m tile of Davenport.
 import * as THREE from 'three';
-import { TILE, C, G, terrainHeight, district, pointOnEdge } from './data.js';
+import { TILE, C, G, D, terrainHeight, district, pointOnEdge, nearestEdge } from './data.js';
 import { makeBox } from './collide.js';
 import { M, CELL, STYLE_CELL } from './mats.js';
 
@@ -217,9 +217,9 @@ function pointInPoly(x, z, pts) {
   }
   return c;
 }
-function buildBuildings(t, B, boxes, foot) {
+function buildBuildings(t, B, boxes, foot, SB) {
   t.b.forEach((rec, bi) => {
-    const [rel, baseY, hgt, pitched, style, name] = rec;
+    const [rel, baseY, hgt, pitched, style, name, kind = 0] = rec;
     const pts = new Float32Array(rel.length);
     for (let i = 0; i < rel.length; i += 2) { pts[i] = rel[i] + t.ox; pts[i + 1] = rel[i + 1] + t.oz; }
     const n = pts.length / 2; if (n < 3) return;
@@ -230,9 +230,16 @@ function buildBuildings(t, B, boxes, foot) {
     let cell = STYLE_CELL[style] || 'plain';
     if (cell === 'brick') cell = dist === 'village' ? 'brick2' : hash(seed) < 0.3 ? 'brick3' : 'brick';
     if (cell === 'glass' && hash(seed + 1) < 0.45) cell = 'office';
-    if (/church|cathedral|chapel|temple/i.test(name)) cell = 'church';
+    if (/church|cathedral|chapel|temple/i.test(name) || kind === 2) cell = 'church';
+    if (kind === 1) cell = 'ramp';
+    else if (kind === 3) cell = 'brick3';
+    else if (kind === 4) cell = 'metal';
+    // landmarks keep their real look
+    if (/Figge|Conservatory/.test(name)) cell = 'glass';
+    else if (/River Center/.test(name)) cell = 'office';
+    else if (/Union Station|Freight House|Adler|Blackhawk|Kahl|Putnam/.test(name)) cell = 'brick2';
     if (pitched && hgt < 4.2) cell = 'garage';
-    const store = !pitched && hgt >= 6 && hgt < 32 && (((dist === 'downtown' || dist === 'village') && (style === 0 || style === 1) && hash(seed + 2) < 0.75) || style === 4);
+    const store = !pitched && kind !== 1 && kind !== 2 && kind !== 3 && !name && hgt >= 6 && hgt < 32 && (((dist === 'downtown' || dist === 'village') && (style === 0 || style === 1) && hash(seed + 2) < 0.75) || style === 4 || kind === 5);
     let tint = [1, 1, 1];
     if (cell === 'siding' || cell === 'garage') tint = lin(SIDING_TINTS[Math.floor(hash(seed + 3) * SIDING_TINTS.length)]);
     else if (cell.startsWith('brick')) tint = lin(BRICK_TINTS[Math.floor(hash(seed + 4) * BRICK_TINTS.length)]);
@@ -258,6 +265,32 @@ function buildBuildings(t, B, boxes, foot) {
       else wall(yb, top, A, 16, 13.2, baseY);
       along += L;
       if (L > 0.5) boxes.push(makeBox((x0 + x1) / 2 - ox * 0.6, (z0 + z1) / 2 - oz * 0.6, ox, oz, 0.6, L / 2 + 0.05, yb, top - yb + (pitched ? 1.5 : 0)));
+    }
+    // a lit sign with a made-up name over the shop fronts, on the wall facing the street
+    if (store && SB && hash(seed + 9) < 0.85) {
+      const q = nearestEdge(cx, cz, 70);
+      if (q) {
+        let best = null, bd = 0.3;
+        for (let i = 0; i < n; i++) {
+          const x0 = pts[i * 2], z0 = pts[i * 2 + 1], x1 = pts[((i + 1) % n) * 2], z1 = pts[((i + 1) % n) * 2 + 1], L = Math.hypot(x1 - x0, z1 - z0);
+          if (L < 5) continue;
+          let ox = (z1 - z0) / L, oz = -(x1 - x0) / L;
+          if (pointInPoly((x0 + x1) / 2 + ox * 0.3, (z0 + z1) / 2 + oz * 0.3, pts)) { ox = -ox; oz = -oz; }
+          const tx = q.x - (x0 + x1) / 2, tz = q.z - (z0 + z1) / 2, tl = Math.hypot(tx, tz) || 1, d = (ox * tx + oz * tz) / tl;
+          if (d > bd) { bd = d; best = { x0, z0, x1, z1, L, ox, oz }; }
+        }
+        if (best) {
+          const w = Math.min(best.L * 0.6, 9), mx = (best.x0 + best.x1) / 2 + best.ox * 0.14, mz = (best.z0 + best.z1) / 2 + best.oz * 0.14;
+          const ux = (best.x1 - best.x0) / best.L, uz = (best.z1 - best.z0) / best.L, y0 = baseY + 3.25, y1 = baseY + 4.15;
+          // winding: face outward
+          const flip = ux * best.oz - uz * best.ox > 0;
+          const si = Math.floor(hash(seed + 11) * 128), su = (si % 8) / 8, sv = 1 - (Math.floor(si / 8) + 1) / 16;
+          const ax = mx - ux * w / 2, az = mz - uz * w / 2, bx = mx + ux * w / 2, bz = mz + uz * w / 2;
+          const a = SB.v(ax, y0, az, best.ox, 0, best.oz, 1, 1, 1, flip ? su : su + 1 / 8, sv), b = SB.v(bx, y0, bz, best.ox, 0, best.oz, 1, 1, 1, flip ? su + 1 / 8 : su, sv);
+          const c = SB.v(bx, y1, bz, best.ox, 0, best.oz, 1, 1, 1, flip ? su + 1 / 8 : su, sv + 1 / 16), d = SB.v(ax, y1, az, best.ox, 0, best.oz, 1, 1, 1, flip ? su : su + 1 / 8, sv + 1 / 16);
+          if (flip) SB.quad(a, b, c, d); else SB.quad(b, a, d, c);
+        }
+      }
     }
     // roof
     const flatRoof = (y, at, tintR) => {
@@ -330,6 +363,29 @@ function streetLights(t) {
   return out;
 }
 
+// ---------- railway track (ballast + two rails), cut into tiles like the roads ----------
+function buildRail(t, B) {
+  if (!D.rail) return;
+  const BAL = lin(0x6b665e), RAIL = lin(0x8a8f96), TIE = lin(0x4e3b2c);
+  for (const l of D.rail.tracks) {
+    if (!l.bbox) { let a = Infinity, b = -Infinity, c = Infinity, d = -Infinity; for (let i = 0; i < l.length; i += 2) { a = Math.min(a, l[i]); b = Math.max(b, l[i]); c = Math.min(c, l[i + 1]); d = Math.max(d, l[i + 1]); } l.bbox = [a, b, c, d]; }
+    if (l.bbox[1] < t.ox - 5 || l.bbox[0] > t.ox + TILE + 5 || l.bbox[3] < t.oz - 5 || l.bbox[2] > t.oz + TILE + 5) continue;
+    for (let i = 2; i < l.length; i += 2) {
+      const ax = l[i - 2], az = l[i - 1], bx = l[i], bz = l[i + 1], L = Math.hypot(bx - ax, bz - az), n = Math.max(1, Math.ceil(L / 4));
+      const ux = (bx - ax) / L, uz = (bz - az) / L, nx = -uz, nz = ux;
+      for (let k = 0; k < n; k++) {
+        const x0 = ax + (bx - ax) * (k / n), z0 = az + (bz - az) * (k / n), x1 = ax + (bx - ax) * ((k + 1) / n), z1 = az + (bz - az) * ((k + 1) / n);
+        if (!inTile(t, (x0 + x1) / 2, (z0 + z1) / 2)) continue;
+        const y0 = terrainHeight(x0, z0) + 0.1, y1 = terrainHeight(x1, z1) + 0.1;
+        const strip = (o0, o1, lift, c) => { const p = [[x0 + nx * o0, z0 + nz * o0, y0], [x0 + nx * o1, z0 + nz * o1, y0], [x1 + nx * o1, z1 + nz * o1, y1], [x1 + nx * o0, z1 + nz * o0, y1]].map(([x, z, y]) => B.v(x, y + lift, z, 0, 1, 0, ...c, 0, 0)); B.quad(p[1], p[0], p[3], p[2]); };
+        strip(-1.6, 1.6, 0, BAL);
+        for (let tt = 0; tt < 4; tt += 0.8) { const f = tt / 4; const px = x0 + (x1 - x0) * f, pz = z0 + (z1 - z0) * f; const y = y0 + (y1 - y0) * f + 0.03; const q = [[px + nx * -1.25, pz + nz * -1.25], [px + nx * 1.25, pz + nz * 1.25], [px + nx * 1.25 + ux * 0.25, pz + nz * 1.25 + uz * 0.25], [px + nx * -1.25 + ux * 0.25, pz + nz * -1.25 + uz * 0.25]].map(([x, z]) => B.v(x, y, z, 0, 1, 0, ...TIE, 0, 0)); B.quad(q[1], q[0], q[3], q[2]); }
+        strip(-0.8, -0.68, 0.14, RAIL); strip(0.68, 0.8, 0.14, RAIL);
+      }
+    }
+  }
+}
+
 // Build everything for a tile. Returns {group, boxes, trees, lights, foot}.
 export function buildTile(t) {
   const group = new THREE.Group();
@@ -340,9 +396,11 @@ export function buildTile(t) {
   add(walkB.geometry(), M.walk, false);
   add(roadB.geometry(), M.road, false);
   add(markB.geometry(), M.mark, false);
-  const bB = new Buf(true), boxes = [], foot = [];
-  buildBuildings(t, bB, boxes, foot);
+  const bB = new Buf(true), sB = new Buf(), boxes = [], foot = [];
+  buildBuildings(t, bB, boxes, foot, sB);
   add(bB.geometry(), M.building, true);
+  add(sB.geometry(), M.signs, false);
+  const rB = new Buf(); buildRail(t, rB); add(rB.geometry(), M.rail, false);
   const trees = [];
   for (let i = 0; i < t.t.length; i += 4) {
     const x = t.t[i] + t.ox, z = t.t[i + 1] + t.oz;

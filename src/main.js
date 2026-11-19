@@ -5,10 +5,11 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import * as W from './world.js';
 import { makeCharacter, animateCharacter, placeCharacter, randomLook, nameTag, mat } from './character.js';
-import { createAllVehicles, makeParked, initFarCars, farCarsBegin, farCarAdd, farCarsEnd, stepVehicle, collideVehicles, pushCharOut, circles, charVehicle, makeVehicleMesh, damageZone, applyDamageVisual, applyBump } from './vehicles.js';
+import { createAllVehicles, makeParked, makeVehicle, V, initFarCars, farCarsBegin, farCarAdd, farCarsEnd, stepVehicle, collideVehicles, pushCharOut, circles, charVehicle, makeVehicleMesh, damageZone, applyDamageVisual, applyBump } from './vehicles.js';
 import { initTraffic, updateTraffic as tickTraffic, bumpTraffic, scareTraffic, updateSignals, traffic, patrolViewers } from './traffic.js';
 import { initWalkers, updateWalkers, walkers, panicNear, spawnFleeing, scare, provoke, setNpcContext, cartNear, revive } from './npc.js';
 import { initEmergency, updateEmergency, reportDown } from './emergency.js';
+import { initLandmarks, updateLandmarks, doors, closedCrossings, trainCars, bargeList } from './landmarks.js';
 import { initDayNight, updateDayNight, sky as weather, clockText, view as fogView } from './daynight.js';
 import { initLife, updateLife, startle } from './life.js';
 import { glowMats } from './vehicles.js';
@@ -198,7 +199,7 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyT') { e.preventDefault(); openChat(); }
   if (e.code === 'Tab' || e.code === 'KeyQ') { e.preventDefault(); openWheel(); }
   if (e.code === 'KeyM') { document.exitPointerLock?.(); openPause('map'); }
-  if (e.code === 'KeyE') { if (!useStore()) toggleVehicle(); }
+  if (e.code === 'KeyE') { const d = doorNear(); if (d) useDoor(d); else if (!useStore()) toggleVehicle(); }
   if (e.code === 'KeyR') startReload();
   if (e.code === 'KeyN' && me.veh && !me.veh.T.bike) { const st = nextStation(); ui.flashPrompt(st.sub ? `📻 ${st.name} · ${st.sub}` : st.name); }
   if (/^Digit[1-7]$/.test(e.code)) selectWeapon(+e.code.slice(5) - 1);
@@ -464,7 +465,7 @@ function manageParked(dt, x, z, force) {
   parkT -= dt; if (parkT > 0 && !force) return; parkT = 2.5;
   const R = activeQuality === 'low' ? 170 : 240, want = activeQuality === 'low' ? 18 : activeQuality === 'medium' ? 32 : 44;
   for (const v of [...vehicles]) {
-    if (v === me.veh || v.driver || v.localSim) continue;
+    if (v === me.veh || v.driver || v.localSim || v.keep) continue;
     const d = Math.hypot(v.x - x, v.z - z);
     if ((v.mode === 'parked' && !v.stolenOnce && d > R + 120) || (v.mode === 'free' && d > 480)) resetVehicle(v);
   }
@@ -890,6 +891,36 @@ function updateGrenades(dt) {
   }
 }
 
+// The freight train and the barges don't stop for anyone.
+function trainAndBargeHits(dt) {
+  if (me.dead) return;
+  const px = me.veh ? me.veh.x : me.x, pz = me.veh ? me.veh.z : me.z;
+  const big = [];
+  for (const c of trainCars) if (c.active && Math.abs(c.x - px) < 30 && Math.abs(c.z - pz) < 30) big.push(c);
+  for (const b of bargeList()) if (Math.abs(b.x - px) < 140 && Math.abs(b.z - pz) < 140) big.push(b);
+  for (const o of big) {
+    if (me.veh) {
+      const i = collideVehicles(me.veh, o, false);
+      if (i > 0) { crashFx(me.veh, me.veh.hit); if (i > 6) damageVehicle(me.veh, (i - 4) * 3, me.veh.hit); }
+    } else if (!me.ch.rag) {
+      const q = pushCharOut(me.x, me.z, 0.4, o);
+      if (Math.hypot(q.x - me.x, q.z - me.z) > 1e-3) {
+        me.x = q.x; me.z = q.z;
+        if (o.len && Math.hypot(o.vx, o.vz) > 2 && me.hitCd <= 0) { damageMe(260, 'a freight train', '', { x: o.vx * 1.5 + (q.x - o.x), y: 6, z: o.vz * 1.5 + (q.z - o.z) }); me.hitCd = 1; }
+      }
+    }
+  }
+}
+// Stairwells (the rooftop helipad): a quick fade and you're there.
+const fadeEl = Object.assign(document.createElement('div'), { id: 'fade' });
+Object.assign(fadeEl.style, { position: 'fixed', inset: '0', background: '#000', opacity: '0', pointerEvents: 'none', transition: 'opacity .35s', zIndex: '50' });
+document.body.append(fadeEl);
+function doorNear() { if (me.veh || me.dead) return null; for (const d of doors) if (Math.hypot(d.x - me.x, d.z - me.z) < 2.2 && Math.abs(d.y - me.y) < 3) return d; return null; }
+function useDoor(d) {
+  fadeEl.style.opacity = '1';
+  setTimeout(() => { me.x = d.to.x; me.z = d.to.z; me.y = d.to.y; me.vy = 0; me.h = d.to.h; camYaw = d.to.h; fadeEl.style.opacity = '0'; }, 380);
+}
+
 // ---------- per-frame updates ----------
 // Crash v (simulated here) into everything nearby. Returns the biggest hit this frame.
 function collideAround(v, sliding) {
@@ -946,6 +977,8 @@ function updateTraffic(dt, tSec) {
   }
   for (const w of walkers) if (!w.dead && w.mode !== 'gone') obs.push({ x: w.x, z: w.z, r: 0.45, person: true });
   for (const d of fx.debrisList) obs.push({ x: d.m.position.x, z: d.m.position.z, r: 0.6 });
+  for (const c of closedCrossings()) obs.push({ x: c.x, z: c.z, r: c.e.width / 2 + 1, hl: 4, h: c.rh + Math.PI / 2 });
+  for (const c of trainCars) if (c.active) obs.push({ x: c.x, z: c.z, r: 1.6, hl: c.len / 2, h: c.h });
   allCars.length = 0; allCars.push(...vehicles);
   const sirens = [];
   const chase = wanted.stars > 0 || [...remotes.values()].some((r) => r.stars > 0);
@@ -1118,8 +1151,8 @@ function footUpdate(dt, fwd, side) {
   const ox = me.x, oz = me.z;
   me.x += mx * speed * dt; me.z += mz * speed * dt;
   // walls of earth: steep steps block you (but you can climb out of the river onto the bank)
-  if (W.offMap(me.x, me.z) || (W.isLand(me.x, me.z) && W.groundHeight(me.x, me.z) - me.y > (me.swim ? 1.9 : 0.7))) { me.x = ox; me.z = oz; }
-  const p = W.pushOutCircle(me.x, me.z, 0.4);
+  if (W.offMap(me.x, me.z) || (W.isLand(me.x, me.z) && W.surfaceHeight(me.x, me.z, me.y) - me.y > (me.swim ? 1.9 : 0.7))) { me.x = ox; me.z = oz; }
+  const p = W.pushOutCircle(me.x, me.z, 0.4, me.y);
   me.x = p.x; me.z = p.z;
   const pushers = [...vehicles];
   for (const u of police.cops.values()) if (u.kind < 2) pushers.push(u.v);
@@ -1137,7 +1170,7 @@ function footUpdate(dt, fwd, side) {
   me.y += me.vy * dt;
   if (land) {
     me.swim = false;
-    const gh = W.groundHeight(me.x, me.z);
+    const gh = W.surfaceHeight(me.x, me.z, me.y); // roofs count when you're on them
     if (me.y <= gh + 0.05 && me.vy <= 0) { me.y = gh; me.vy = 0; me.grounded = true; } else me.grounded = false;
     if (me.grounded && keys.has('Space')) { me.vy = 6.5; me.grounded = false; }
   } else {
@@ -1449,6 +1482,11 @@ initEmergency(scene, {
   revive: (w) => { if (revive(w)) ui.addFeed('Paramedics revived someone'); },
   extinguish: (v) => { v.burnAt = 0; v.burnBy = ''; fx.stopFire(v.fire); v.fire = null; v.hp = Math.max(v.hp, -v.T.hp * 0.3); writeVeh(v, true); },
 });
+initLandmarks(scene, {
+  addHeli: (x, y, z) => { const v = makeVehicle('heli-roof', V.HELI, 0x263238, { x, z, h: 0 }); v.y = y; v.keep = true; scene.add(v.mesh); vehicles.push(v); vehById.set(v.id, v); },
+  addBoat: (x, z, h) => { const v = makeVehicle('boat' + vehicles.length + '_' + Math.round(x), V.BOAT, [0xffffff, 0xe5484d, 0x1e88e5][Math.floor(Math.random() * 3)], { x, z, h }); v.y = W.WATER_Y - 0.35; v.keep = true; scene.add(v.mesh); vehicles.push(v); vehById.set(v.id, v); },
+  horn: (x, z) => fx.soundHorn(distCam(x, z) * 0.6),
+});
 police.initPolice(scene, {
   extraViewers: () => patrolViewers(),
   now: () => net.now(),
@@ -1507,6 +1545,7 @@ function updateHud(dt, t) {
     else if (st && st.kind === 'body' && me.veh && !me.veh.T.boat && !me.veh.T.heli) prompt = 'E: Repair & respray ($150)';
     else if (st && st.kind === 'rob' && !me.veh && st.cooldown <= 0) prompt = `Aim a gun at the door (right click) to rob ${st.name}`;
   }
+  if (!me.dead && !prompt) { const d = doorNear(); if (d) prompt = `E: ${d.label}`; }
   if (!me.dead && !prompt) {
     if (me.veh) prompt = '';
     else if (!me.enter) { const v = nearestVehicle(4.5); if (v) prompt = Math.hypot(v.vx || 0, v.vz || 0) > 3.5 ? '' : `E: ${v.mode === 'traffic' || v.driver ? 'Carjack' : 'Enter'} ${v.T.name}`; }
@@ -1577,6 +1616,8 @@ function update(dt, t) {
   updateRemotes(dt);
   updateWalkers(dt, tSec, nowMs, camView());
   updateEmergency(dt, { x: me.veh ? me.veh.x : me.x, z: me.veh ? me.veh.z : me.z }, camView(), tSec);
+  updateLandmarks(dt, tSec, { x: me.veh ? me.veh.x : me.x, z: me.veh ? me.veh.z : me.z }, weather.night);
+  trainAndBargeHits(dt);
   if (isHost) { police.hostUpdate(dt, policePlayers()); hostChores(dt, nowMs); }
   for (const v of vehicles) if (v.pending) flushBump(v);
   police.render(dt, isHost, t, camera.position, farCarDist());
@@ -1619,6 +1660,7 @@ function frame(now) {
     updateNav(dt);
     updateWalkers(dt, nowMs / 1000, nowMs, camView());
     updateRagdolls(dt);
+    updateLandmarks(dt, nowMs / 1000, W.places.menu, weather.night);
     menuCamera(now / 1000);
     updateWorldLife(dt, nowMs, now / 1000);
   }

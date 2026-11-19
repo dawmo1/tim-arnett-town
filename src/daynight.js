@@ -129,6 +129,7 @@ export function updateDayNight(dt, nowMs, cam) {
   if (env.beam) { env.beam.material.opacity = n * 0.16; env.beam.rotation.y += dt * 0.9; }
   if (env.water) env.water.color.copy(C(0x4d7378).lerp(C(0x0b2230), n * 0.85).lerp(C(0x56676a), sky.cloud * 0.4));
   if (env.farBox) env.farBox.emissiveIntensity = n * 0.35;
+  if (env.signs) env.signs.emissiveIntensity = n * 1.2;
   if (env.roads) env.roads.color.setScalar(1 - 0.35 * sky.wet);
   if (env.ground) env.ground.color.setScalar(1 - 0.28 * sky.wet);
 

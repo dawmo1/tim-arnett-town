@@ -122,7 +122,7 @@ export function setClock(time, wx, night) { el.clock.textContent = `${time} · $
 export function setSpeedo(v, station = '', nitro = 0) {
   if (!v) { el.speedo.hidden = true; return; }
   el.speedo.hidden = false;
-  const alt = v.T.heli ? `<span>Altitude ${Math.round(v.y)} m</span>` : '';
+  const alt = v.T.heli ? `<span>Altitude ${Math.round(v.alt ?? v.y)} m</span>` : '';
   const nb = !v.T.bike && !v.T.heli ? `<div id="nitro" title="Nitro"><i style="width:${Math.round(nitro * 100)}%"></i></div>` : '';
   el.speedo.innerHTML = `<b>${Math.round(Math.abs(v.speed) * 3.6)}</b><small>km/h</small><span>${v.T.name}${station ? ' · ' + station : ''}</span>${alt}${nb}`;
 }

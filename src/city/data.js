@@ -17,8 +17,8 @@ function b64(s, Type) {
 
 // ---------- startup ----------
 export async function loadData() {
-  const [index, roads, overview] = await Promise.all([getJSON('index.json'), getJSON('roads.json'), getJSON('overview.json')]);
-  D.index = index; D.overview = overview;
+  const [index, roads, overview, rail] = await Promise.all([getJSON('index.json'), getJSON('roads.json'), getJSON('overview.json'), getJSON('rail.json')]);
+  D.index = index; D.overview = overview; D.rail = rail;
   const c = overview.coarse;
   D.coarse = { ...c, heights: b64(c.heights, Int16Array), kind: b64(c.kind, Uint8Array) };
   D.tileSet = new Set(index.tiles);
@@ -86,6 +86,25 @@ export function bridgeDeck(x, z) {
 export function groundHeight(x, z) {
   const t = terrainHeight(x, z), b = bridgeDeck(x, z);
   return (b !== null && b > t ? b : t) + GROUND_LIFT;
+}
+// Top of the building roof at (x, z), or -Infinity (for standing on roofs and landing helicopters).
+export function roofAt(x, z) {
+  const t = tiles.get(tileKey(Math.floor(x / TILE), Math.floor(z / TILE)));
+  if (!t) return -Infinity;
+  if (!t.bb) t.bb = t.b.map(([rel, y, h]) => { let a = Infinity, b = -Infinity, c = Infinity, d = -Infinity; for (let i = 0; i < rel.length; i += 2) { a = Math.min(a, rel[i]); b = Math.max(b, rel[i]); c = Math.min(c, rel[i + 1]); d = Math.max(d, rel[i + 1]); } return [a + t.ox, b + t.ox, c + t.oz, d + t.oz, rel, y + h]; });
+  let top = -Infinity;
+  for (const [a, b, c, d, rel, h] of t.bb) {
+    if (x < a || x > b || z < c || z > d || h < top) continue;
+    let inside = false; const lx = x - t.ox, lz = z - t.oz;
+    for (let i = 0, j = rel.length - 2; i < rel.length; j = i, i += 2) if ((rel[i + 1] > lz) !== (rel[j + 1] > lz) && lx < ((rel[j] - rel[i]) * (lz - rel[i + 1])) / (rel[j + 1] - rel[i + 1]) + rel[i]) inside = !inside;
+    if (inside) top = h;
+  }
+  return top;
+}
+// What's under your feet when you're at height y: a roof you're standing on, else the ground.
+export function surfaceHeight(x, z, y) {
+  const g = groundHeight(x, z), r = roofAt(x, z);
+  return r > g && r <= y + 0.7 ? r + 0.05 : g;
 }
 export function isLand(x, z) {
   if (terrainHeight(x, z) > WATER_Y + 0.05) return true;

@@ -8,7 +8,7 @@ export const CELL = {
   brick: [0, 0], stone: [1, 0], siding: [2, 0], glass: [3, 0],
   stucco: [0, 1], metal: [1, 1], store: [2, 1], roof: [3, 1],
   shingle: [0, 2], brick2: [1, 2], office: [2, 2], plain: [3, 2],
-  sign: [0, 3], garage: [1, 3], church: [2, 3], brick3: [3, 3],
+  ramp: [0, 3], garage: [1, 3], church: [2, 3], brick3: [3, 3],
 };
 export const STYLE_CELL = ['brick', 'stone', 'siding', 'glass', 'stucco', 'metal'];
 const N = 512;
@@ -103,7 +103,13 @@ function atlas(lit) {
     g.fillStyle = '#ffffff'; g.fillRect(0, 0, N, N);
     for (let y = 0, row = 0; y < N; y += 16, row++) for (let x = (row % 2) * -12; x < N; x += 24) { const k = 0.72 + r() * 0.28; g.fillStyle = `rgb(${255 * k | 0},${255 * k | 0},${255 * k | 0})`; g.fillRect(x + 1, y + 1, 22, 14); }
   });
-  cell('sign', () => { if (!lit) { g.fillStyle = '#ffffff'; g.fillRect(0, 0, N, N); } else { g.fillStyle = '#fff'; g.fillRect(0, 0, N, N); } });
+  // parking ramp: concrete floor slabs with open dark bays between columns
+  cell('ramp', () => {
+    if (lit) { for (let j = 0; j < 4; j++) for (let i = 0; i < 8; i++) if (r() < 0.5) { g.fillStyle = '#ffe9b0'; g.fillRect(i * 64 + 10, j * 128 + 60, 44, 6); } return; }
+    g.fillStyle = '#b9b6ae'; g.fillRect(0, 0, N, N);
+    for (let j = 0; j < 4; j++) { g.fillStyle = '#2a2c2e'; g.fillRect(0, j * 128 + 34, N, 74); g.fillStyle = '#a19e96'; for (let i = 0; i < 4; i++) g.fillRect(i * 128, j * 128 + 34, 16, 74); g.fillStyle = '#c9c6be'; g.fillRect(0, j * 128 + 96, N, 12); }
+    noise('60,60,60', 500, 0.12);
+  });
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; t.generateMipmaps = true;
   t.minFilter = THREE.LinearMipmapLinearFilter;
@@ -136,6 +142,22 @@ function noiseTex(size, base, amt, seed, lines = null) {
   return t;
 }
 
+// Made-up business names for lit shop signs (8 x 16 grid of 256 x 64 cells).
+export const SIGN_NAMES = ["Tim's Diner", 'Arnett Hardware', 'River City Pawn', 'Quad Coffee', 'Big Muddy BBQ', 'Bix Records', 'Lock & Dam Liquor', 'Bluff Barbers', 'Mississippi Mattress', 'Hilltop Tavern', 'Arnett Pharmacy', 'Paddlewheel Pizza', 'Barge Burgers', 'Brady St. Tattoo', 'Quad Nails', 'Iowa Cell Repair', 'Tim Taco', 'Village Bakery', 'River Rat Bait', 'Corn Belt Cafe', 'Dam Good Donuts', 'Arnett Insurance', 'Hawkeye Hobbies', 'Gold Coast Gifts', 'Eagle Point Optical', 'Riverbend Books', 'Bluff City Bikes', 'Pinewood Pub', 'Quad Vapes', 'Mayor Tim HQ', 'Prairie Florist', 'Second Hand Rose', 'Sweet Corn Sweets', 'Bridge View Bar', 'Davenport Dry Clean', 'Lucky Arnett Laundry', 'Steamboat Subs', 'Old Town Antiques', 'Muddy Waters Coffee', 'Kimberly Kicks', 'Heartland Hair', 'Arsenal Army Surplus', 'Cornfield Comics', 'Rust Belt Records', 'Quad City Cleaners', 'Pork Tenderloin Palace', 'Tim Mart Express', 'Bettendorf Bagels', 'Rock Island Rugs', 'Moline Mobile', 'Lindsay Park Pets', 'River Drive Rentals', 'Bandshell Brews', 'Ferris Wheel Fun', 'Skybridge Sushi', 'Westside Wings', 'Northside Nutrition', 'Bucktown Bistro', 'Freight House Fitness', 'Locust St. Loans', 'Harrison Hot Dogs', 'Union Station Sandwiches', 'Mayor\'s Meat Market', 'Davenport Donuts'];
+function signAtlas(lit) {
+  const c = document.createElement('canvas'); c.width = 2048; c.height = 1024;
+  const g = c.getContext('2d');
+  const COLS = [['#b71c1c', '#fff'], ['#0d47a1', '#fff'], ['#1b5e20', '#fff'], ['#212121', '#ffd54f'], ['#4a148c', '#fff'], ['#f9a825', '#212121'], ['#004d40', '#ffeb3b'], ['#e65100', '#fff'], ['#fafafa', '#c62828'], ['#263238', '#80deea']];
+  for (let i = 0; i < 128; i++) {
+    const x = (i % 8) * 256, y = Math.floor(i / 8) * 64, name = SIGN_NAMES[i % SIGN_NAMES.length], [bg, fg] = COLS[(i * 7) % COLS.length];
+    g.fillStyle = lit ? '#0a0a0a' : bg; g.fillRect(x + 2, y + 2, 252, 60);
+    if (!lit) { g.strokeStyle = fg; g.lineWidth = 3; g.strokeRect(x + 6, y + 6, 244, 52); }
+    g.fillStyle = lit ? fg : fg; g.font = `bold ${name.length > 16 ? 24 : 30}px Arial Black, Arial`; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(name.toUpperCase(), x + 128, y + 33, 236);
+  }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+  return t;
+}
 export const M = {};
 export function initMaterials() {
   if (M.building) return M;
@@ -145,6 +167,8 @@ export function initMaterials() {
   M.road = new THREE.MeshStandardMaterial({ vertexColors: true, map: noiseTex(256, '#bdbdbd', 0.22, 4, (g, s) => { g.fillStyle = 'rgba(0,0,0,.25)'; for (let k = 0; k < 6; k++) { g.beginPath(); g.moveTo(Math.random() * s, 0); g.lineTo(Math.random() * s, s); g.lineWidth = 1; g.strokeStyle = 'rgba(30,30,30,.25)'; g.stroke(); } }), roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
   M.walk = new THREE.MeshStandardMaterial({ vertexColors: true, map: noiseTex(128, '#e4e1db', 0.12, 5, (g, s) => { g.fillStyle = 'rgba(80,80,80,.35)'; g.fillRect(0, 0, s, 2); g.fillRect(0, 0, 2, s); }), roughness: 0.92, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 });
   M.mark = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -6 });
+  M.signs = new THREE.MeshStandardMaterial({ map: signAtlas(false), emissiveMap: signAtlas(true), emissive: 0xffffff, emissiveIntensity: 0, roughness: 0.5, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+  M.rail = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, metalness: 0.2, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
   M.water = new THREE.MeshStandardMaterial({ color: 0x3f6f7a, roughness: 0.12, metalness: 0.1, transparent: true, opacity: 0.93 });
   M.far = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 });
   M.farBox = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, emissive: 0xffc070, emissiveIntensity: 0 });

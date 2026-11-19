@@ -444,7 +444,8 @@ function stepBoat(v, inp, dt) {
 // Helicopter: W/S tilt forward/back, A/D turn, Space climb, Shift descend.
 function stepHeli(v, inp, dt) {
   const T = v.T, alive = v.hp > 0;
-  const ground = W.isLand(v.x, v.z) ? W.groundHeight(v.x, v.z) : -0.15;
+  const ground = Math.max(W.isLand(v.x, v.z) ? W.groundHeight(v.x, v.z) : -0.15, W.roofAt(v.x, v.z)); // roofs are helipads too
+  v.alt = v.y - ground;
   v.vy = v.vy || 0;
   if (alive) {
     if (inp.up) v.vy += 11 * dt; else if (inp.down) v.vy -= 11 * dt; else v.vy *= Math.exp(-2.5 * dt);
