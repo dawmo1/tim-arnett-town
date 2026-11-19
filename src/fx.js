@@ -182,7 +182,10 @@ export function updateFx(dt) {
 }
 
 // ---------- sound (synthesized, no files) ----------
-let ac = null, noise = null;
+let ac = null, noise = null, master = null, volume = 1;
+// everything plays through one master volume
+function out() { if (!master) { master = ac.createGain(); master.gain.value = volume; master.connect(ac.destination); } return master; }
+export function setVolume(v) { volume = v; if (master) master.gain.value = v; }
 export function unlockAudio() {
   if (ac) { ac.resume(); return; }
   try {
@@ -199,7 +202,7 @@ function burst(dur, freq, vol) {
   const g = ac.createGain();
   g.gain.setValueAtTime(vol, ac.currentTime);
   g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + dur);
-  src.connect(f); f.connect(g); g.connect(ac.destination);
+  src.connect(f); f.connect(g); g.connect(out());
   src.start(); src.stop(ac.currentTime + dur);
 }
 const fall = (dist) => Math.max(0, 1 - dist / 140);
@@ -219,7 +222,7 @@ function tone(type, freq, dur, vol, t0 = 0) {
   o.type = type; o.frequency.value = freq;
   g.gain.setValueAtTime(vol, ac.currentTime + t0);
   g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + t0 + dur);
-  o.connect(g); g.connect(ac.destination);
+  o.connect(g); g.connect(out());
   o.start(ac.currentTime + t0); o.stop(ac.currentTime + t0 + dur);
 }
 export function soundHorn(dist = 0) { const v = 0.18 * fall(dist * 1.5); tone('square', 392, 0.35, v); tone('square', 494, 0.35, v * 0.8); }
@@ -249,7 +252,7 @@ function loopNoise(type, freq, q = 1) {
   const src = ac.createBufferSource(); src.buffer = noise; src.loop = true;
   const f = ac.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q;
   const g = ac.createGain(); g.gain.value = 0;
-  src.connect(f); f.connect(g); g.connect(ac.destination); src.start();
+  src.connect(f); f.connect(g); g.connect(out()); src.start();
   return g;
 }
 export function setAmbient(v) {
@@ -260,7 +263,7 @@ export function setAmbient(v) {
     const o = ac.createOscillator(), am = ac.createOscillator(), amg = ac.createGain(), g = ac.createGain();
     o.frequency.value = 4400; am.frequency.value = 28; amg.gain.value = 0.5;
     const pulse = ac.createGain(); pulse.gain.value = 0.5;
-    am.connect(amg); amg.connect(pulse.gain); o.connect(pulse); pulse.connect(g); g.gain.value = 0; g.connect(ac.destination);
+    am.connect(amg); amg.connect(pulse.gain); o.connect(pulse); pulse.connect(g); g.gain.value = 0; g.connect(out());
     o.start(); am.start();
     amb.crickets = g; amb.birdT = 0;
   }
@@ -284,9 +287,17 @@ export function setSiren(vol) {
     o.type = 'sawtooth'; o.frequency.value = 760; lfo.frequency.value = 0.55; lg.gain.value = 260;
     lfo.connect(lg); lg.connect(o.frequency);
     const f = ac.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 1800;
-    g.gain.value = 0; o.connect(f); f.connect(g); g.connect(ac.destination);
+    g.gain.value = 0; o.connect(f); f.connect(g); g.connect(out());
     o.start(); lfo.start();
     siren = g;
   }
   siren.gain.setTargetAtTime(Math.max(0, Math.min(0.09, vol * 0.09)), ac.currentTime, 0.2);
 }
+
+export const audio = () => ({ ac, noise, out: ac ? out() : null });
+export function soundGoal() { [523, 659, 784, 1046, 1318].forEach((f, i) => tone('triangle', f, 0.22, 0.13, i * 0.09)); }
+export function soundCash() { tone('square', 1318, 0.06, 0.06); tone('square', 1760, 0.08, 0.06, 0.06); }
+export function soundGnome() { [880, 1108, 1318, 1760].forEach((f, i) => tone('sine', f, 0.25, 0.12, i * 0.07)); }
+export function soundClick() { burst(0.03, 4000, 0.25); }
+export function soundReload() { burst(0.05, 3000, 0.3); setTimeout(() => burst(0.06, 2000, 0.35), 350); }
+export function soundNitro() { burst(0.6, 900, 0.3); }

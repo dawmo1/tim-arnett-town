@@ -19,15 +19,18 @@ import * as ui from './ui.js';
 import { net, connect, joinRoom, sendState, setVehicle, removeVehicle, setCops, sendEvent, sendChat, hostUid } from './net.js';
 import { clamp, angDiff, rayOBB, raySphere } from './util.js';
 import { wanted, crime, updateWanted as tickWanted, resetWanted, cones, initWanted } from './wanted.js';
+import { eco, initEconomy, addCash, spend, goalDone, checkCountGoals, GOALS, storeNear, dropCash, updateEconomy, gnomeList } from './economy.js';
+import { updateRadio, nextStation, currentStation } from './radio.js';
 
+// price: cost at Arnett Arms (0 = you start with it); mag/ammoPack: magazine size and rounds per purchase
 const WEAPONS = [
-  { name: 'Fists', melee: true, dmg: 12, range: 1.8, rate: 2.5, kind: 'none' },
-  { name: 'Bat', melee: true, dmg: 30, range: 2.4, rate: 1.6, kind: 'bat' },
-  { name: 'Pistol', dmg: 22, rate: 3.5, spread: 0.012, range: 120, kind: 'gun', snd: 'pistol' },
-  { name: 'SMG', dmg: 9, rate: 12, spread: 0.04, range: 90, kind: 'gun', auto: true, snd: 'smg' },
-  { name: 'Shotgun', dmg: 11, pellets: 8, rate: 1.1, spread: 0.09, range: 40, kind: 'gun', snd: 'shotgun' },
-  { name: 'Rifle', dmg: 34, rate: 5, spread: 0.006, range: 200, kind: 'gun', auto: true, snd: 'rifle' },
-  { name: 'Grenade', grenade: true, rate: 0.8, kind: 'none' },
+  { name: 'Fists', melee: true, dmg: 12, range: 1.8, rate: 2.5, kind: 'none', price: 0 },
+  { name: 'Bat', melee: true, dmg: 30, range: 2.4, rate: 1.6, kind: 'bat', price: 60 },
+  { name: 'Pistol', dmg: 22, rate: 3.5, spread: 0.012, range: 120, kind: 'gun', snd: 'pistol', price: 0, mag: 12, ammoPack: 48, ammoPrice: 40 },
+  { name: 'SMG', dmg: 9, rate: 12, spread: 0.04, range: 90, kind: 'gun', auto: true, snd: 'smg', price: 450, mag: 30, ammoPack: 120, ammoPrice: 80 },
+  { name: 'Shotgun', dmg: 11, pellets: 8, rate: 1.1, spread: 0.09, range: 40, kind: 'gun', snd: 'shotgun', price: 650, mag: 6, ammoPack: 30, ammoPrice: 70 },
+  { name: 'Rifle', dmg: 34, rate: 5, spread: 0.006, range: 200, kind: 'gun', auto: true, snd: 'rifle', price: 1200, mag: 20, ammoPack: 80, ammoPrice: 120 },
+  { name: 'Grenade', grenade: true, rate: 0.8, kind: 'none', price: 200, mag: 1, ammoPack: 5, ammoPrice: 200 },
 ];
 const r1 = (n) => Math.round(n * 10) / 10, r2 = (n) => Math.round(n * 100) / 100;
 
@@ -75,6 +78,50 @@ composer.addPass(new RenderPass(scene, camera));
 const bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.35, 0.5, 0.88);
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
+// ---------- settings (remembered in this browser only) ----------
+const settings = { quality: 'auto', sens: 1, volume: 0.9, invertY: false };
+try { Object.assign(settings, JSON.parse(localStorage.getItem('tat-settings') || '{}')); } catch { /* private mode etc. */ }
+const saveSettings = () => { try { localStorage.setItem('tat-settings', JSON.stringify(settings)); } catch { /* ignore */ } };
+let activeQuality = 'medium';
+// Low: no shadows/bloom, lower resolution, shorter view. High: sharper shadows and full resolution.
+function applyQuality(q) {
+  activeQuality = q;
+  const dpr = window.devicePixelRatio || 1;
+  renderer.setPixelRatio(q === 'low' ? Math.min(dpr, 0.75) : q === 'medium' ? Math.min(dpr, 1) : Math.min(dpr, 1.5));
+  renderer.shadowMap.enabled = q !== 'low';
+  const size = q === 'high' ? 2048 : 1024;
+  if (sun.shadow.mapSize.x !== size) { sun.shadow.mapSize.set(size, size); sun.shadow.map?.dispose(); sun.shadow.map = null; }
+  scene.traverse((o) => { if (o.material && o.material.needsUpdate !== undefined && o.receiveShadow) o.material.needsUpdate = true; });
+  bloom.enabled = q !== 'low';
+  camera.far = q === 'low' ? 260 : 360; camera.updateProjectionMatrix();
+  resize();
+  const note = document.getElementById('qualityNote');
+  if (note) note.textContent = settings.quality === 'auto' ? `Auto picked ${q}. It drops a level if the game runs slowly.` : '';
+}
+function initSettingsUi() {
+  const qb = document.getElementById('qualityBtns');
+  const mark = () => { for (const b of qb.querySelectorAll('button')) b.classList.toggle('on', b.dataset.q === settings.quality); };
+  qb.addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; settings.quality = b.dataset.q; saveSettings(); mark(); applyQuality(b.dataset.q === 'auto' ? 'medium' : b.dataset.q); });
+  const sens = document.getElementById('sensSlider'), vol = document.getElementById('volSlider'), inv = document.getElementById('invertY');
+  sens.value = settings.sens; vol.value = settings.volume; inv.checked = settings.invertY;
+  const show = () => { document.getElementById('sensOut').textContent = Number(settings.sens).toFixed(2) + '×'; document.getElementById('volOut').textContent = Math.round(settings.volume * 100) + '%'; };
+  sens.addEventListener('input', () => { settings.sens = +sens.value; saveSettings(); show(); });
+  vol.addEventListener('input', () => { settings.volume = +vol.value; fx.setVolume(settings.volume); saveSettings(); show(); });
+  inv.addEventListener('change', () => { settings.invertY = inv.checked; saveSettings(); });
+  mark(); show(); fx.setVolume(settings.volume);
+}
+// Auto quality: if the frame rate stays low, step down one level.
+let fpsAcc = 0, fpsFrames = 0, fpsWarm = 0;
+function watchFps(dt) {
+  if (settings.quality !== 'auto' || paused || !playing) return;
+  fpsWarm += dt; if (fpsWarm < 4) return;
+  fpsAcc += dt; fpsFrames++;
+  if (fpsAcc >= 4) {
+    const fps = fpsFrames / fpsAcc; fpsAcc = 0; fpsFrames = 0;
+    if (fps < 28 && activeQuality !== 'low') { applyQuality(activeQuality === 'high' ? 'medium' : 'low'); ui.flashPrompt(`Graphics lowered to ${activeQuality} to keep things smooth`); fpsWarm = 0; }
+  }
+}
+
 function resize() {
   renderer.setSize(innerWidth, innerHeight, false); composer.setSize(innerWidth, innerHeight);
   bloom.resolution.set(innerWidth / 2, innerHeight / 2);
@@ -82,12 +129,19 @@ function resize() {
 }
 addEventListener('resize', resize);
 resize();
+applyQuality(settings.quality === 'auto' ? 'medium' : settings.quality);
+initSettingsUi();
 
 W.buildWorld(scene);
 fx.initFx(scene);
 initWalkers(scene);
 initDayNight({ scene, sun, hemi, skyMat: scene.userData.sky.material });
 initLife(scene);
+initEconomy(scene, {
+  announce: (t, sub, c) => ui.announce(t, sub, c || '#8fe38a'),
+  sound: (k) => (k === 'goal' ? fx.soundGoal() : k === 'gnome' ? fx.soundGnome() : fx.soundCash()),
+  feed: (t) => ui.addFeed(t),
+});
 const enginesReady = Promise.all([
   initPhysics().catch((e) => console.warn('physics unavailable', e)),
   initNav().catch((e) => console.warn('navigation unavailable', e)),
@@ -106,7 +160,9 @@ const me = {
   name: '', look: null, ch: null, x: 0, y: 0, z: 0, h: 0, vy: 0, vx: 0, vz: 0, hp: 100, dead: false, deadT: 0,
   stars: 0, unseen: 0, weapon: 2, cd: 0, swing: 0, veh: null, swim: false, grounded: true, moveSpeed: 0,
   shotSeq: 0, shot: [0, 0, 0], hitCd: 0, lastBy: '', lastByUid: '',
+  armor: 0, owned: new Set([0, 2]), ammo: { 2: { mag: 12, res: 48 } }, reloadT: 0, aimT: 0, lockOn: null,
 };
+let aiming = false;
 let playing = false, isHost = true, shake = 0, lastAttack = -1e9;
 let wheelOpen = false, wheelSel = 0, wheelX = 0, wheelY = 0;
 
@@ -128,7 +184,9 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyT') { e.preventDefault(); openChat(); }
   if (e.code === 'Tab' || e.code === 'KeyQ') { e.preventDefault(); openWheel(); }
   if (e.code === 'KeyM') { document.exitPointerLock?.(); openPause('map'); }
-  if (e.code === 'KeyE') toggleVehicle();
+  if (e.code === 'KeyE') { if (!useStore()) toggleVehicle(); }
+  if (e.code === 'KeyR') startReload();
+  if (e.code === 'KeyN' && me.veh && !me.veh.T.bike) { const st = nextStation(); ui.flashPrompt(st.sub ? `📻 ${st.name} · ${st.sub}` : st.name); }
   if (/^Digit[1-7]$/.test(e.code)) selectWeapon(+e.code.slice(5) - 1);
 });
 addEventListener('keyup', (e) => { keys.delete(e.code); if ((e.code === 'Tab' || e.code === 'KeyQ') && wheelOpen) closeWheel(true); });
@@ -138,7 +196,7 @@ document.addEventListener('pointerlockchange', () => {
   locked = document.pointerLockElement === canvas;
   if (!locked) mouseDown = false;
   if (locked) closePause();
-  else if (playing && !typing && !wheelOpen) openPause();
+  else if (playing && !typing && !wheelOpen && !shopOpen) openPause();
 });
 addEventListener('mousemove', (e) => {
   if (!locked) return;
@@ -147,12 +205,18 @@ addEventListener('mousemove', (e) => {
     if (Math.hypot(wheelX, wheelY) > 25) { wheelSel = ui.wheelIndex(wheelX, wheelY, WEAPONS.length); ui.wheelHighlight(wheelSel, WEAPONS[wheelSel]); }
     return;
   }
-  camYaw -= e.movementX * 0.0025;
-  camPitch = clamp(camPitch + e.movementY * 0.0025, -0.5, 1.2);
+  const sens = (aiming ? 0.0013 : 0.0025) * settings.sens;
+  camYaw -= e.movementX * sens;
+  camPitch = clamp(camPitch + e.movementY * sens * (settings.invertY ? -1 : 1), -0.5, 1.2);
   lastMouse = performance.now();
 });
-addEventListener('mousedown', (e) => { if (locked && e.button === 0 && !wheelOpen) { mouseDown = true; clicked = true; } });
-addEventListener('mouseup', (e) => { if (e.button === 0) mouseDown = false; });
+addEventListener('mousedown', (e) => {
+  if (!locked || wheelOpen) return;
+  if (e.button === 0) { mouseDown = true; clicked = true; }
+  if (e.button === 2) { aiming = true; me.lockOn = findLockTarget(); }
+});
+addEventListener('mouseup', (e) => { if (e.button === 0) mouseDown = false; if (e.button === 2) { aiming = false; me.lockOn = null; } });
+addEventListener('contextmenu', (e) => { if (playing) e.preventDefault(); });
 addEventListener('wheel', (e) => { if (locked) selectWeapon((me.weapon + (e.deltaY > 0 ? 1 : -1) + WEAPONS.length) % WEAPONS.length); });
 function openChat() {
   typing = true; keys.clear(); mouseDown = false;
@@ -172,11 +236,23 @@ function openPause(tab) {
   if (tab) showTab(tab);
   drawPauseMap();
 }
-function closePause() { paused = false; ui.el.pause.hidden = true; }
+function closePause() { if (shopOpen) { shopOpen = false; document.getElementById('shop').hidden = true; } paused = false; ui.el.pause.hidden = true; }
 function showTab(tab) {
   for (const b of ui.el.pauseTabs.querySelectorAll('button')) b.classList.toggle('on', b.dataset.tab === tab);
   for (const p of ui.el.pause.querySelectorAll('[data-panel]')) p.hidden = p.dataset.panel !== tab;
   if (tab === 'map') drawPauseMap();
+  if (tab === 'goals') drawGoals();
+}
+function drawGoals() {
+  const ul = document.getElementById('goalList');
+  ul.innerHTML = '';
+  for (const g of GOALS) {
+    const li = document.createElement('li'), done = eco.done.has(g.id);
+    li.className = done ? 'done' : '';
+    const prog = g.max && !done ? `<span class="prog">${Math.min(g.get(), g.max)}/${g.max}</span>` : '';
+    li.innerHTML = `<span class="check">${done ? '✔' : '○'}</span><span>${g.text}${prog}</span><span class="reward">$${g.reward}</span>`;
+    ul.append(li);
+  }
 }
 ui.el.pauseTabs.addEventListener('click', (e) => { const t = e.target.closest('button'); if (t) showTab(t.dataset.tab); });
 ui.el.resumeBtn.addEventListener('click', () => { closePause(); lockMouse(); fx.unlockAudio(); });
@@ -187,11 +263,22 @@ ui.el.bigmap.addEventListener('click', (e) => {
 });
 function mapBlips() {
   const b = [];
-  if (W.places.clinic) { const c = W.P(W.places.clinic.s, -12); b.push({ x: c.x, z: c.z, color: '#e5484d', size: 6, shape: 'square', label: '+', name: 'Clinic' }); }
+  if (W.places.clinic) { const c = W.P(W.places.clinic.s, -12); b.push({ x: c.x, z: c.z, color: '#e5484d', size: 6, shape: 'square', label: '+', name: 'Clinic', dy: 12 }); }
+  if (W.places.helipad) b.push({ x: W.places.helipad.x, z: W.places.helipad.z, color: '#ffc94a', size: 6, label: 'H', name: 'Helicopter' });
+  for (const v of vehicles) if (v.T.boat && !v.exploded) b.push({ x: v.x, z: v.z, color: '#ffffff', size: 4, name: v === vehicles.find((q) => q.T.boat) ? 'Boats' : '' });
   if (W.places.gas) { const c = W.P(W.places.gas.s, W.places.gas.d); b.push({ x: c.x, z: c.z, color: '#ffc94a', size: 5, shape: 'square', name: 'Gas' }); }
   for (const r of W.ramps) b.push({ x: r.x, z: r.z, color: '#ffb300', size: 3.5 });
+  for (const s of storeList()) b.push(s);
   for (const r of remotes.values()) if (!r.dead) b.push({ x: r.x, z: r.z, color: '#4aa3ff', size: 5, name: r.name });
   return b;
+}
+function storeList() {
+  const out = [];
+  for (const s of (W.env.shops || [])) {
+    if (s.name === 'ARNETT ARMS') out.push({ x: s.x, z: s.z, color: '#e5484d', size: 6, shape: 'square', label: '⌖', name: 'Arnett Arms' });
+    if (s.name === 'ARNETT AUTO') out.push({ x: s.x, z: s.z, color: '#4aa3ff', size: 6, shape: 'square', label: '✦', name: 'Body shop' });
+  }
+  return out;
 }
 function drawPauseMap() { ui.drawBigMap(me, mapBlips(), waypoint); }
 
@@ -212,11 +299,46 @@ function areaAt(x, z) {
 }
 
 function lockMouse() { try { const p = canvas.requestPointerLock?.(); p?.catch?.(() => {}); } catch { /* not allowed here */ } }
-function selectWeapon(i) { me.weapon = i; ui.setWeapon(WEAPONS[i].name); }
+function selectWeapon(i) {
+  const w = WEAPONS[i];
+  if (!me.owned.has(i)) { ui.flashPrompt(`${w.name}: buy it at Arnett Arms ($${w.price})`); return; }
+  me.weapon = i; me.reloadT = 0; refreshWeaponHud();
+}
+function ammoOf(i) { return me.ammo[i] || (me.ammo[i] = { mag: 0, res: 0 }); }
+function refreshWeaponHud() {
+  const w = WEAPONS[me.weapon], a = ammoOf(me.weapon);
+  ui.setWeapon(w.name, w.melee ? '' : w.grenade ? `× ${a.mag + a.res}` : me.reloadT > 0 ? 'Reloading…' : `${a.mag} / ${a.res}`);
+}
+function startReload() {
+  const w = WEAPONS[me.weapon], a = ammoOf(me.weapon);
+  if (w.melee || w.grenade || me.reloadT > 0 || a.mag >= w.mag || a.res <= 0) return;
+  me.reloadT = w.name === 'Shotgun' ? 1.8 : 1.3; fx.soundReload(); refreshWeaponHud();
+}
+// Right-click aim: snap onto the nearest threat (or person) roughly where you're looking.
+function findLockTarget() {
+  let best = null, bs = 0.26;
+  const consider = (x, y, z, ref, kind) => {
+    const dx = x - me.x, dz = z - me.z, d = Math.hypot(dx, dz);
+    if (d > 45 || d < 1) return;
+    const off = Math.abs(angDiff(camYaw, Math.atan2(dx, dz)));
+    const score = off + d * 0.004 - (kind === 'threat' ? 0.1 : 0);
+    if (off < 0.35 && score < bs && W.lineOfSight(me.x, me.y + 1.5, me.z, x, y, z)) { bs = score; best = { ref, kind }; }
+  };
+  for (const u of police.cops.values()) if (!police.isDown(u)) { const P = police.posOf(u); consider(P.x, u.kind === 3 ? u.y : 1.2, P.z, u, 'threat'); }
+  for (const w of walkers) if (!w.dead && !w.ch.rag) consider(w.x, 1.2, w.z, w, w.mode === 'hostile' ? 'threat' : 'person');
+  for (const r of remotes.values()) if (!r.dead) consider(r.x, r.y + 1.2, r.z, r, 'player');
+  return best;
+}
+function lockPos(t) {
+  const r = t.ref;
+  if (t.kind === 'threat' && r.kind !== undefined) { if (police.isDown(r)) return null; const P = police.posOf(r); return { x: P.x, y: r.kind === 3 ? r.y : r.kind < 2 ? 1.0 : 1.2, z: P.z }; }
+  if (r.dead || (r.ch && r.ch.rag)) return null;
+  return { x: r.x, y: (r.y || 0) + 1.2, z: r.z };
+}
 function openWheel() {
   if (wheelOpen || me.dead) return;
   wheelOpen = true; wheelSel = me.weapon; wheelX = wheelY = 0; mouseDown = false;
-  ui.wheelHighlight(wheelSel, WEAPONS[wheelSel]); ui.showWheel(true);
+  ui.wheelHighlight(wheelSel, WEAPONS[wheelSel]); ui.setWheelLocked(me.owned); ui.showWheel(true);
 }
 function closeWheel(apply) {
   if (!wheelOpen) return;
@@ -257,6 +379,7 @@ playBtn.addEventListener('click', async () => {
   ui.help('Welcome to <b>Tim Arnett Town</b>. <kbd>WASD</kbd> to move, mouse to look. Press <kbd>Esc</kbd> or <kbd>M</kbd> for the map.', 7);
   ui.help('Walk up to any car and press <kbd>E</kbd>. If someone is driving, you will drag them out.', 6);
   ui.help('Hold <kbd>Tab</kbd> for the weapon wheel. Crimes seen by the cops or reported by witnesses give you stars.', 7);
+  ui.help('Looking for something to do? Press <kbd>Esc</kbd> and open <b>Goals</b>: stunts, robberies, 15 hidden Tim gnomes and more, all paying cash.', 8);
   lockMouse();
 });
 
@@ -360,6 +483,8 @@ function damageCopUnit(u, dmg) {
   if (isHost) killed = police.damageCop(u.id, dmg);
   else { sendEvent('copHit', { id: u.id, dmg: r1(dmg) }); killed = hp > 0 && hp - dmg <= 0; }
   report(killed ? (u.kind === 3 ? 'killheli' : 'killcop') : 'hitcop', u.kind < 2 ? u.v.x : u.x, u.kind < 2 ? u.v.z : u.z);
+  if (killed && u.kind === 2) dropCash(u.x, u.z, 60);
+  if (killed && u.kind === 3) goalDone('heli');
   if (u.kind === 2) fx.blood(u.x, 1.2, u.z, 0, 0, 8);
   ui.hitMarker(killed);
 }
@@ -408,6 +533,7 @@ function hurtWalker(w, dmg, dx, dz, p, force = 3) {
     fx.bloodPool(w.x, w.z, 1.4);
     sendEvent('npc', { id: w.id, ...w.dead });
     report('kill', w.x, w.z);
+    if (Math.random() < 0.75) dropCash(w.x, w.z, 5 + Math.floor(Math.random() * 40));
     return true;
   }
   return false;
@@ -415,6 +541,7 @@ function hurtWalker(w, dmg, dx, dz, p, force = 3) {
 // imp (optional): a push like {x, y, z}; big pushes knock you over
 function damageMe(dmg, by, bu, imp) {
   if (me.dead || dmg <= 0) return;
+  if (me.armor > 0) { const soak = Math.min(me.armor, dmg * 0.7); me.armor -= soak; dmg -= soak; }
   me.hp -= dmg; me.lastBy = by; me.lastByUid = bu || '';
   me.lastImpulse = imp || null;
   ui.flashHurt();
@@ -447,7 +574,8 @@ function die() {
 function respawn(first) {
   const sp = first ? W.places.spawns[Math.floor(Math.random() * W.places.spawns.length)] : W.places.spawn;
   me.x = sp.x + (Math.random() - 0.5) * 3; me.z = sp.z + (Math.random() - 0.5) * 3; me.h = sp.h; me.y = 0; me.vy = 0;
-  me.hp = 100; me.dead = false; resetWanted(); me.enter = null; me.exitT = 0; me.swim = false; deathSpin = 0; me.rag = null;
+  if (!first && eco.cash > 0) { const bill = Math.min(eco.cash, Math.max(50, Math.round(eco.cash * 0.1))); eco.cash -= bill; ui.addFeed(`Hospital bill: -$${bill}`); }
+  me.hp = 100; me.dead = false; resetWanted(); me.enter = null; me.exitT = 0; me.reloadT = 0; me.swim = false; deathSpin = 0; me.rag = null;
   release(me.ch);
   me.ch.body.rotation.set(0, 0, 0); me.ch.body.position.y = 0;
   camYaw = sp.h;
@@ -630,13 +758,18 @@ function handPos() {
 function fire(w) {
   me.cd = 1 / w.rate;
   if (w.melee) { me.swing = 1; me.h = camYaw; melee(w); return; }
-  if (w.grenade) { throwGrenade(); return; }
+  const a = ammoOf(me.weapon);
+  if (me.reloadT > 0) return;
+  if (a.mag <= 0) { if (a.res > 0) startReload(); else { fx.soundClick(); ui.flashPrompt('Out of ammo. Buy more at Arnett Arms.'); } return; }
+  a.mag--;
+  if (w.grenade) { if (a.mag <= 0 && a.res > 0) { a.mag = 1; a.res--; } throwGrenade(); refreshWeaponHud(); return; }
+  me.aimT = 0.8;
   if (!me.veh) me.h = camYaw;
   const { o, d } = aimRay();
   const from = handPos();
   let last = null;
   for (let i = 0; i < (w.pellets || 1); i++) {
-    const dd = spread(d, w.spread);
+    const dd = spread(d, w.spread * (aiming ? 1 : 2.2) * (me.veh ? 1.6 : 1));
     const hit = raycast(o, dd, w.range);
     applyHit(hit, w, dd);
     if (i < 3) fx.tracer(from, hit.p);
@@ -647,6 +780,8 @@ function fire(w) {
   fx.soundShot(w.snd);
   if (performance.now() - lastAttack > 1000) report('gunfire'); else lastAttack = performance.now();
   if (w.name === 'Shotgun' || w.name === 'Rifle') shake = Math.max(shake, 0.12);
+  if (a.mag <= 0 && a.res > 0) startReload();
+  refreshWeaponHud();
   panicNear(me.x, me.z, 30); startle(me.x, me.z, 30);
 }
 function melee(w) {
@@ -837,7 +972,8 @@ function updateVehicles(dt, tSec, nowMs) {
     v.mesh.rotation.y = v.h;
     const body = v.mesh.userData.body;
     body.rotation.z = v.T.bike ? (v.driver ? v.tilt : 0.3) : 0;
-    body.rotation.x = v.air > 0.05 ? clamp(-(v.vy || 0) * 0.025, -0.35, 0.35) : 0;
+    body.rotation.x = v.T.boat || v.T.heli ? v.pitch || 0 : v.air > 0.05 ? clamp(-(v.vy || 0) * 0.025, -0.35, 0.35) : 0;
+    if (v.T.heli) { body.rotation.z = v.tilt || 0; const rt = v.mesh.userData.rotor; if (rt) rt.rotation.y += dt * (v.driver || v.y > 0.5 ? 32 : 0); }
     if (v.hp < v.T.hp * 0.35 && !v.exploded && (v.hp > 0 || Math.random() < 0.6) && Math.abs(v.x - camera.position.x) < 120 && Math.abs(v.z - camera.position.z) < 120) fx.damageSmoke(v);
   }
 }
@@ -860,7 +996,11 @@ function updatePlayer(dt) {
     if (me.deadT <= 0) respawn(false);
     return;
   }
-  me.cd -= dt; me.hitCd -= dt;
+  me.cd -= dt; me.hitCd -= dt; me.aimT = Math.max(0, me.aimT - dt);
+  if (me.reloadT > 0) {
+    me.reloadT -= dt;
+    if (me.reloadT <= 0) { const w = WEAPONS[me.weapon], a = ammoOf(me.weapon), n = Math.min(w.mag - a.mag, a.res); a.mag += n; a.res -= n; refreshWeaponHud(); }
+  }
   me.ch.g.visible = !me.veh || !!me.veh.T.bike;
   if (me.enter) { enterUpdate(dt); me.vx = (me.x - px) / dt; me.vz = (me.z - pz) / dt; me.moveSpeed = 3; return; }
   if (me.exitT > 0 && me.veh) {
@@ -917,15 +1057,15 @@ function ragdollUpdate(dt) {
 
 function footUpdate(dt, fwd, side) {
   const sprint = keys.has('ShiftLeft') || keys.has('ShiftRight');
-  const speed = me.swim ? 2.6 : sprint ? 8 : 4.5;
+  const speed = me.swim ? 2.6 : aiming ? 2.6 : sprint ? 8 : 4.5;
   const rx = -Math.cos(camYaw), rz = Math.sin(camYaw);
   let mx = Math.sin(camYaw) * fwd + rx * side, mz = Math.cos(camYaw) * fwd + rz * side;
   const ml = Math.hypot(mx, mz);
   if (ml > 0) { mx /= ml; mz /= ml; }
   const wk = WEAPONS[me.weapon].kind;
-  const aiming = wk === 'gun' && !me.swim;
-  if (ml > 0 || aiming || me.swing > 0) {
-    const target = aiming || me.swing > 0 ? camYaw : Math.atan2(mx, mz);
+  const aimPose = wk === 'gun' && !me.swim && (aiming || me.aimT > 0);
+  if (ml > 0 || aimPose || me.swing > 0) {
+    const target = aimPose || me.swing > 0 ? camYaw : Math.atan2(mx, mz);
     me.h += angDiff(me.h, target) * Math.min(1, dt * 12);
   }
   const ox = me.x, oz = me.z;
@@ -963,13 +1103,18 @@ function footUpdate(dt, fwd, side) {
   me.ch.g.visible = true;
   me.ch.g.position.set(me.x, me.y, me.z);
   me.ch.g.rotation.set(0, me.h, 0);
-  animateCharacter(me.ch, dt, { speed: me.moveSpeed, aim: aiming, swim: me.swim, swing: me.swing, weapon: me.swim ? 'none' : wk });
+  animateCharacter(me.ch, dt, { speed: aimPose ? Math.min(me.moveSpeed, 3) : me.moveSpeed, aim: aimPose, swim: me.swim, swing: me.swing, weapon: me.swim ? 'none' : wk });
 }
 
 function driveUpdate(dt, fwd, side) {
   const v = me.veh;
   const pre = { vx: v.vx, vz: v.vz, speed: v.speed };
-  const imp = stepVehicle(v, { throttle: fwd > 0 ? 1 : 0, brake: fwd < 0 ? 1 : 0, steer: -side, handbrake: keys.has('Space') }, dt);
+  const shift = keys.has('ShiftLeft') || keys.has('ShiftRight');
+  const imp = stepVehicle(v, { throttle: fwd > 0 ? 1 : 0, brake: fwd < 0 ? 1 : 0, steer: -side, handbrake: !v.T.heli && keys.has('Space'), nitro: shift && !v.T.heli, up: keys.has('Space'), down: shift }, dt);
+  if (v.boosting) { fx.sparks(v.x - Math.sin(v.h) * v.T.len / 2, v.y + 0.4, v.z - Math.cos(v.h) * v.T.len / 2, 2, -Math.sin(v.h), -Math.cos(v.h)); if (!v.boostSnd) { fx.soundNitro(); v.boostSnd = true; } } else v.boostSnd = false;
+  if (v.T.boat && Math.abs(v.speed) > 6 && Math.random() < 0.5) fx.smokePuff(v.x - Math.sin(v.h) * v.T.len / 2, -0.1, v.z - Math.cos(v.h) * v.T.len / 2, true, 0.6);
+  if (v.T.heli && v.y > 8 && W.places.park) { const st = W.P(W.places.park.s, W.places.park.d); if (Math.hypot(v.x - st.x, v.z - st.z) < 20) goalDone('fly'); }
+  if (v.T.boat && W.toSD(v.x, v.z).s > W.L + 15) goalDone('boat');
   const wallHit = v.hit;
   if (wallHit) { crashFx(v, wallHit); if (imp > 6) damageZone(v, wallHit.cp[0], wallHit.cp[1], imp); }
   const vImp = collideAround(v, false);
@@ -981,7 +1126,7 @@ function driveUpdate(dt, fwd, side) {
   if (mainHit && !me.dead) {
     const dv = Math.hypot(v.vx - pre.vx, v.vz - pre.vz);
     const frontal = mainHit.nx * Math.sin(v.h) + mainHit.nz * Math.cos(v.h) < -0.55;
-    if (frontal && (v.T.bike ? pre.speed > 14 && dv > 8 : pre.speed > 28 && dv > 18)) {
+    if (frontal && !v.T.boat && !v.T.heli && (v.T.bike ? pre.speed > 14 && dv > 8 : pre.speed > 28 && dv > 18)) {
       damageVehicle(v, (total - 7) * 3, mainHit);
       launchMe(v, pre.vx * 0.7, 5, pre.vz * 0.7);
       return;
@@ -991,8 +1136,10 @@ function driveUpdate(dt, fwd, side) {
   // stunt jumps
   if (v.lastAir > 0.9 && v.air === 0) {
     const sd = W.toSD(v.x, v.z);
-    if (sd.s < -160) ui.announce('BRIDGE JUMPED!', `${v.lastAir.toFixed(1)}s of air`, '#7cf29a');
-    else ui.announce('STUNT JUMP', `${v.lastAir.toFixed(1)}s of air`);
+    const bonus = Math.round(v.lastAir * 60);
+    if (sd.s < -160) { ui.announce('BRIDGE JUMPED!', `${v.lastAir.toFixed(1)}s of air · +$${bonus}`, '#7cf29a'); goalDone('bridge'); }
+    else ui.announce('STUNT JUMP', `${v.lastAir.toFixed(1)}s of air · +$${bonus}`);
+    addCash(bonus); eco.stunts++; checkCountGoals();
     fx.soundStunt();
     v.lastAir = 0;
   }
@@ -1085,14 +1232,107 @@ function updateRemotes(dt) {
   for (const [uid, r] of remotes) if (!net.players[uid]) { scene.remove(r.ch.g); remotes.delete(uid); ui.addFeed(`${r.name} left`); }
 }
 
+let peakStars = 0, survive5 = 0, robberyPrompt = '';
 function updateWantedLevel(dt) {
-  if (tickWanted(dt, me) === 'lost') ui.announce('COPS LOST', '', '#7cf29a');
+  peakStars = Math.max(peakStars, wanted.stars);
+  if (tickWanted(dt, me) === 'lost') { ui.announce('COPS LOST', '', '#7cf29a'); if (peakStars >= 3) goalDone('lose3'); peakStars = 0; }
+  if (wanted.stars === 0) peakStars = 0;
+  updateRobbery(dt);
 }
+// Robbing a store: stand at the door and hold your aim on it. The clerk hits the alarm after a few seconds.
+function updateRobbery(dt) {
+  robberyPrompt = '';
+  const st = !me.veh && !me.dead ? storeNear(me.x, me.z, 4) : null;
+  const w = WEAPONS[me.weapon];
+  for (const s of storesRobbing) if (s !== st) { s.progress = Math.max(0, s.progress - dt * 0.5); if (s.progress === 0) storesRobbing.delete(s); }
+  if (!st || st.kind !== 'rob' || st.cooldown > 0) return;
+  const facing = Math.abs(angDiff(camYaw, Math.atan2(st.doorX - me.x, st.doorZ - me.z))) < 0.7;
+  if (!(aiming && w.kind === 'gun' && facing)) { if (st.progress > 0) robberyPrompt = `Keep aiming at the clerk to rob ${st.name}`; return; }
+  storesRobbing.add(st);
+  st.progress += dt / 8;
+  if (st.progress > 0.35 && !st.alarm) { st.alarm = true; crime('robbery', me.x, me.y, me.z); ui.help('The clerk hit the silent alarm. Grab the cash and get out!', 4); }
+  const bars = Math.round(st.progress * 10);
+  robberyPrompt = `Robbing ${st.name}  ${'▮'.repeat(bars)}${'▯'.repeat(10 - bars)}`;
+  if (st.progress >= 1) {
+    const take = 150 + Math.floor(Math.random() * 300);
+    st.progress = 0; st.cooldown = 300; st.alarm = false; storesRobbing.delete(st);
+    addCash(take); eco.robbed++; checkCountGoals();
+    ui.announce('STORE ROBBED', `${st.name} · +$${take}`, '#8fe38a');
+    fx.soundCash();
+  }
+}
+const storesRobbing = new Set();
+
+// Shops you walk (or drive) into with E. Returns true if a shop opened.
+function useStore() {
+  if (me.dead || me.enter) return false;
+  const st = storeNear(me.veh ? me.veh.x : me.x, me.veh ? me.veh.z : me.z, me.veh ? 7 : 3.2);
+  if (!st) return false;
+  if (st.kind === 'body' && me.veh && !me.veh.T.boat && !me.veh.T.heli) { bodyShop(me.veh); return true; }
+  if (me.veh) return false;
+  if (st.kind === 'guns') { openShop('Arnett Arms', gunShopItems()); return true; }
+  if (st.kind === 'meds') { openShop('Arnett Clinic Pharmacy', [{ label: 'Patch me up', sub: 'Full health', price: 60, ok: () => me.hp < 100, buy: () => { me.hp = 100; } }]); return true; }
+  return false;
+}
+function gunShopItems() {
+  const items = [];
+  WEAPONS.forEach((w, i) => {
+    if (i === 0) return;
+    if (!me.owned.has(i)) items.push({ label: w.name, sub: w.melee ? 'Melee weapon' : `Comes with ${w.ammoPack} ${w.grenade ? 'grenades' : 'rounds'}`, price: w.price, buy: () => { me.owned.add(i); if (!w.melee) { const a = ammoOf(i); if (w.grenade) { a.mag = 1; a.res = w.ammoPack - 1; } else { a.mag = w.mag; a.res = w.ammoPack - w.mag; } } selectWeapon(i); } });
+    else if (!w.melee) items.push({ label: `${w.name} ammo`, sub: `+${w.ammoPack} ${w.grenade ? 'grenades' : 'rounds'}`, price: w.ammoPrice, buy: () => { ammoOf(i).res += w.ammoPack; refreshWeaponHud(); } });
+  });
+  items.push({ label: 'Body armor', sub: 'Soaks up most incoming damage', price: 250, ok: () => me.armor < 100, buy: () => { me.armor = 100; goalDone('armor'); } });
+  return items;
+}
+function bodyShop(v) {
+  if (!spend(150)) { ui.flashPrompt('Repairs cost $150.'); return; }
+  const colors = [0xe74c3c, 0x3498db, 0xf1c40f, 0x2ecc71, 0xecf0f1, 0x34495e, 0x9b59b6, 0xe67e22, 0x1abc9c, 0x161616, 0xff6fa8];
+  v.color = colors[Math.floor(Math.random() * colors.length)];
+  scene.remove(v.mesh); v.mesh = makeVehicleMesh(v.T, v.color); scene.add(v.mesh);
+  v.hp = v.T.hp; v.dz = { f: 0, b: 0, l: 0, r: 0 }; v.burnAt = 0; v.headFor = '';
+  writeVeh(v, true);
+  if (wanted.stars > 0 && wanted.search) { resetWanted(); ui.announce('RESPRAYED', 'The cops lost track of you', '#7cf29a'); }
+  else ui.announce('RESPRAYED', 'Good as new');
+  fx.soundCash();
+}
+let shopOpen = false;
+function openShop(title, items) {
+  shopOpen = true; paused = true; keys.clear(); mouseDown = false;
+  document.exitPointerLock?.();
+  const el = document.getElementById('shop'), list = document.getElementById('shopItems');
+  document.getElementById('shopTitle').textContent = title;
+  const render = () => {
+    list.innerHTML = '';
+    for (const it of items) {
+      const li = document.createElement('li'), b = document.createElement('button');
+      b.innerHTML = `<span>${it.label}<small>${it.sub || ''}</small></span><span class="price">$${it.price}</span>`;
+      b.disabled = eco.cash < it.price || (it.ok && !it.ok());
+      b.addEventListener('click', () => { if (spend(it.price)) { it.buy(); fx.soundCash(); ui.setCash(eco.cash); if (title === 'Arnett Arms') items = gunShopItems(); render(); } });
+      li.append(b); list.append(li);
+    }
+  };
+  render();
+  el.hidden = false;
+  ui.el.pause.hidden = true;
+}
+function closeShop() { shopOpen = false; paused = false; document.getElementById('shop').hidden = true; lockMouse(); }
+document.getElementById('shopClose').addEventListener('click', closeShop);
 
 let deathSpin = 0;
 function updateCamera(dt) {
   const spd = me.veh ? Math.abs(me.veh.speed) : 0;
-  const fov = 70 + clamp(spd - 15, 0, 30) * 0.45;
+  const aimZoom = aiming && !me.dead && WEAPONS[me.weapon].kind === 'gun';
+  const fov = aimZoom ? 48 : 70 + clamp(spd - 15, 0, 30) * 0.45 + (me.veh && me.veh.boosting ? 8 : 0);
+  // soft lock-on keeps the crosshair on your target while you hold aim
+  if (aimZoom && me.lockOn) {
+    const lp = lockPos(me.lockOn);
+    if (!lp) me.lockOn = null;
+    else {
+      const c = camera.position, dx = lp.x - c.x, dz = lp.z - c.z;
+      camYaw += angDiff(camYaw, Math.atan2(dx, dz)) * Math.min(1, dt * 9);
+      camPitch += (-Math.atan2(lp.y - c.y, Math.hypot(dx, dz)) - camPitch) * Math.min(1, dt * 9);
+    }
+  }
   if (Math.abs(camera.fov - fov) > 0.1) { camera.fov += (fov - camera.fov) * Math.min(1, dt * 3); camera.updateProjectionMatrix(); }
   if (me.dead) { deathSpin += dt; camYaw += dt * 0.5; camPitch += (0.6 - camPitch) * Math.min(1, dt * 2); }
   const tx = me.veh ? me.veh.x : me.x, tz = me.veh ? me.veh.z : me.z;
@@ -1100,9 +1340,9 @@ function updateCamera(dt) {
   if (me.veh && performance.now() - lastMouse > 1200 && Math.abs(me.veh.speed) > 3) {
     camYaw += angDiff(camYaw, me.veh.speed > 0 ? me.veh.h : me.veh.h + Math.PI) * Math.min(1, dt * 2.5);
   }
-  const dist = me.veh ? 5 + me.veh.T.len + spd * 0.04 : me.dead ? 6 + deathSpin * 1.5 : 4.2;
+  const dist = me.veh ? (me.veh.T.heli ? 16 : 5 + me.veh.T.len + spd * 0.04) : me.dead ? 6 + deathSpin * 1.5 : aimZoom ? 2.4 : 4.2;
   const cp = Math.cos(camPitch), dx = Math.sin(camYaw) * cp, dy = -Math.sin(camPitch), dz = Math.cos(camYaw) * cp;
-  const sh = me.veh ? 0 : 0.55, ax = tx - Math.cos(camYaw) * sh, az = tz + Math.sin(camYaw) * sh;
+  const sh = me.veh ? 0 : aimZoom ? 0.75 : 0.55, ax = tx - Math.cos(camYaw) * sh, az = tz + Math.sin(camYaw) * sh;
   const back = W.rayBuildings(ax, ty, az, -dx, -dy, -dz, dist);
   const d = Math.max(0.8, Math.min(dist, back - 0.3));
   camera.position.set(ax - dx * d, Math.max(0.2, ty - dy * d), az - dz * d);
@@ -1155,8 +1395,11 @@ function updateHud(dt, t) {
   if (uiT <= 0) {
     uiT = 0.2;
     ui.setHealth(me.hp);
+    ui.setCash(eco.cash);
+    ui.setArmor(me.armor);
+    if (wanted.stars >= 5 && !me.dead) { survive5 += 0.2; if (survive5 >= 60) goalDone('survive5'); } else survive5 = 0;
     if (ui.setStars(wanted.stars, wanted.search)) { ui.announce('WANTED', '★'.repeat(wanted.stars), '#ff5e5b'); fx.soundWanted(); }
-    ui.setSpeedo(me.veh);
+    ui.setSpeedo(me.veh, me.veh && !me.veh.T.bike ? currentStation().name : '', me.veh ? me.veh.nitro ?? 1 : 0);
     const [area, street] = areaAt(me.x, me.z); ui.showArea(area, street);
     if (waypoint && Math.hypot(waypoint.x - me.x, waypoint.z - me.z) < 15) { waypoint = null; ui.help('You reached your waypoint.', 3, false); }
     const wk = WEAPONS[me.weapon];
@@ -1170,8 +1413,15 @@ function updateHud(dt, t) {
     for (const r of remotes.values()) list.push({ name: r.name, host: host === r.uid, stars: r.stars });
     ui.setPlayers(net.room, list, net.online);
   }
-  let prompt = '';
-  if (!me.dead) {
+  let prompt = robberyPrompt;
+  if (!me.dead && !prompt) {
+    const st = storeNear(me.veh ? me.veh.x : me.x, me.veh ? me.veh.z : me.z, me.veh ? 7 : 3.2);
+    if (st && st.kind === 'guns' && !me.veh) prompt = 'E: Shop at Arnett Arms';
+    else if (st && st.kind === 'meds' && !me.veh) prompt = 'E: Pharmacy (heal $60)';
+    else if (st && st.kind === 'body' && me.veh && !me.veh.T.boat && !me.veh.T.heli) prompt = 'E: Repair & respray ($150)';
+    else if (st && st.kind === 'rob' && !me.veh && st.cooldown <= 0) prompt = `Aim a gun at the door (right click) to rob ${st.name}`;
+  }
+  if (!me.dead && !prompt) {
     if (me.veh) prompt = '';
     else if (!me.enter) { const v = nearestVehicle(4.5); if (v) prompt = Math.hypot(v.vx || 0, v.vz || 0) > 3.5 ? '' : `E: ${v.mode === 'traffic' || v.driver ? 'Carjack' : 'Enter'} ${v.T.name}`; }
   }
@@ -1183,6 +1433,7 @@ function updateHud(dt, t) {
     const blips = [];
     if (W.places.clinic) { const c = W.P(W.places.clinic.s, -12); blips.push({ x: c.x, z: c.z, color: '#e53935', size: 6, shape: 'square', label: '+' }); }
     for (const r of remotes.values()) if (!r.dead) blips.push({ x: r.x, z: r.z, color: '#40c4ff', size: 4.5 });
+    for (const sb of storeList()) blips.push(sb);
     for (const u of police.cops.values()) if (!police.isDown(u)) { const P = police.posOf(u); blips.push({ x: P.x, z: P.z, color: flash, size: u.kind === 3 ? 6 : u.kind === 2 ? 2.5 : 4 }); }
     const spd = me.veh ? Math.abs(me.veh.speed) : 0;
     ui.drawMinimap({ x: me.veh ? me.veh.x : me.x, z: me.veh ? me.veh.z : me.z, yaw: camYaw }, me, blips, spd > 15 ? 0.75 : 1.1, wanted.search ? cones() : null, waypoint);
@@ -1240,6 +1491,8 @@ function update(dt, t) {
   updateRagdolls(dt);
   updateCamera(dt);
   updateWorldLife(dt, nowMs, t);
+  updateEconomy(dt, me, t);
+  updateRadio(!!me.veh && !me.veh.T.bike && !me.dead);
   fx.updateFx(dt);
   sendT -= dt;
   if (sendT <= 0) {
@@ -1262,7 +1515,7 @@ function frame(now) {
   requestAnimationFrame(frame);
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
-  if (playing) update(dt, now / 1000);
+  if (playing) { update(dt, now / 1000); watchFps(dt); }
   else {
     const nowMs = net.now();
     updateVehicles(dt, nowMs / 1000, nowMs);

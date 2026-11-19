@@ -14,8 +14,10 @@ export const TYPES = [
   { name: 'Scooter', len: 1.8, wid: 0.7, hgt: 1.05, max: 22, acc: 12, turn: 2.8, grip: 9, mass: 0.3, hp: 40, bike: true },
   { name: 'Police car', len: 4.6, wid: 2.0, hgt: 1.5, max: 33, acc: 14, turn: 2.0, grip: 8, mass: 1.4, hp: 160, police: true },
   { name: 'City bus', len: 10, wid: 2.6, hgt: 3.1, max: 22, acc: 6, turn: 1.1, grip: 6, mass: 4, hp: 260, bus: true },
+  { name: 'Speedboat', len: 6, wid: 2.3, hgt: 1.4, max: 30, acc: 11, turn: 1.3, grip: 2, mass: 1.6, hp: 150, boat: true },
+  { name: 'Helicopter', len: 9, wid: 2.4, hgt: 2.6, max: 38, acc: 10, turn: 1.6, grip: 2, mass: 2.2, hp: 200, heli: true },
 ];
-export const BUS = 7;
+export const BUS = 7, BOAT = 8, HELI = 9;
 // Shared glow materials: their opacity follows the night (set once per frame in main).
 export const glowMats = {
   head: new THREE.MeshBasicMaterial({ color: 0xfff2c8, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }),
@@ -59,6 +61,24 @@ export function makeVehicleMesh(T, color) {
     bx(body, 0xffffcc, 0.18, 0.14, 0.05, 0, 0.95, L * 0.38);
     if (T.name === 'Scooter') bx(body, color, 0.4, 0.08, 0.7, 0, 0.42, 0.05);
     for (const z of [L / 2 - 0.35, -L / 2 + 0.35]) { const w = new THREE.Mesh(wheelGeo, mat(0x111111)); w.scale.set(0.5, 0.95, 0.95); w.position.set(0, 0.36, z); body.add(w); parts.wheels.push(w); }
+  } else if (T.boat) {
+    bx(body, color, Wd, 0.9, L * 0.8, 0, 0.3, -L * 0.08);
+    const bow = bx(body, color, Wd * 0.7, 0.9, L * 0.3, 0, 0.3, L * 0.38); bow.rotation.y = Math.PI / 4; bow.scale.set(Wd * 0.7, 0.9, Wd * 0.7);
+    bx(body, 0xffffff, Wd + 0.04, 0.12, L * 0.8, 0, 0.72, -L * 0.08);
+    bx(body, 0, Wd * 0.8, 0.5, 0.06, 0, 1.05, 0.3, glassMat);
+    bx(body, 0x1e1e1e, 0.5, 0.5, 0.6, 0, 0.8, -L * 0.45);
+    parts.segL = 1;
+  } else if (T.heli) {
+    bx(body, color, Wd, 1.9, 4.4, 0, 1.3, 0.4);
+    bx(body, 0, Wd * 0.86, 1.0, 1.3, 0, 1.6, 2.4, glassMat);
+    bx(body, 0xffffff, Wd + 0.02, 0.4, 4.42, 0, 0.75, 0.4);
+    bx(body, color, 0.45, 0.45, 4.6, 0, 1.55, -3.9);
+    bx(body, color, 0.1, 1.3, 0.8, 0, 2.1, -6.0);
+    for (const x of [0.95, -0.95]) bx(body, 0x333333, 0.12, 0.12, 3.6, x, 0.12, 0.4);
+    const rotor = new THREE.Group(); rotor.position.set(0, 2.4, 0.4); body.add(rotor);
+    for (const r of [0, Math.PI / 2]) { const b = new THREE.Mesh(box, mat(0x1e1e1e)); b.scale.set(0.3, 0.06, 10); b.rotation.y = r; rotor.add(b); }
+    g.userData.rotor = rotor;
+    parts.segL = 1;
   } else if (T.bus) {
     bx(body, color, Wd, T.hgt - 0.5, L, 0, 0.35 + (T.hgt - 0.5) / 2, 0);
     bx(body, 0, Wd + 0.02, 0.9, L * 0.82, 0, 1.9, -0.3, glassMat);
@@ -113,7 +133,7 @@ export function makeVehicleMesh(T, color) {
       g.userData.lights = [red, blue];
     }
   }
-  if (!T.bike) {
+  if (!T.bike && !T.boat && !T.heli) {
     for (const sx of [1, -1]) for (const sz of [1, -1]) {
       const w = new THREE.Group();
       w.position.set(sx * (Wd / 2 - 0.08), 0.36, sz * (L / 2 - (T.truck ? 1.0 : T.bus ? 2.0 : 0.85)));
@@ -291,21 +311,100 @@ function resolve(a, b, c, cp, bStatic) {
   return { imp: -vn, Jx, Jz, JwB, cp };
 }
 
-// Arcade car physics. inp: {throttle, brake, steer, handbrake}. Returns impact speed against walls.
+// Buildings and walls (anything you're flying above is ignored). Returns the hardest impact.
+function hitWalls(v) {
+  const T = v.T, A = boxOf(v), reach = T.len / 2 + 1;
+  let impact = 0;
+  for (const b of W.colliders) {
+    if (b.h < 0.5 || v.y > b.h || Math.abs(b.cx - v.x) > b.br + reach || Math.abs(b.cz - v.z) > b.br + reach) continue;
+    A.x = v.x; A.z = v.z;
+    const B = boxOfWall(b), c = sat(A, B);
+    if (!c) continue;
+    const cp = contactPoint(A, B);
+    const r = resolve(v, null, c, cp, true);
+    if (r && r.imp > impact) { impact = r.imp; v.hit = { imp: r.imp, cp, nx: c.nx, nz: c.nz, wall: true }; }
+  }
+  return impact;
+}
+
+// Boats: drift a lot, bob on the waves, land is a wall.
+function stepBoat(v, inp, dt) {
+  const T = v.T, fx = Math.sin(v.h), fz = Math.cos(v.h), rx = -Math.cos(v.h), rz = Math.sin(v.h);
+  let vf = v.vx * fx + v.vz * fz, vr = v.vx * rx + v.vz * rz;
+  const alive = v.hp > 0;
+  if (alive && inp.throttle) vf += T.acc * dt * (inp.nitro && v.nitro > 0 ? 1.7 : 1);
+  if (alive && inp.brake) vf = Math.max(-8, vf - T.acc * 0.8 * dt);
+  vf -= vf * 0.35 * dt; vr *= Math.exp(-1.6 * dt);
+  if (vf > T.max) vf = T.max;
+  const yaw = alive ? (inp.steer || 0) * T.turn * clamp(vf / 6, -1, 1) : 0;
+  v.w = (v.w || 0) + (yaw - (v.w || 0)) * Math.min(1, 4 * dt); v.h += v.w * dt;
+  const nfx = Math.sin(v.h), nfz = Math.cos(v.h), nrx = -Math.cos(v.h), nrz = Math.sin(v.h);
+  v.vx = nfx * vf + nrx * vr; v.vz = nfz * vf + nrz * vr;
+  const ox = v.x, oz = v.z;
+  v.x += v.vx * dt; v.z += v.vz * dt;
+  v.hit = null;
+  let impact = 0;
+  const bowX = v.x + nfx * T.len / 2, bowZ = v.z + nfz * T.len / 2;
+  if (W.isLand(bowX, bowZ) || W.isLand(v.x, v.z)) { impact = Math.abs(vf); v.hit = { imp: impact, cp: [bowX, bowZ], nx: -nfx, nz: -nfz, wall: true }; v.x = ox; v.z = oz; v.vx *= -0.25; v.vz *= -0.25; }
+  v.speed = vf; v.slip = Math.abs(vr); v.sinkT = 0; v.air = 0;
+  v.y = -0.35 + Math.sin(performance.now() / 420 + v.x * 0.3) * 0.07 + Math.min(0.25, Math.abs(vf) * 0.008);
+  v.pitch = -Math.min(0.16, Math.max(0, vf) * 0.006);
+  return impact;
+}
+
+// Helicopter: W/S tilt forward/back, A/D turn, Space climb, Shift descend.
+function stepHeli(v, inp, dt) {
+  const T = v.T, alive = v.hp > 0;
+  const ground = W.isLand(v.x, v.z) ? W.groundHeight(v.x, v.z) : -0.15;
+  v.vy = v.vy || 0;
+  if (alive) {
+    if (inp.up) v.vy += 11 * dt; else if (inp.down) v.vy -= 11 * dt; else v.vy *= Math.exp(-2.5 * dt);
+    v.vy = clamp(v.vy, -10, 9);
+  } else v.vy -= 16 * dt; // engine dead: drop
+  const flying = v.y > ground + 0.4;
+  const fx = Math.sin(v.h), fz = Math.cos(v.h), rx = -Math.cos(v.h), rz = Math.sin(v.h);
+  let vf = v.vx * fx + v.vz * fz, vr = v.vx * rx + v.vz * rz;
+  if (flying && alive) vf += ((inp.throttle ? 1 : 0) - (inp.brake ? 1 : 0)) * T.acc * dt;
+  vf -= vf * (flying ? 0.35 : 4) * dt; vr *= Math.exp(-1.4 * dt);
+  vf = clamp(vf, -14, T.max);
+  const yaw = alive && flying ? (inp.steer || 0) * T.turn : 0;
+  v.w = (v.w || 0) + (yaw - (v.w || 0)) * Math.min(1, 3 * dt); v.h += v.w * dt;
+  const nfx = Math.sin(v.h), nfz = Math.cos(v.h), nrx = -Math.cos(v.h), nrz = Math.sin(v.h);
+  v.vx = nfx * vf + nrx * vr; v.vz = nfz * vf + nrz * vr;
+  v.x += v.vx * dt; v.z += v.vz * dt; v.y += v.vy * dt;
+  v.landed = 0;
+  if (v.y < ground) { v.landed = -v.vy; v.y = ground; v.vy = Math.max(0, v.vy); }
+  v.y = Math.min(v.y, 140);
+  v.speed = vf; v.slip = 0; v.sinkT = 0; v.air = flying ? 1 : 0;
+  v.pitch = alive ? -((inp.throttle ? 1 : 0) - (inp.brake ? 1 : 0)) * 0.18 : v.pitch || 0;
+  v.tilt = -v.w * 0.25;
+  v.hit = null;
+  return Math.max(hitWalls(v), v.landed > 9 ? v.landed : 0);
+}
+
+// Arcade car physics. inp: {throttle, brake, steer, handbrake, nitro}. Returns impact speed against walls.
 export function stepVehicle(v, inp, dt) {
   const T = v.T;
+  if (T.boat) return stepBoat(v, inp, dt);
+  if (T.heli) return stepHeli(v, inp, dt);
+  // nitro: a few seconds of extra push, refills slowly
+  if (v.nitro === undefined) v.nitro = 1;
+  const boosting = inp.nitro && v.nitro > 0 && inp.throttle > 0 && !T.bike;
+  v.boosting = boosting;
+  v.nitro = boosting ? Math.max(0, v.nitro - dt / 3.5) : Math.min(1, v.nitro + dt / 14);
   const fx = Math.sin(v.h), fz = Math.cos(v.h), rx = -Math.cos(v.h), rz = Math.sin(v.h);
   let vf = v.vx * fx + v.vz * fz, vr = v.vx * rx + v.vz * rz;
   const alive = v.hp > 0 && v.sinkT === 0;
   const grounded = !(v.air > 0);
-  if (alive && grounded && inp.throttle > 0) vf += T.acc * inp.throttle * dt * (vf < 0 ? 2.5 : 1);
+  if (alive && grounded && inp.throttle > 0) vf += T.acc * inp.throttle * dt * (vf < 0 ? 2.5 : 1) * (boosting ? 1.6 : 1);
   if (alive && grounded && inp.brake > 0) { if (vf > 0.5) vf -= T.acc * 2.4 * dt; else vf = Math.max(-T.max * 0.35, vf - T.acc * 0.7 * dt); }
   if (grounded) {
     vf -= vf * ((inp.throttle || inp.brake) && alive ? 0.12 : 0.7) * dt;
     if (inp.handbrake) vf -= vf * 1.4 * dt;
     vr *= Math.exp(-(inp.handbrake ? 1.6 : T.grip * sky.grip) * dt);
   }
-  if (vf > T.max) vf = T.max;
+  const cap = T.max * (boosting ? 1.25 : 1);
+  if (vf > cap) vf = cap + (vf - cap) * Math.exp(-6 * dt);
   const yaw = alive ? (inp.steer || 0) * T.turn * clamp(vf / 5, -1, 1) * (1 - 0.35 * Math.min(1, Math.abs(vf) / T.max)) * (inp.handbrake ? 1.35 : 1) : 0;
   // spin: tires pull the turn rate toward what the steering asks for; a crash can overpower that
   const gripK = grounded ? (inp.handbrake ? 2.5 : T.grip * 1.4 * sky.grip) : 0.2;
@@ -328,17 +427,7 @@ export function stepVehicle(v, inp, dt) {
     v.x = ox; v.z = oz; v.vx *= -0.3; v.vz *= -0.3;
     gh = W.groundHeight(v.x, v.z);
   }
-  // buildings and walls
-  const A = boxOf(v), reach = T.len / 2 + 1;
-  for (const b of W.colliders) {
-    if (b.h < 0.5 || Math.abs(b.cx - v.x) > b.br + reach || Math.abs(b.cz - v.z) > b.br + reach) continue;
-    A.x = v.x; A.z = v.z;
-    const B = boxOfWall(b), c = sat(A, B);
-    if (!c) continue;
-    const cp = contactPoint(A, B);
-    const r = resolve(v, null, c, cp, true);
-    if (r && r.imp > impact) { impact = r.imp; v.hit = { imp: r.imp, cp, nx: c.nx, nz: c.nz, wall: true }; }
-  }
+  impact = Math.max(impact, hitWalls(v));
   v.landed = 0;
   if (!W.isLand(v.x, v.z) && v.y < 0.3) {
     v.sinkT += dt; v.vx *= Math.exp(-2.5 * dt); v.vz *= Math.exp(-2.5 * dt);
@@ -433,6 +522,13 @@ export function createAllVehicles(scene) {
     const v = makeVehicle('p' + i, ti, CAR_COLORS[Math.floor(r() * CAR_COLORS.length)], sp);
     list.push(v);
   });
+  // rideable boats at the end of each dock, and a helicopter on the beach helipad
+  let extra = W.parkedSpots.length;
+  for (const k of W.docks) {
+    const p = W.P(k.s - 7, k.d0 + 6);
+    list.push(makeVehicle('p' + extra++, BOAT, [0xffffff, 0xe5484d, 0x1e88e5][extra % 3], { x: p.x, z: p.z, h: -W.theta(k.s) - Math.PI / 2 }));
+  }
+  if (W.places.helipad) list.push(makeVehicle('p' + extra++, HELI, 0x263238, W.places.helipad));
   let n = 0;
   LOOPS.forEach((lp) => {
     for (let k = 0; k < lp.count; k++) {

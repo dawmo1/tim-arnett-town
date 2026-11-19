@@ -105,6 +105,7 @@ button { font: inherit; }
 #wheel .slot { position: absolute; width: 22%; aspect-ratio: 1; transform: translate(-50%, -50%); border-radius: 50%; border: 1px solid var(--line); background: rgba(255,255,255,.06); color: #fff; display: block; cursor: pointer; padding: clamp(8px, 2.5vmin, 18px); }
 #wheel .slot svg { width: 100%; height: 100%; display: block; }
 #wheel .slot span { position: absolute; top: 6%; right: 14%; font-size: 11px; font-weight: 800; opacity: .7; }
+#wheel .slot.locked { opacity: .3; }
 #wheel .slot.sel { background: rgba(255,255,255,.92); color: var(--ink); transform: translate(-50%, -50%) scale(1.12); }
 #wheel .hub { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 44%; text-align: center; }
 #wheelName { font: 400 24px var(--display); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 8px; }
@@ -140,6 +141,33 @@ button { font: inherit; }
 #help dd { margin: 0; color: var(--muted); }
 #resumeBtn { justify-self: center; font: 400 22px var(--display); letter-spacing: 2px; text-transform: uppercase; background: var(--accent); color: var(--ink); border: 0; border-radius: 3px; padding: 10px 40px; cursor: pointer; }
 
+#goalList { list-style: none; padding: 0; margin: 0 auto; max-width: 560px; display: grid; gap: 4px; }
+#goalList li { display: grid; grid-template-columns: 22px 1fr auto; gap: 10px; align-items: center; background: rgba(255,255,255,.06); padding: 10px 14px; }
+#goalList li.done { color: var(--muted); }
+#goalList li.done .check { color: var(--health); }
+#goalList .reward { color: var(--cash); font-weight: 800; font-variant-numeric: tabular-nums; }
+#goalList .prog { color: var(--muted); font-size: 12px; margin-left: 6px; }
+#shop { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(5, 8, 13, .55); pointer-events: auto; padding: 16px; }
+.shopCard { width: min(440px, 100%); background: var(--panel-strong); border-top: 4px solid var(--accent); padding: 20px; display: grid; gap: 12px; }
+.shopCard h2 { margin: 0; font: 400 32px var(--display); letter-spacing: 1px; text-transform: uppercase; }
+#shopItems { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+#shopItems button { width: 100%; display: grid; grid-template-columns: 1fr auto; gap: 10px; text-align: left; background: rgba(255,255,255,.06); color: var(--text); border: 0; padding: 11px 14px; cursor: pointer; font-weight: 600; }
+#shopItems button:hover:not(:disabled), #shopItems button:focus-visible { background: rgba(255,255,255,.16); outline: none; }
+#shopItems button:disabled { opacity: .45; cursor: not-allowed; }
+#shopItems .price { color: var(--cash); font-variant-numeric: tabular-nums; }
+#shopItems small { display: block; color: var(--muted); font-weight: 400; font-size: 12px; }
+#shopClose { justify-self: end; background: transparent; color: var(--muted); border: 1px solid var(--line); padding: 8px 18px; cursor: pointer; }
+#nitro { height: 4px; width: 120px; background: rgba(0,0,0,.5); margin-left: auto; margin-top: 4px; }
+#nitro i { display: block; height: 100%; background: #6fd3ff; }
+.settings { max-width: 460px; margin: 0 auto; display: grid; gap: 10px; }
+.settings fieldset { border: 1px solid var(--line); padding: 12px; margin: 0; }
+.settings legend { font: 400 18px var(--display); letter-spacing: 1px; text-transform: uppercase; padding: 0 6px; }
+#qualityBtns { display: flex; gap: 4px; }
+#qualityBtns button { flex: 1; background: rgba(255,255,255,.06); color: var(--text); border: 1px solid var(--line); padding: 8px; cursor: pointer; font-weight: 600; }
+#qualityBtns button.on { background: var(--accent); color: var(--ink); border-color: var(--accent); }
+.settings label { font-weight: 600; display: flex; justify-content: space-between; }
+.settings label.check { justify-content: flex-start; gap: 8px; }
+.settings input[type=range] { width: 100%; accent-color: var(--accent); }
 @media (max-width: 760px), (max-height: 540px) {
   #bottomleft { width: 190px; }
   #minimap { width: 190px; height: 120px; }

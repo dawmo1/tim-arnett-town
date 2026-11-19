@@ -49,6 +49,7 @@ export function crime(type, x, y, z) {
     case 'gunfire': if (seen || copNear(x, z, 80)) raise(1, x, z, seen); else if (Math.random() < 0.5) civilianCall(x, z, 1); break;
     case 'kill': if (seen) raise(3, x, z, true); else civilianCall(x, z, 2); break;
     case 'hitcop': raise(3, x, z, true); break;
+    case 'robbery': raise(2, x, z, seen); break; // the clerk's alarm calls it in
     case 'killcop': {
       wanted.copKills++;
       let lvl = 4;

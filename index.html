@@ -55,13 +55,23 @@
     <div id="hurt"></div>
     <div id="dead" hidden><div class="band"><span>YOU DIED</span></div><small id="deadSub">Respawning at Arnett Clinic…</small></div>
 
+    <div id="shop" hidden>
+      <div class="shopCard">
+        <h2 id="shopTitle"></h2>
+        <ul id="shopItems"></ul>
+        <button id="shopClose">Leave</button>
+      </div>
+    </div>
+
     <div id="pause" hidden>
       <div class="pauseTop">
         <h2>Tim Arnett Town</h2>
         <nav id="pauseTabs" aria-label="Pause menu">
           <button data-tab="map" class="on">Map</button>
+          <button data-tab="goals">Goals</button>
           <button data-tab="players">Players</button>
           <button data-tab="controls">Controls</button>
+          <button data-tab="settings">Settings</button>
         </nav>
         <div id="roomInfo"></div>
       </div>
@@ -70,6 +80,7 @@
           <canvas id="bigmap" width="1000" height="560" aria-label="Island map. Click to set a waypoint."></canvas>
           <p class="hint">Click the map to set a waypoint. Click it again to clear it.</p>
         </section>
+        <section data-panel="goals" hidden><ul id="goalList"></ul><p class="hint">Rewards are paid in cash. Nothing is saved between sessions.</p></section>
         <section data-panel="players" hidden><ul id="playerList"></ul><p class="hint" id="shareHint"></p></section>
         <section data-panel="controls" hidden>
           <dl id="help">
@@ -79,10 +90,30 @@
             <dt>Hold Tab or Q</dt><dd>Weapon wheel (or 1–7 / scroll)</dd>
             <dt>Shift</dt><dd>Sprint</dd>
             <dt>Space</dt><dd>Jump / handbrake</dd>
-            <dt>E</dt><dd>Get in or out (yanks drivers out)</dd>
+            <dt>E</dt><dd>Get in or out (yanks drivers out) · use shops</dd>
+            <dt>Right click</dt><dd>Aim (locks onto nearby targets)</dd>
+            <dt>R</dt><dd>Reload</dd>
+            <dt>Shift (driving)</dt><dd>Nitro · in the helicopter: descend</dd>
+            <dt>Space (helicopter)</dt><dd>Climb</dd>
+            <dt>N</dt><dd>Change radio station</dd>
             <dt>T</dt><dd>Chat</dd>
             <dt>Esc</dt><dd>Pause and map</dd>
           </dl>
+        </section>
+        <section data-panel="settings" hidden>
+          <div class="settings">
+            <fieldset><legend>Graphics</legend>
+              <div id="qualityBtns" role="radiogroup" aria-label="Graphics quality">
+                <button data-q="auto">Auto</button><button data-q="low">Low</button><button data-q="medium">Medium</button><button data-q="high">High</button>
+              </div>
+              <p class="hint" id="qualityNote"></p>
+            </fieldset>
+            <label for="sensSlider">Mouse sensitivity <output id="sensOut"></output></label>
+            <input id="sensSlider" type="range" min="0.3" max="2.5" step="0.05">
+            <label for="volSlider">Volume <output id="volOut"></output></label>
+            <input id="volSlider" type="range" min="0" max="1" step="0.05">
+            <label class="check"><input id="invertY" type="checkbox"> Invert mouse Y</label>
+          </div>
         </section>
       </div>
       <button id="resumeBtn">Resume</button>

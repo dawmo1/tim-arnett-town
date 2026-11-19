@@ -376,7 +376,7 @@ export function buildWorld(scene) {
     ac.castShadow = true;
     scene.add(roof, ac);
     // shop fronts on the main road: awning + name sign
-    const SHOPS = ['TIM-MART', 'ARNETT PAWN', 'SURF SHACK', 'PALM MOTEL', 'KEY LIME CAFE', 'TACO TIM', 'CONCH BURGER', 'ISLAND ARCADE', 'LUCKY 7 LAUNDRY', 'REEF RECORDS', 'ARNETT AUTO', 'GATOR GYM', 'SUNSET VIDEO', 'TIMS TATTOOS', 'COCONUT BANK', 'BAIT N BREW', 'MANGO NAILS', 'PELICAN PIZZA'];
+    const SHOPS = ['TIM-MART', 'ARNETT ARMS', 'SURF SHACK', 'PALM MOTEL', 'KEY LIME CAFE', 'TACO TIM', 'CONCH BURGER', 'ISLAND ARCADE', 'LUCKY 7 LAUNDRY', 'REEF RECORDS', 'ARNETT AUTO', 'GATOR GYM', 'SUNSET VIDEO', 'TIMS TATTOOS', 'COCONUT BANK', 'BAIT N BREW', 'MANGO NAILS', 'PELICAN PIZZA'];
     const SIGN_COLORS = [['#ff5e5b', '#fff'], ['#1e88e5', '#fff'], ['#ffd23f', '#222'], ['#2e7d32', '#fff'], ['#6a1b9a', '#ffeb3b'], ['#111', '#00e5ff']];
     let si = 0;
     for (const b of buildings) {
@@ -394,6 +394,10 @@ export function buildWorld(scene) {
       const aw = new THREE.Mesh(new THREE.BoxGeometry(wlen, 0.15, 2), mat([0xff5e5b, 0x1e88e5, 0x2e7d32, 0xffb300, 0xffffff][Math.floor(r() * 5)]));
       const ap = P(b.sc, fd + toward * 1);
       aw.position.set(ap.x, 3.1, ap.z); aw.rotation.y = face; aw.rotation.x = 0; aw.castShadow = true; scene.add(aw);
+      // where you stand to use the shop (a few metres out from the door, on the sidewalk)
+      const out = P(b.sc, fd + toward * 2.2);
+      env.shops = env.shops || [];
+      env.shops.push({ name: shop, x: out.x, z: out.z, face, doorX: p.x, doorZ: p.z });
       const door = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 2.6), mat(0x37474f));
       const dp = P(b.sc, fd + toward * 0.03);
       door.position.set(dp.x, 1.3, dp.z); door.rotation.y = face; scene.add(door);
@@ -647,6 +651,14 @@ export function buildWorld(scene) {
     }
   }
 
+  // beach helipad
+  {
+    const s = 462, d = 74, p = P(s, d);
+    places.helipad = { x: p.x, z: p.z, h: -theta(s) };
+    const pad = new THREE.Mesh(new THREE.CircleGeometry(7, 32).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ map: textTexture('H', { w: 256, h: 256, bg: '#3b4048', fg: '#ffc94a', size: 200, border: '#ffc94a' }) }));
+    pad.position.set(p.x, 0.06, p.z); pad.rotation.y = -theta(s); pad.receiveShadow = true;
+    scene.add(pad);
+  }
   // walkable spawn spots along the sidewalks
   places.spawns = [];
   for (let k = 0; k < 12; k++) { const s = 200 + k * 60; const p = P(s, k % 2 ? 8.8 : -8.8); places.spawns.push({ x: p.x, z: p.z, h: roadHeading(s) }); }

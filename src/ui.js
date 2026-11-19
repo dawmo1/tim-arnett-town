@@ -119,11 +119,14 @@ function nextAnnounce() {
 
 const WX = { clear: 'Clear', cloudy: 'Cloudy', rain: 'Rain', storm: 'Storm' };
 export function setClock(time, wx, night) { el.clock.textContent = `${time} · ${WX[wx] || wx}${night ? ' · Night' : ''}`; }
-export function setSpeedo(v) {
+export function setSpeedo(v, station = '', nitro = 0) {
   if (!v) { el.speedo.hidden = true; return; }
   el.speedo.hidden = false;
-  el.speedo.innerHTML = `<b>${Math.round(Math.abs(v.speed) * 3.6)}</b><small>km/h</small><span>${v.T.name}</span>`;
+  const alt = v.T.heli ? `<span>Altitude ${Math.round(v.y)} m</span>` : '';
+  const nb = !v.T.bike && !v.T.heli ? `<div id="nitro" title="Nitro"><i style="width:${Math.round(nitro * 100)}%"></i></div>` : '';
+  el.speedo.innerHTML = `<b>${Math.round(Math.abs(v.speed) * 3.6)}</b><small>km/h</small><span>${v.T.name}${station ? ' · ' + station : ''}</span>${alt}${nb}`;
 }
+export function setWheelLocked(owned) { slots.forEach((s, i) => s.classList.toggle('locked', !owned.has(i))); }
 let hitT = 0;
 export function hitMarker(kill) {
   el.crosshair.classList.add(kill ? 'kill' : 'hit');
@@ -264,7 +267,7 @@ export function drawBigMap(me, blips, waypoint) {
     bm.fillStyle = b.color; bm.strokeStyle = '#000'; bm.lineWidth = 1.5;
     bm.beginPath(); if (b.shape === 'square') bm.rect(x - b.size, y - b.size, b.size * 2, b.size * 2); else bm.arc(x, y, b.size, 0, 7); bm.fill(); bm.stroke();
     if (b.label) { bm.fillStyle = '#fff'; bm.font = 'bold 11px system-ui'; bm.textAlign = 'center'; bm.textBaseline = 'middle'; bm.fillText(b.label, x, y + 0.5); }
-    if (b.name) { bm.fillStyle = '#fff'; bm.font = '600 12px Inter, system-ui'; bm.textAlign = 'left'; bm.fillText(b.name, x + 9, y + 1); }
+    if (b.name) { bm.font = '600 11px Inter, system-ui'; bm.textAlign = 'left'; bm.lineWidth = 3; bm.strokeStyle = 'rgba(0,0,0,.75)'; bm.strokeText(b.name, x + 9, y + (b.dy || 1)); bm.fillStyle = '#fff'; bm.fillText(b.name, x + 9, y + (b.dy || 1)); }
   }
   if (waypoint) { const [x, y] = P(waypoint.x, waypoint.z); bm.fillStyle = '#b678ff'; bm.strokeStyle = '#000'; bm.beginPath(); bm.arc(x, y, 8, 0, 7); bm.fill(); bm.stroke(); }
   const [px, py] = P(me.x, me.z);
