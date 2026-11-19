@@ -16,7 +16,25 @@ export const TYPES = [
   { name: 'City bus', len: 10, wid: 2.6, hgt: 3.1, max: 22, acc: 6, turn: 1.1, grip: 6, mass: 4, hp: 260, bus: true },
   { name: 'Speedboat', len: 6, wid: 2.3, hgt: 1.4, max: 30, acc: 11, turn: 1.3, grip: 2, mass: 1.6, hp: 150, boat: true },
   { name: 'Helicopter', len: 9, wid: 2.4, hgt: 2.6, max: 38, acc: 10, turn: 1.6, grip: 2, mass: 2.2, hp: 200, heli: true },
+  // everyday
+  { name: 'Hatchback', len: 3.9, wid: 1.8, hgt: 1.45, max: 30, acc: 13, turn: 2.1, grip: 7.2, mass: 1.0, hp: 90, hatch: true },
+  { name: 'SUV', len: 4.8, wid: 2.0, hgt: 1.85, max: 31, acc: 12, turn: 1.8, grip: 7, mass: 1.7, hp: 130, suv: true },
+  { name: 'Pickup', len: 5.4, wid: 2.05, hgt: 1.85, max: 31, acc: 12, turn: 1.7, grip: 6.8, mass: 1.9, hp: 140, pickup: true },
+  { name: 'Minivan', len: 5.0, wid: 2.0, hgt: 1.8, max: 29, acc: 11, turn: 1.8, grip: 6.8, mass: 1.7, hp: 120, minivan: true },
+  // fun
+  { name: 'Muscle car', len: 4.7, wid: 2.0, hgt: 1.25, max: 44, acc: 20, turn: 1.9, grip: 7.5, mass: 1.4, hp: 110, muscle: true },
+  { name: 'Convertible', len: 4.4, wid: 1.9, hgt: 1.2, max: 40, acc: 18, turn: 2.2, grip: 8, mass: 1.1, hp: 85, convertible: true },
+  { name: 'Limo', len: 7.4, wid: 2.0, hgt: 1.45, max: 30, acc: 10, turn: 1.3, grip: 6.5, mass: 2.4, hp: 160, limo: true },
+  { name: 'Monster truck', len: 5.2, wid: 2.8, hgt: 3.0, max: 34, acc: 16, turn: 1.6, grip: 7, mass: 3, hp: 260, monster: true },
+  // work
+  { name: 'Taxi', len: 4.5, wid: 1.9, hgt: 1.45, max: 32, acc: 13, turn: 1.9, grip: 7, mass: 1.2, hp: 100, taxi: true },
+  { name: 'Garbage truck', len: 8, wid: 2.5, hgt: 3.4, max: 22, acc: 6, turn: 1.1, grip: 6, mass: 4.5, hp: 300, cabbed: 'garbage' },
+  { name: 'Tow truck', len: 6.6, wid: 2.3, hgt: 2.6, max: 27, acc: 8, turn: 1.3, grip: 6, mass: 3, hp: 220, cabbed: 'tow' },
+  // emergency
+  { name: 'Ambulance', len: 6.2, wid: 2.3, hgt: 2.7, max: 32, acc: 11, turn: 1.5, grip: 6.5, mass: 2.6, hp: 200, cabbed: 'ambulance', siren: true },
+  { name: 'Fire truck', len: 9.5, wid: 2.5, hgt: 3.2, max: 26, acc: 7, turn: 1.05, grip: 6, mass: 5, hp: 350, cabbed: 'fire', siren: true },
 ];
+export const V = { SEDAN: 0, SPORTS: 1, TRUCK: 2, VAN: 3, BIKE: 4, SCOOTER: 5, POLICE: 6, BUS: 7, BOAT: 8, HELI: 9, HATCH: 10, SUV: 11, PICKUP: 12, MINIVAN: 13, MUSCLE: 14, CONVERTIBLE: 15, LIMO: 16, MONSTER: 17, TAXI: 18, GARBAGE: 19, TOW: 20, AMBULANCE: 21, FIRE: 22 };
 export const BUS = 7, BOAT = 8, HELI = 9;
 // Shared glow materials: their opacity follows the night (set once per frame in main).
 export const glowMats = {
@@ -38,7 +56,8 @@ function addGlow(g, T) {
   g.userData.glow = gl;
 }
 export const POLICE = 6;
-const CAR_COLORS = [0xe74c3c, 0x3498db, 0xf1c40f, 0x2ecc71, 0xecf0f1, 0x34495e, 0x9b59b6, 0xe67e22, 0x1abc9c, 0x161616, 0xff6fa8];
+// real-world car colours: lots of white, black, silver and grey, some blue and red, the odd bright one
+export const CAR_COLORS = [0xf2f2f0, 0xf2f2f0, 0xe8e8e6, 0x1c1d20, 0x1c1d20, 0x9ea3a8, 0xb9bcbf, 0x6b7076, 0x4a4f55, 0x2f4a6d, 0x1f3550, 0x8e1c1c, 0xb02a2a, 0xc9b99a, 0x3f5a3c, 0x6e2b3a, 0xd9762b, 0xe3c33b, 0x2f8fd0, 0x4fae6e];
 
 const box = new THREE.BoxGeometry(1, 1, 1);
 const wheelGeo = new THREE.CylinderGeometry(0.36, 0.36, 0.26, 10);
@@ -87,13 +106,41 @@ export function makeVehicleMesh(T, color) {
     const sign = new THREE.Mesh(new THREE.PlaneGeometry(Wd * 0.8, 0.35), new THREE.MeshBasicMaterial({ map: busSign() }));
     sign.position.set(0, T.hgt - 0.35, L / 2 + 0.02); body.add(sign);
     parts.segL = 1.5;
-  } else if (T.truck) {
+  } else if (T.truck || T.cabbed) {
+    const kind = T.cabbed || 'box', cabC = kind === 'fire' ? 0xc62828 : kind === 'ambulance' ? 0xf4f4f4 : color;
+    const cabL = kind === 'ambulance' ? 2.2 : 1.9, cabH = kind === 'ambulance' ? 1.5 : 1.7;
     const fg = new THREE.Group(); fg.position.z = L / 2; body.add(fg); parts.frontG = fg;
-    parts.hood = bx(fg, color, Wd, 1.7, 1.9, 0, 1.25, -0.95);
-    bx(fg, 0x26323f, Wd * 0.92, 0.65, 0.05, 0, 1.65, 0.01, glassMat);
+    parts.hood = bx(fg, cabC, Wd, cabH, cabL, 0, 0.4 + cabH / 2, -cabL / 2);
+    bx(fg, 0x26323f, Wd * 0.92, 0.65, 0.05, 0, 0.4 + cabH - 0.45, 0.01, glassMat);
+    bx(fg, 0xfff8c4, 0.3, 0.16, 0.05, Wd / 2 - 0.3, 0.75, 0.02); bx(fg, 0xfff8c4, 0.3, 0.16, 0.05, -Wd / 2 + 0.3, 0.75, 0.02);
     parts.bumpF = bx(fg, 0x2b2b2b, Wd + 0.04, 0.3, 0.25, 0, 0.5, 0.05);
-    bx(body, 0xf2f2f2, Wd + 0.05, 2.2, L - 2.1, 0, 1.55, -1.0);
     bx(body, 0x333333, Wd * 0.9, 0.3, L, 0, 0.45, 0);
+    const rl = L - cabL - 0.2, rz = -L / 2 + rl / 2;
+    if (kind === 'box') bx(body, 0xf2f2f2, Wd + 0.05, 2.2, rl, 0, 1.55, rz);
+    else if (kind === 'garbage') {
+      bx(body, 0x2e7d32, Wd + 0.05, 2.5, rl * 0.8, 0, 1.75, rz + rl * 0.1);
+      const back = bx(body, 0x1b5e20, Wd, 2.1, rl * 0.25, 0, 1.45, -L / 2 + rl * 0.12); back.rotation.x = 0.35;
+      bx(body, 0xfafafa, Wd + 0.07, 0.25, rl * 0.6, 0, 1.4, rz + rl * 0.1);
+    } else if (kind === 'tow') {
+      bx(body, 0x37474f, Wd, 0.25, rl, 0, 0.75, rz);
+      const boom = bx(body, 0xf9a825, 0.25, 0.25, rl * 0.8, 0, 1.5, rz - 0.3); boom.rotation.x = -0.35;
+      bx(body, 0x212121, 0.6, 0.12, 0.4, 0, 0.9, -L / 2 + 0.2);
+    } else if (kind === 'ambulance') {
+      bx(body, 0xf4f4f4, Wd + 0.05, 2.3, rl, 0, 1.6, rz);
+      bx(body, 0xd32f2f, Wd + 0.08, 0.3, rl, 0, 1.25, rz);
+      bx(body, 0xd32f2f, 0.05, 0.9, 0.3, Wd / 2 + 0.03, 2.1, rz); bx(body, 0xd32f2f, 0.05, 0.3, 0.9, Wd / 2 + 0.03, 2.1, rz);
+      bx(body, 0xd32f2f, 0.05, 0.9, 0.3, -Wd / 2 - 0.03, 2.1, rz); bx(body, 0xd32f2f, 0.05, 0.3, 0.9, -Wd / 2 - 0.03, 2.1, rz);
+    } else if (kind === 'fire') {
+      bx(body, 0xc62828, Wd + 0.05, 1.7, rl, 0, 1.3, rz);
+      bx(body, 0xe0e0e0, Wd + 0.07, 0.15, rl, 0, 1.9, rz);
+      bx(body, 0xb0bec5, 0.7, 0.2, rl * 1.05, 0.3, 2.35, rz + 0.4); bx(body, 0xb0bec5, 0.7, 0.2, rl * 1.05, -0.3, 2.35, rz + 0.4);
+      for (let k = 0; k < 9; k++) bx(body, 0xb0bec5, 1.3, 0.08, 0.08, 0, 2.38, rz - rl / 2 + k * rl / 8);
+    }
+    if (T.siren) { // light bar on the cab roof
+      const red = new THREE.MeshBasicMaterial({ color: 0xff1744 }), blue = new THREE.MeshBasicMaterial({ color: kind === 'fire' ? 0xff1744 : 0xfff3e0 });
+      bx(fg, 0, 0.6, 0.18, 0.3, 0.35, 0.4 + cabH + 0.1, -cabL / 2, red); bx(fg, 0, 0.6, 0.18, 0.3, -0.35, 0.4 + cabH + 0.1, -cabL / 2, blue);
+      g.userData.lights = [red, blue];
+    }
     parts.segL = 1.9;
   } else {
     const lower = T.hgt * 0.5, yb = 0.3 + lower / 2, segL = L * 0.28;
@@ -118,10 +165,25 @@ export function makeVehicleMesh(T, color) {
     bx(dl, color, 0.1, lower, doorLen, 0, 0, -doorLen / 2);
     parts.doorL = dl;
     parts.doorR = bx(body, color, 0.1, lower, doorLen, -Wd / 2 + 0.05, yb, 0);
-    const cabLen = T.van ? L * 0.82 : L * 0.5, cabZ = T.van ? -L * 0.07 : -L * 0.06;
-    bx(body, 0, Wd * 0.88, T.hgt * 0.42, cabLen, 0, 0.3 + lower + T.hgt * 0.21, cabZ, glassMat);
-    bx(body, color, Wd * 0.9, 0.07, cabLen + 0.02, 0, 0.3 + lower + T.hgt * 0.42, cabZ);
-    if (T.van) bx(body, color, Wd * 0.9, T.hgt * 0.42, cabLen * 0.7, 0, 0.3 + lower + T.hgt * 0.21, cabZ - cabLen * 0.15);
+    const [cf, zf] = T.van ? [0.82, -0.07] : T.hatch ? [0.6, -0.13] : T.suv ? [0.68, -0.1] : T.minivan ? [0.78, -0.06] : T.pickup ? [0.33, 0.06] : T.limo ? [0.66, -0.04] : T.monster ? [0.4, 0.02] : [0.5, -0.06];
+    const cabLen = L * cf, cabZ = L * zf, top = 0.3 + lower + T.hgt * 0.42;
+    if (T.convertible) {
+      const ws = bx(body, 0, Wd * 0.86, T.hgt * 0.36, 0.06, 0, 0.3 + lower + T.hgt * 0.16, cabZ + cabLen * 0.35, glassMat); ws.rotation.x = -0.5;
+      bx(body, 0x2b1d14, Wd * 0.8, 0.4, cabLen * 0.6, 0, 0.3 + lower + 0.15, cabZ - cabLen * 0.05); // seats
+    } else {
+      bx(body, 0, Wd * 0.88, T.hgt * 0.42, cabLen, 0, 0.3 + lower + T.hgt * 0.21, cabZ, glassMat);
+      bx(body, color, Wd * 0.9, 0.07, cabLen + 0.02, 0, top, cabZ);
+      if (T.van) bx(body, color, Wd * 0.9, T.hgt * 0.42, cabLen * 0.7, 0, 0.3 + lower + T.hgt * 0.21, cabZ - cabLen * 0.15);
+      // window pillars so the glasshouse reads as a car, not a box of glass
+      for (const f of T.limo ? [0.5, 0.17, -0.17, -0.5] : [0.5, -0.02, -0.5]) bx(body, color, Wd * 0.9, T.hgt * 0.4, 0.09, 0, 0.3 + lower + T.hgt * 0.21, cabZ + cabLen * f);
+    }
+    if (T.pickup) { // open bed behind the cab
+      const bz0 = cabZ - cabLen / 2, bl = bz0 + L / 2 - 0.15;
+      for (const sx of [1, -1]) bx(body, color, 0.1, 0.45, bl, sx * (Wd / 2 - 0.05), 0.3 + lower + 0.22, bz0 - bl / 2);
+      bx(body, 0x262626, Wd - 0.2, 0.05, bl, 0, 0.3 + lower + 0.02, bz0 - bl / 2);
+    }
+    if (T.taxi) { bx(body, 0xfff59d, 0.7, 0.22, 0.32, 0, top + 0.14, cabZ); bx(body, 0x111111, Wd + 0.01, 0.12, midL * 0.9, 0, 0.3 + lower * 0.6, 0); }
+    if (T.muscle) { bx(fg, 0xf5f5f5, 0.35, lower + 0.01, segL + 0.01, 0, yb, -segL / 2); bx(fg, 0x1e1e1e, 0.6, 0.18, segL * 0.5, 0, yb + lower / 2 + 0.08, -segL * 0.5); }
     bx(body, color, 0.12, 0.1, 0.2, Wd / 2 + 0.06, 0.3 + lower + 0.05, cabZ + cabLen / 2 - 0.2);
     bx(body, color, 0.12, 0.1, 0.2, -Wd / 2 - 0.06, 0.3 + lower + 0.05, cabZ + cabLen / 2 - 0.2);
     if (T.police) {
@@ -142,14 +204,40 @@ export function makeVehicleMesh(T, color) {
       body.add(w); parts.wheels.push(w);
     }
     // driver head: shown for traffic, cops and players
-    const head = bx(body, 0xe0ac69, 0.3, 0.3, 0.3, 0.42, 0.3 + T.hgt * 0.72, T.truck ? L / 2 - 0.9 : T.bus ? L / 2 - 1.2 : -0.1);
+    const head = bx(body, 0xe0ac69, 0.3, 0.3, 0.3, 0.42, (T.cabbed ? 1.4 : 0.3 + T.hgt * 0.72), T.truck || T.cabbed ? L / 2 - 0.9 : T.bus ? L / 2 - 1.2 : -0.1);
     head.visible = false;
     g.userData.driverHead = head;
+    if (T.monster) { // jacked up on huge tyres
+      for (const c of body.children) if (!parts.wheels.includes(c)) c.position.y += 0.95;
+      for (const w of parts.wheels) { w.scale.set(1.6, 2.5, 2.5); w.position.y = 0.9; w.position.x *= 1.08; }
+    }
   }
+  // merge the static boxes that share a material (a car is a few draw calls, not twenty-five)
+  const keep = new Set([parts.hood, parts.bumpF, parts.trunk, parts.bumpR, parts.doorR, g.userData.driverHead].filter(Boolean));
+  for (const grp of [body, parts.frontG, parts.rearG]) if (grp) mergeStatic(grp, keep);
   addGlow(g, T);
   g.userData.body = body;
   g.userData.parts = parts;
   return g;
+}
+function mergeStatic(group, keep) {
+  const byMat = new Map();
+  for (const m of group.children) if (m.isMesh && !keep.has(m)) { if (!byMat.has(m.material)) byMat.set(m.material, []); byMat.get(m.material).push(m); }
+  for (const [material, list] of byMat) {
+    if (list.length < 2) continue;
+    const pos = [], nor = [], uv = [], idx = [];
+    for (const m of list) {
+      m.updateMatrix();
+      const gg = m.geometry.clone().applyMatrix4(m.matrix), base = pos.length / 3;
+      pos.push(...gg.attributes.position.array); nor.push(...gg.attributes.normal.array); uv.push(...gg.attributes.uv.array);
+      for (const i of gg.index.array) idx.push(base + i);
+      group.remove(m);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); geo.setIndex(idx);
+    const mm = new THREE.Mesh(geo, material); mm.castShadow = true; group.add(mm);
+  }
 }
 let _busSign = null;
 function busSign() {
@@ -449,17 +537,20 @@ export function stepVehicle(v, inp, dt) {
       v.lastAir = v.air || 0; v.air = 0;
     }
   }
-  // lean with the slope of the ground under the wheels
-  if (!T.bike && !(v.air > 0)) {
-    const hl = T.len * 0.4, hwd = T.wid * 0.45;
-    const hf = W.groundHeight(v.x + nfx * hl, v.z + nfz * hl), hb = W.groundHeight(v.x - nfx * hl, v.z - nfz * hl);
-    const lx = Math.cos(v.h), lz = -Math.sin(v.h);
-    const hL = W.groundHeight(v.x + lx * hwd, v.z + lz * hwd), hR = W.groundHeight(v.x - lx * hwd, v.z - lz * hwd);
-    const k = Math.min(1, dt * 10);
-    v.gp = (v.gp || 0) + (clamp(Math.atan2(hb - hf, hl * 2), -0.5, 0.5) - (v.gp || 0)) * k;
-    v.gr = (v.gr || 0) + (clamp(Math.atan2(hL - hR, hwd * 2), -0.4, 0.4) - (v.gr || 0)) * k;
-  }
+  if (!(v.air > 0)) alignToGround(v, dt);
   return impact;
+}
+
+// Lean with the slope of the ground under the wheels (v.gp pitch, v.gr roll).
+export function alignToGround(v, dt) {
+  const T = v.T; if (T.bike) return;
+  const nfx = Math.sin(v.h), nfz = Math.cos(v.h), hl = T.len * 0.4, hwd = T.wid * 0.45;
+  const hf = W.groundHeight(v.x + nfx * hl, v.z + nfz * hl), hb = W.groundHeight(v.x - nfx * hl, v.z - nfz * hl);
+  const lx = Math.cos(v.h), lz = -Math.sin(v.h);
+  const hL = W.groundHeight(v.x + lx * hwd, v.z + lz * hwd), hR = W.groundHeight(v.x - lx * hwd, v.z - lz * hwd);
+  const k = Math.min(1, dt * 10);
+  v.gp = (v.gp || 0) + (clamp(Math.atan2(hb - hf, hl * 2), -0.5, 0.5) - (v.gp || 0)) * k;
+  v.gr = (v.gr || 0) + (clamp(Math.atan2(hL - hR, hwd * 2), -0.4, 0.4) - (v.gr || 0)) * k;
 }
 
 // Crash a locally simulated vehicle v into another vehicle o.
@@ -504,7 +595,7 @@ export function pushCharOut(x, z, r, v) {
 export function trafficPose(v) { return { x: v.x, z: v.z, h: v.h, vx: v.vx || 0, vz: v.vz || 0 }; }
 
 // Parked cars at the given spots: [{x, z, h}]. More get added as you explore (see main.js).
-const PARKED_TYPES = [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 3, 4, 5];
+const PARKED_TYPES = [0, 0, 0, 0, 10, 10, 10, 11, 11, 11, 11, 12, 12, 12, 13, 13, 1, 14, 15, 3, 4, 5, 18];
 export function makeParked(id, sp, r = Math.random) {
   const ti = sp.ti ?? PARKED_TYPES[Math.floor(r() * PARKED_TYPES.length)];
   return makeVehicle(id, ti, CAR_COLORS[Math.floor(r() * CAR_COLORS.length)], sp);

@@ -5,7 +5,8 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import * as W from './world.js';
 import { makeCharacter, animateCharacter, placeCharacter, randomLook, nameTag, mat } from './character.js';
-import { createAllVehicles, makeParked, stepVehicle, collideVehicles, pushCharOut, circles, trafficPose, charVehicle, makeVehicleMesh, damageZone, applyDamageVisual, applyBump } from './vehicles.js';
+import { createAllVehicles, makeParked, stepVehicle, collideVehicles, pushCharOut, circles, charVehicle, makeVehicleMesh, damageZone, applyDamageVisual, applyBump } from './vehicles.js';
+import { initTraffic, updateTraffic as tickTraffic, bumpTraffic, scareTraffic, updateSignals, traffic } from './traffic.js';
 import { initWalkers, updateWalkers, walkers, panicNear, spawnFleeing, scare, provoke, setNpcContext } from './npc.js';
 import { initDayNight, updateDayNight, sky as weather, clockText, view as fogView } from './daynight.js';
 import { initLife, updateLife, startle } from './life.js';
@@ -461,7 +462,11 @@ const spotHash = (a, b) => { const s = Math.sin(a * 127.1 + b * 311.7) * 43758.5
 function manageParked(dt, x, z, force) {
   parkT -= dt; if (parkT > 0 && !force) return; parkT = 2.5;
   const R = activeQuality === 'low' ? 170 : 240, want = activeQuality === 'low' ? 18 : activeQuality === 'medium' ? 32 : 44;
-  for (const v of [...vehicles]) if (v.mode === 'parked' && !v.stolenOnce && v !== me.veh && Math.hypot(v.x - x, v.z - z) > R + 120) resetVehicle(v);
+  for (const v of [...vehicles]) {
+    if (v === me.veh || v.driver || v.localSim) continue;
+    const d = Math.hypot(v.x - x, v.z - z);
+    if ((v.mode === 'parked' && !v.stolenOnce && d > R + 120) || (v.mode === 'free' && d > 480)) resetVehicle(v);
+  }
   let have = vehicles.filter((v) => v.mode === 'parked' && Math.hypot(v.x - x, v.z - z) < R).length;
   if (have >= want) return;
   const cand = [];
@@ -471,7 +476,9 @@ function manageParked(dt, x, z, force) {
       const key = t.key + ':' + i; if (usedSpots.has(key) || spotHash(t.tx * 31 + i, t.tz) > 0.42) continue;
       const px = t.k[i] + t.ox, pz = t.k[i + 1] + t.oz, d = Math.hypot(px - x, pz - z);
       if (d > R || (!force && d < 70)) continue; // new cars appear out of sight
-      cand.push({ key, x: px, z: pz, h: t.k[i + 2] + (spotHash(i, t.tx) < 0.5 ? 0 : Math.PI), d });
+      let sx = px, sz = pz;
+      if (!t.k[i + 3]) { const q = W.nearestEdge(px, pz, 8); if (q) { const ox = px - q.x, oz = pz - q.z, l = Math.hypot(ox, oz) || 1; sx += (ox / l) * 0.3; sz += (oz / l) * 0.3; } }
+      cand.push({ key, x: sx, z: sz, h: t.k[i + 2] + (spotHash(i, t.tx) < 0.5 ? 0 : Math.PI), d });
     }
   }
   cand.sort((a, b) => a.d - b.d);
@@ -549,7 +556,7 @@ function explode(x, y, z, by, bu, origin) {
   const dm = Math.hypot(me.x - x, me.z - z);
   if (!me.dead && dm < R) damageMe(140 * (1 - dm / R), by, bu, { x: ((me.x - x) / (dm || 1)) * 14, y: 8, z: ((me.z - z) / (dm || 1)) * 14 });
   if (me.veh) { const dv = Math.hypot(me.veh.x - x, me.veh.z - z); if (dv < R) damageVehicle(me.veh, 150 * (1 - dv / R)); }
-  scare(x, z, 45, 'explosion'); startle(x, z, 60);
+  scare(x, z, 45, 'explosion'); startle(x, z, 60); scareTraffic(x, z, 90);
   if (origin) {
     for (const w of walkers) { if (w.dead) continue; const d = Math.hypot(w.x - x, w.z - z); if (d < R) hurtWalker(w, 200, (w.x - x) / (d || 1), (w.z - z) / (d || 1), null, 16 * (1 - d / R) + 6); }
     for (const v of vehicles) {
@@ -838,7 +845,7 @@ function fire(w) {
   if (w.name === 'Shotgun' || w.name === 'Rifle') shake = Math.max(shake, 0.12);
   if (a.mag <= 0 && a.res > 0) startReload();
   refreshWeaponHud();
-  panicNear(me.x, me.z, 30); startle(me.x, me.z, 30);
+  panicNear(me.x, me.z, 30); startle(me.x, me.z, 30); scareTraffic(me.x, me.z, 60);
 }
 function melee(w) {
   const fx_ = Math.sin(me.h), fz_ = Math.cos(me.h);
@@ -893,7 +900,7 @@ function collideAround(v, sliding) {
       const pb = o.pending; o.pending = null;
       // tap: they brake and lean on the horn. Real hit: the car is knocked loose with the driver still in it.
       // Big crash: the driver jumps out and runs.
-      if (i0 < 4) { o.sf = 0; o.lag += 0.6; if (!o.honkCd || performance.now() > o.honkCd) { fx.soundHorn(distCam(o.x, o.z)); o.honkCd = performance.now() + 1500; } }
+      if (i0 < 4) { bumpTraffic(o); if (!o.honkCd || performance.now() > o.honkCd) { fx.soundHorn(distCam(o.x, o.z)); o.honkCd = performance.now() + 1500; } }
       else { freeTraffic(o, false, i0 < 13); if (pb) applyBump(o, pb); }
     } else {
       const pushable = !o.driver || o.driver === net.uid;
@@ -923,71 +930,30 @@ function collideAround(v, sliding) {
   return best ? best.imp : 0;
 }
 
-// Traffic follows the shared clock, but each car can fall behind ("lag") when it stops for people.
-// Cars stop for anyone in front of them unless that person is wanted or just attacked someone.
+// Traffic: local to each player (see traffic.js). Cars stop for anyone in front of them unless that
+// person is wanted or just attacked someone, and pull over for police chasing a suspect.
+const allCars = [];
 function updateTraffic(dt, tSec) {
   const nowP = performance.now();
   const obs = [];
-  if (playing && !me.dead && !(wanted.stars > 0 || nowP - lastAttack < 15000)) obs.push(me.veh ? { x: me.veh.x, z: me.veh.z, r: 1.6, person: false } : { x: me.x, z: me.z, r: 0.5, person: true });
+  if (playing && !me.dead && !me.veh && !(wanted.stars > 0 || nowP - lastAttack < 15000)) obs.push({ x: me.x, z: me.z, r: 0.5, person: true });
   for (const r of remotes.values()) {
-    if (r.dead || r.stars > 0 || nowP - (r.lastShot || -1e9) < 15000) continue;
-    obs.push(r.vehObj ? { x: r.vehObj.x, z: r.vehObj.z, r: 1.6, person: false } : { x: r.x, z: r.z, r: 0.5, person: true });
+    if (r.dead || r.vehObj || r.stars > 0 || nowP - (r.lastShot || -1e9) < 15000) continue;
+    obs.push({ x: r.x, z: r.z, r: 0.5, person: true });
   }
-  for (const u of police.cops.values()) if (u.kind < 2 && !u.v.exploded) obs.push({ x: u.v.x, z: u.v.z, r: 1.6, person: false });
-  // things to drive around (not people): stopped cars, wrecks, loose parts
-  const avoid = [];
-  for (const o of vehicles) if (o.mode !== 'traffic' && Math.hypot(o.vx || 0, o.vz || 0) < 1.5 && o.sinkT === 0) avoid.push({ x: o.x, z: o.z, r: o.T.wid / 2 + 0.4 });
-  for (const d of fx.debrisList) avoid.push({ x: d.m.position.x, z: d.m.position.z, r: 0.8 });
-  const tr = vehicles.filter((v) => v.mode === 'traffic');
-  for (const v of tr) {
-    v.lag = v.lag || 0; if (v.sf === undefined) v.sf = 1; v.off = v.off || 0; v.offT = v.offT || 0;
-    const lp = v.loop;
-    v._u = (((lp.speed * (tSec - v.lag) + (v.slot * lp.len) / lp.count) % lp.len) + lp.len) % lp.len;
-    v._p = trafficPose(v, tSec - v.lag);
-    v._p.x += Math.cos(v._p.h) * v.off; v._p.z -= Math.sin(v._p.h) * v.off;
-  }
-  for (const v of tr) {
-    let block = false, person = false;
-    const fx_ = Math.sin(v._p.h), fz_ = Math.cos(v._p.h);
-    // obstacle in our lane ahead? swing into the other lane if it's clear, otherwise wait
-    let obstacle = false;
-    for (const o of avoid) {
-      const dx = o.x - v._p.x, dz = o.z - v._p.z, a = dx * fx_ + dz * fz_, l = dx * fz_ - dz * fx_;
-      if (a > 2 && a < 24 && Math.abs(l + v.off) < 1.2 + o.r && Math.abs(l) < 1.2 + o.r + 3.6) { obstacle = true; break; }
-    }
-    if (obstacle && v.offT === 0) {
-      let clear = true;
-      for (const o of tr) {
-        if (o === v) continue;
-        const dx = o._p.x - v._p.x, dz = o._p.z - v._p.z, a = dx * fx_ + dz * fz_, l = dx * fz_ - dz * fx_;
-        if (a > -6 && a < 40 && l < -1.5 && l > -6.5) { clear = false; break; }
-      }
-      if (clear) { v.offT = v.loop.lane * 2; v.offHold = 3.5; } else block = true;
-    } else if (v.offT && !obstacle) { v.offHold -= dt; if (v.offHold <= 0) v.offT = 0; }
-    const before = v.off;
-    v.off += Math.sign(v.offT - v.off) * Math.min(Math.abs(v.offT - v.off), dt * 3);
-    v._offRate = (v.off - before) / dt;
-    for (const o of obs) {
-      const dx = o.x - v._p.x, dz = o.z - v._p.z, a = dx * fx_ + dz * fz_, l = Math.abs(dx * fz_ - dz * fx_);
-      if (a > 1.5 && a < 13 && l < 1.5 + o.r) { block = true; person = o.person; break; }
-    }
-    if (!block) for (const o of tr) {
-      if (o === v || o.loop !== v.loop) continue;
-      const gap = (((o._u - v._u) % v.loop.len) + v.loop.len) % v.loop.len;
-      if (gap > 0 && gap < 8.5) { block = true; break; }
-    }
-    if (v.jackHold) { block = true; person = false; }
-    v.sf = block ? Math.max(0, v.sf - dt * (v.jackHold ? 8 : 3)) : Math.min(1, v.sf + dt * 0.6);
-    v.lag += dt * (1 - v.sf);
-    if (block && person && v.sf < 0.1) { v.honkT = (v.honkT || 0) + dt; if (v.honkT > 1.6) { v.honkT = -1.2; fx.soundHorn(distCam(v.x, v.z)); } }
-    else v.honkT = 0;
-  }
-  for (const v of tr) {
-    const p = trafficPose(v, tSec - v.lag);
-    v.x = p.x + Math.cos(p.h) * v.off; v.z = p.z - Math.sin(p.h) * v.off;
-    v.h = p.h + Math.atan2(v._offRate || 0, Math.max(3, v.loop.speed * v.sf));
-    v.vx = p.vx * v.sf; v.vz = p.vz * v.sf; v.speed = Math.hypot(v.vx, v.vz);
-  }
+  for (const w of walkers) if (!w.dead && w.mode !== 'gone') obs.push({ x: w.x, z: w.z, r: 0.45, person: true });
+  for (const d of fx.debrisList) obs.push({ x: d.m.position.x, z: d.m.position.z, r: 0.6 });
+  allCars.length = 0; allCars.push(...vehicles);
+  const sirens = [];
+  const chase = wanted.stars > 0 || [...remotes.values()].some((r) => r.stars > 0);
+  for (const u of police.cops.values()) if (u.kind < 2 && !police.isDown(u)) { allCars.push(u.v); if (chase && u.kind === 0) sirens.push({ x: u.v.x, z: u.v.z }); }
+  for (const v of vehicles) if (v.T.siren && v.sirenOn) sirens.push({ x: v.x, z: v.z });
+  const fxp = me.veh ? me.veh.x : me.x, fzp = me.veh ? me.veh.z : me.z;
+  camera.getWorldDirection(tmpDir);
+  const q = activeQuality, night = weather.night > 0.5;
+  const count = Math.round((q === 'low' ? 14 : q === 'medium' ? 30 : 42) * (night ? 0.6 : 1));
+  tickTraffic(dt, { x: fxp, z: fzp }, { x: camera.position.x, z: camera.position.z, fx: tmpDir.x, fz: tmpDir.z }, obs, sirens, tSec, { radius: q === 'low' ? 200 : q === 'medium' ? 260 : 320, count, night });
+  updateSignals(tSec);
 }
 
 function updateVehicles(dt, tSec, nowMs) {
@@ -1039,7 +1005,8 @@ function updateVehicles(dt, tSec, nowMs) {
     v.mesh.rotation.y = v.h;
     const body = v.mesh.userData.body;
     body.rotation.z = v.T.bike ? (v.driver ? v.tilt : 0.3) : 0;
-    body.rotation.x = v.T.boat || v.T.heli ? v.pitch || 0 : v.air > 0.05 ? clamp(-(v.vy || 0) * 0.025, -0.35, 0.35) : 0;
+    body.rotation.x = v.T.boat || v.T.heli ? v.pitch || 0 : v.air > 0.05 ? clamp(-(v.vy || 0) * 0.025, -0.35, 0.35) + (v.gp || 0) : v.gp || 0;
+    if (!v.T.bike && !v.T.heli && !v.T.boat) body.rotation.z = v.gr || 0;
     if (v.T.heli) { body.rotation.z = v.tilt || 0; const rt = v.mesh.userData.rotor; if (rt) rt.rotation.y += dt * (v.driver || v.y > 0.5 ? 32 : 0); }
     if (v.hp < v.T.hp * 0.35 && !v.exploded && (v.hp > 0 || Math.random() < 0.6) && Math.abs(v.x - camera.position.x) < 120 && Math.abs(v.z - camera.position.z) < 120) fx.damageSmoke(v);
   }
@@ -1263,7 +1230,7 @@ function updateRemotes(dt) {
       r.seq = s[9]; r.lastShot = performance.now();
       fx.tracer({ x: r.x + Math.sin(r.h) * 0.6, y: r.y + 1.35, z: r.z + Math.cos(r.h) * 0.6 }, { x: s[10], y: s[11], z: s[12] });
       fx.soundShot(WEAPONS[r.weapon]?.snd || 'pistol', distCam(r.x, r.z));
-      panicNear(r.x, r.z, 30); startle(r.x, r.z, 30);
+      panicNear(r.x, r.z, 30); startle(r.x, r.z, 30); scareTraffic(r.x, r.z, 60);
     }
     const vo = r.veh ? vehById.get(r.veh) : null;
     r.vehObj = vo;
@@ -1448,6 +1415,12 @@ setNpcContext({
   hitPlayer: (dmg, by, w) => damageMe(dmg, by, '', w && w.hostile === 'melee' && Math.random() < 0.2 ? { x: Math.sin(w.h) * 6, y: 2, z: Math.cos(w.h) * 6 } : null),
   vehicles: () => movingVehicles,
   shot: (w, to) => { const from = { x: w.x + Math.sin(w.h) * 0.5, y: (w.y || 0) + 1.4, z: w.z + Math.cos(w.h) * 0.5 }; fx.tracer(from, to); fx.muzzleFlash(from); fx.soundShot('pistol', distCam(w.x, w.z)); },
+});
+initTraffic(scene, {
+  vehicles: () => allCars,
+  add: (v) => { scene.add(v.mesh); vehicles.push(v); vehById.set(v.id, v); },
+  remove: (v) => resetVehicle(v),
+  honk: (v) => fx.soundHorn(distCam(v.x, v.z)),
 });
 police.initPolice(scene, {
   now: () => net.now(),

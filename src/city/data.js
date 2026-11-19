@@ -211,7 +211,8 @@ export function edgesNear(x, z, rad) {
 export const canGo = (e, fromNode) => (fromNode === e.a ? e.lf > 0 : e.lb > 0);
 
 // ---------- GPS: A* over the road graph, obeying one-way streets ----------
-export function route(fx, fz, tx, tz) {
+// opts.any: ignore one-way streets (emergency vehicles). opts.heading: prefer starting the way you face.
+export function route(fx, fz, tx, tz, opts = {}) {
   const drivable = (e) => e.cls !== 'service' || e.len > 30;
   const A = nearestEdge(fx, fz, 120, drivable), B = nearestEdge(tx, tz, 300, drivable);
   if (!A || !B) return null;
@@ -223,9 +224,12 @@ export function route(fx, fz, tx, tz) {
   const hx = (k) => Math.hypot(N.x[k] - B.x, N.z[k] - B.z);
   const cost = (e) => e.len / Math.max(5, e.speed) * (e.cls === 'service' ? 3 : 1); // seconds, roughly
   const start = (node, c) => { if (c < g[node]) { g[node] = c; push(node, c + hx(node) / 15); } };
-  const ea = A.e, none = !(ea.lf > 0) && !(ea.lb > 0);
-  if (ea.lf > 0 || none) start(ea.b, (ea.len - A.s) / Math.max(5, ea.speed));
-  if (ea.lb > 0 || none) start(ea.a, A.s / Math.max(5, ea.speed));
+  const ea = A.e, none = !(ea.lf > 0) && !(ea.lb > 0) || opts.any;
+  // turning around costs time: penalise the end of the road behind you
+  let penA = 0, penB = 0;
+  if (opts.heading !== undefined) { const dot = Math.sin(opts.heading) * Math.sin(A.h) + Math.cos(opts.heading) * Math.cos(A.h); if (dot > 0) penA = 12; else penB = 12; }
+  if (ea.lf > 0 || none) start(ea.b, (ea.len - A.s) / Math.max(5, ea.speed) + penB);
+  if (ea.lb > 0 || none) start(ea.a, A.s / Math.max(5, ea.speed) + penA);
   const goal = new Set([B.e.a, B.e.b]);
   let reached = -1;
   while (heap.length) {
@@ -233,7 +237,7 @@ export function route(fx, fz, tx, tz) {
     if (closed[k]) continue; closed[k] = 1;
     if (goal.has(k)) { reached = k; break; }
     for (const id of G.adj[k]) {
-      const e = G.edges[id]; if (!canGo(e, k)) continue;
+      const e = G.edges[id]; if (!opts.any && !canGo(e, k)) continue;
       const o = e.a === k ? e.b : e.a; if (closed[o] || N.closed[o]) continue;
       const c = g[k] + cost(e);
       if (c < g[o]) { g[o] = c; came[o] = k; cameEdge[o] = id; push(o, c + hx(o) / 15); }
@@ -262,7 +266,7 @@ export function route(fx, fz, tx, tz) {
 }
 
 // ---------- spawning ----------
-const PLAY = { x0: -4300, x1: 2700, z0: -4800, z1: 400 };
+const PLAY = { x0: -3300, x1: 2600, z0: -4300, z1: 250 }; // where random spawns land (the busy part of town)
 export function inPlay(x, z) { return x > PLAY.x0 && x < PLAY.x1 && z > PLAY.z0 && z < PLAY.z1; }
 // A sidewalk spot beside a road. near: optional {x, z, r} to search around.
 export function sidewalkSpot(near = null, rnd = Math.random) {

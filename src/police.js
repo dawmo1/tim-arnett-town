@@ -186,16 +186,22 @@ export function hostUpdate(dt, players) {
     // far away: follow the streets (GPS route); close and in sight: drive straight at them
     let gx = p.x, gz = p.z;
     u.pathT = (u.pathT || 0) - dt;
-    if (u.pathT <= 0) { u.pathT = 2.5; u.path = dist > 45 ? W.route(v.x, v.z, p.x, p.z) : null; u.pi = 0; }
+    if (u.pathT <= 0) { u.pathT = 2.5; u.path = dist > 45 ? W.route(v.x, v.z, p.x, p.z, { any: true, heading: v.h }) : null; u.pi = 0; }
     if (u.path && dist > 30) {
       while (u.pi < u.path.length - 1 && Math.hypot(u.path[u.pi][0] - v.x, u.path[u.pi][1] - v.z) < 11) u.pi++;
       gx = u.path[u.pi][0]; gz = u.path[u.pi][1];
     }
     const ad = angDiff(v.h, Math.atan2(gx - v.x, gz - v.z));
     let inp = { throttle: Math.abs(ad) > 0.7 && v.speed > 13 ? 0 : 1, brake: Math.abs(ad) > 0.9 && v.speed > 15 ? 0.6 : 0, steer: clamp(ad * 2, -1, 1), handbrake: Math.abs(ad) > 1.3 && v.speed > 12 };
-    if (dist < (p.sweeping ? 6 : 14) && !p.inVeh) inp = { throttle: 0, brake: v.speed > 0.5 ? 1 : 0, steer: inp.steer };
+    if (dist < (p.sweeping ? 6 : 10 + Math.abs(v.speed) * 0.9) && !p.inVeh) inp = { throttle: 0, brake: v.speed > 0.5 ? 1 : 0, steer: inp.steer };
     if (u.revT > 0) { u.revT -= dt; inp = { throttle: 0, brake: 1, steer: -inp.steer }; }
-    else if (inp.throttle > 0 && Math.abs(v.speed) < 1.5) { u.stuckT += dt; if (u.stuckT > 1.5) { u.revT = 1.3; u.stuckT = 0; } }
+    else if (inp.throttle > 0 && Math.abs(v.speed) < 1.5) {
+      u.stuckT += dt;
+      if (u.stuckT > 1.5) { u.revT = 1.3; u.stuckT = 0; u.unstick = (u.unstick || 0) + 1; }
+      // wedged for good and nobody's watching: send a fresh unit instead
+      if (u.unstick > 4 && dist > 70) { remove(u.id); continue; }
+    }
+    else if (Math.abs(v.speed) > 6) u.unstick = 0;
     else u.stuckT = 0;
     const imp = stepVehicle(v, inp, dt);
     if (imp > 10) v.hp -= (imp - 10) * 2;
@@ -371,6 +377,7 @@ export function render(dt, isHost, t) {
       }
       v.mesh.position.set(v.x, v.y, v.z);
       v.mesh.rotation.y = v.h;
+      v.mesh.userData.body.rotation.set(v.gp || 0, 0, v.gr || 0);
       const L = v.mesh.userData.lights;
       if (L && !v.exploded) { L[0].color.setHex(flash ? 0xff1744 : 0x550000); L[1].color.setHex(flash ? 0x0d1b55 : 0x2979ff); }
       v.mesh.userData.driverHead.visible = !v.exploded && !u.deployed?.length;
