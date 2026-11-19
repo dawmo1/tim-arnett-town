@@ -13,14 +13,18 @@ Everyone who types the same **room code** ends up in the same game. You can also
 | WASD | Move / drive |
 | Mouse | Look and aim (click the game first) |
 | Click | Attack / shoot |
-| 1–7 or wheel | Fists, bat, pistol, SMG, shotgun, rifle, grenade |
+| Hold Tab or Q | Weapon wheel (move the mouse, release to equip). 1–7 or scroll also work |
 | Shift | Sprint |
 | Space | Jump / handbrake |
 | E | Get in or out of a vehicle (steals it if someone's driving) |
 | T | Chat |
 | H | Controls help |
 
-Crimes (killing people, stealing cars, attacking cops) give you wanted stars. At 4+ stars the police set up roadblocks. Stay out of police sight long enough and the stars go away.
+Crimes (killing people, stealing cars, attacking cops) give you wanted stars. Cops get out and chase you on foot if you're on foot, set up roadblocks at 4+ stars, and send a helicopter at 5. Stay out of sight long enough and the stars go away.
+
+Traffic stops for people in the road, unless you're wanted or just attacked someone.
+
+Find the yellow-and-black stunt ramps on the beach, at the far tip, and at the end of the broken bridge. Yes, you can jump it.
 
 ## Turn on multiplayer (one-time, about 5 minutes)
 

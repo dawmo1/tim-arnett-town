@@ -16,7 +16,44 @@ const fireMat = new THREE.MeshBasicMaterial({ color: 0xff8c1a });
 const smokeMat = new THREE.MeshLambertMaterial({ color: 0x555555, transparent: true, opacity: 0.7 });
 const sphere = new THREE.SphereGeometry(1, 10, 8);
 
-export function initFx(s) { scene = s; }
+let skids;
+const SKIDS = 500;
+let skidI = 0;
+export function initFx(s) {
+  scene = s;
+  skids = new THREE.InstancedMesh(new THREE.BoxGeometry(0.28, 0.01, 0.5), new THREE.MeshBasicMaterial({ color: 0x1c1c1c, transparent: true, opacity: 0.55, depthWrite: false }), SKIDS);
+  const o = new THREE.Object3D(); o.position.set(0, -50, 0); o.updateMatrix();
+  for (let i = 0; i < SKIDS; i++) skids.setMatrixAt(i, o.matrix);
+  skids.frustumCulled = false;
+  scene.add(skids);
+}
+const so = new THREE.Object3D();
+// A short dark tire mark under a wheel.
+export function skid(x, z, h, y = 0) {
+  so.position.set(x, y + 0.075, z); so.rotation.set(0, h, 0); so.updateMatrix();
+  skids.setMatrixAt(skidI, so.matrix); skids.instanceMatrix.needsUpdate = true;
+  skidI = (skidI + 1) % SKIDS;
+}
+const lightSmoke = new THREE.MeshLambertMaterial({ color: 0xdddddd, transparent: true, opacity: 0.55 });
+export function smokePuff(x, y, z, light = false, size = 0.6) {
+  if (parts.length > 260) return;
+  const s = new THREE.Mesh(sphere, light ? lightSmoke : smokeMat);
+  s.position.set(x, y, z); s.scale.setScalar(size);
+  scene.add(s);
+  parts.push({ m: s, vx: (Math.random() - 0.5) * 0.8, vy: 1 + Math.random(), vz: (Math.random() - 0.5) * 0.8, life: 1.4, kind: 'smoke' });
+}
+// Gray smoke from the hood of a badly damaged vehicle.
+export function damageSmoke(v) {
+  if (Math.random() > 0.15) return;
+  smokePuff(v.x + Math.sin(v.h) * v.T.len * 0.35, v.y + v.T.hgt, v.z + Math.cos(v.h) * v.T.len * 0.35, false, 0.4);
+}
+const flashMat = new THREE.MeshBasicMaterial({ color: 0xffe082 });
+export function muzzleFlash(p) {
+  const m = new THREE.Mesh(sphere, flashMat);
+  m.position.set(p.x, p.y, p.z); m.scale.setScalar(0.18);
+  scene.add(m);
+  tracers.push({ l: m, life: 0.05, mesh: true });
+}
 
 export function blood(x, y, z, dx = 0, dz = 0, amount = 8) {
   for (let i = 0; i < amount; i++) {
@@ -92,7 +129,7 @@ export function updateFx(dt) {
   }
   for (let i = tracers.length - 1; i >= 0; i--) {
     tracers[i].life -= dt;
-    if (tracers[i].life <= 0) { scene.remove(tracers[i].l); tracers[i].l.geometry.dispose(); tracers.splice(i, 1); }
+    if (tracers[i].life <= 0) { scene.remove(tracers[i].l); if (!tracers[i].mesh) tracers[i].l.geometry.dispose(); tracers.splice(i, 1); }
   }
   for (let i = booms.length - 1; i >= 0; i--) {
     const b = booms[i]; b.t += dt;
@@ -134,3 +171,32 @@ export function soundShot(kind, dist = 0) {
 }
 export function soundBoom(dist = 0) { burst(1.4, 500, 1.2 * fall(dist * 0.6)); }
 export function soundHit() { burst(0.06, 900, 0.4); }
+
+function tone(type, freq, dur, vol, t0 = 0) {
+  if (!ac || vol <= 0.01) return;
+  const o = ac.createOscillator(), g = ac.createGain();
+  o.type = type; o.frequency.value = freq;
+  g.gain.setValueAtTime(vol, ac.currentTime + t0);
+  g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + t0 + dur);
+  o.connect(g); g.connect(ac.destination);
+  o.start(ac.currentTime + t0); o.stop(ac.currentTime + t0 + dur);
+}
+export function soundHorn(dist = 0) { const v = 0.18 * fall(dist * 1.5); tone('square', 392, 0.35, v); tone('square', 494, 0.35, v * 0.8); }
+export function soundStunt() { [523, 659, 784, 1046].forEach((f, i) => tone('triangle', f, 0.18, 0.15, i * 0.08)); }
+export function soundWanted() { tone('sawtooth', 220, 0.25, 0.08); tone('sawtooth', 330, 0.25, 0.08, 0.12); }
+
+// Police siren: one looping wail whose volume follows the nearest cop.
+let siren = null;
+export function setSiren(vol) {
+  if (!ac) return;
+  if (!siren) {
+    const o = ac.createOscillator(), lfo = ac.createOscillator(), lg = ac.createGain(), g = ac.createGain();
+    o.type = 'sawtooth'; o.frequency.value = 760; lfo.frequency.value = 0.55; lg.gain.value = 260;
+    lfo.connect(lg); lg.connect(o.frequency);
+    const f = ac.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 1800;
+    g.gain.value = 0; o.connect(f); f.connect(g); g.connect(ac.destination);
+    o.start(); lfo.start();
+    siren = g;
+  }
+  siren.gain.setTargetAtTime(Math.max(0, Math.min(0.09, vol * 0.09)), ac.currentTime, 0.2);
+}

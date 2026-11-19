@@ -38,26 +38,54 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #9fdcf5; fon
 #roomInfo { background: var(--hud); padding: 6px 10px; border-radius: 8px; overflow-wrap: anywhere; }
 #playerList { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 3px; }
 #playerList li { background: var(--hud); padding: 3px 8px; border-radius: 6px; width: max-content; max-width: 100%; }
-#topright { position: absolute; top: 12px; right: 12px; text-align: right; }
+#topright { position: absolute; top: 12px; right: 12px; text-align: right; display: grid; justify-items: end; gap: 6px; }
+#weaponBox { display: flex; align-items: center; gap: 10px; background: linear-gradient(90deg, transparent, rgba(10,20,35,.6)); padding: 6px 12px 6px 30px; border-radius: 10px; }
+#weaponIcon svg { width: 64px; height: 32px; display: block; color: #fff; filter: drop-shadow(0 2px 2px rgba(0,0,0,.6)); }
+#weapon { font: 400 18px var(--display); letter-spacing: 1px; }
 #stars { font-size: 30px; letter-spacing: 2px; }
 #stars span { color: rgba(255,255,255,.25); }
 #stars span.on { color: var(--sun); }
 #stars.flash span.on { animation: blink .6s steps(2) infinite; }
 @keyframes blink { 50% { opacity: .25; } }
-#feed { list-style: none; margin: 6px 0 0; padding: 0; font-size: 14px; display: grid; gap: 3px; justify-items: end; }
+#feed { list-style: none; margin: 0; padding: 0; font-size: 14px; display: grid; gap: 3px; justify-items: end; }
 #feed li { background: var(--hud); padding: 3px 8px; border-radius: 6px; }
 #crosshair { position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 2px rgba(0,0,0,.5); }
+#crosshair::before, #crosshair::after { content: ""; position: absolute; left: 50%; top: 50%; width: 22px; height: 3px; margin: -1.5px 0 0 -11px; background: transparent; }
+#crosshair.hit::before, #crosshair.hit::after { background: #fff; }
+#crosshair.kill::before, #crosshair.kill::after { background: #ff3b3b; }
+#crosshair::before { transform: rotate(45deg); } #crosshair::after { transform: rotate(-45deg); }
 #prompt { position: absolute; left: 50%; top: 62%; transform: translateX(-50%); background: var(--hud); padding: 8px 14px; border-radius: 10px; font-weight: 600; }
-#chat { position: absolute; left: 12px; bottom: 74px; width: min(420px, 60vw); }
+#chat { position: absolute; left: 252px; bottom: 16px; width: min(420px, 40vw); }
 #chatLog { list-style: none; margin: 0 0 6px; padding: 0; font-size: 14px; display: grid; gap: 2px; }
 #chatLog li { background: var(--hud); padding: 3px 8px; border-radius: 6px; width: max-content; max-width: 100%; overflow-wrap: anywhere; transition: opacity 1s; }
 #chatLog li.old { opacity: 0; }
 #chatInput { pointer-events: auto; width: 100%; font: 15px var(--body); padding: 8px 10px; border-radius: 8px; border: 2px solid var(--sea); }
-#bottomleft { position: absolute; left: 12px; bottom: 14px; width: 260px; }
-#weapon { font: 400 20px var(--display); margin-bottom: 6px; }
-#hpbar { height: 14px; background: rgba(0,0,0,.45); border-radius: 7px; overflow: hidden; border: 2px solid rgba(255,255,255,.7); }
+#bottomleft { position: absolute; left: 14px; bottom: 14px; width: 220px; display: grid; gap: 6px; }
+#hpbar { height: 10px; background: rgba(0,0,0,.5); border-radius: 3px; overflow: hidden; border: 2px solid rgba(0,0,0,.6); }
 #hpfill { height: 100%; width: 100%; background: #43d17a; transition: width .15s; }
-#minimap { position: absolute; right: 12px; bottom: 12px; width: 180px; height: 180px; border-radius: 50%; border: 3px solid rgba(255,255,255,.85); box-shadow: 0 4px 16px rgba(0,0,0,.35); }
+#speedo { position: absolute; right: 18px; bottom: 18px; text-align: right; line-height: 1; }
+#speedo b { font: 400 52px var(--display); }
+#speedo small { font-size: 14px; margin-left: 4px; }
+#speedo span { display: block; font-weight: 800; letter-spacing: 2px; text-transform: uppercase; font-size: 13px; margin-top: 4px; opacity: .85; }
+#announce { position: absolute; left: 50%; top: 22%; transform: translateX(-50%); text-align: center; opacity: 0; pointer-events: none; }
+#announce.on { animation: pop 2.1s ease-out forwards; }
+#announce .big { font: 400 clamp(28px, 5vw, 56px) var(--display); text-shadow: 3px 3px 0 #000, 0 0 24px rgba(0,0,0,.5); white-space: nowrap; }
+#announce .sub { font-weight: 800; font-size: 18px; letter-spacing: 2px; }
+@keyframes pop { 0% { opacity: 0; transform: translateX(-50%) scale(1.6); } 12% { opacity: 1; transform: translateX(-50%) scale(1); } 80% { opacity: 1; } 100% { opacity: 0; transform: translateX(-50%) translateY(-10px); } }
+#wheel { position: absolute; inset: 0; display: grid; place-items: center; background: radial-gradient(circle, rgba(0,0,0,.25), rgba(0,0,0,.6)); pointer-events: auto; }
+#wheel .ring { position: relative; width: min(440px, 86vmin); aspect-ratio: 1; max-width: 100%; border-radius: 50%; background: rgba(10,20,35,.55); border: 2px solid rgba(255,255,255,.25); }
+#wheel .slot { position: absolute; width: 22%; aspect-ratio: 1; transform: translate(-50%, -50%); border-radius: 50%; border: 2px solid rgba(255,255,255,.25); background: rgba(255,255,255,.08); color: #fff; display: block; cursor: pointer; padding: clamp(8px, 2.5vmin, 18px); }
+#wheel .slot svg { width: 100%; height: 100%; display: block; }
+#wheel .slot span { position: absolute; top: 6%; right: 14%; font-size: 11px; font-weight: 800; opacity: .7; }
+#wheel .slot.sel { background: var(--sun); color: #111; border-color: #fff; transform: translate(-50%, -50%) scale(1.12); }
+#wheel .slot:focus-visible { outline: 3px solid #fff; }
+#wheel .hub { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 44%; text-align: center; }
+#wheelName { font: 400 22px var(--display); color: var(--sun); margin-bottom: 8px; }
+#wheelStats div { display: grid; grid-template-columns: 70px 1fr; gap: 6px; align-items: center; font-size: 11px; font-weight: 600; margin: 3px 0; text-align: left; }
+#wheelStats i { display: block; height: 6px; background: rgba(255,255,255,.2); border-radius: 3px; overflow: hidden; }
+#wheelStats b { display: block; height: 100%; background: #fff; }
+#wheel .hub small { display: block; margin-top: 8px; opacity: .7; font-size: 11px; }
+#minimap { width: 220px; height: 220px; border-radius: 50%; border: 3px solid rgba(0,0,0,.55); box-shadow: 0 4px 16px rgba(0,0,0,.35); }
 #hurt { position: absolute; inset: 0; box-shadow: inset 0 0 120px 30px rgba(200,0,0,.0); }
 #hurt.on { animation: hurt .45s ease-out; }
 @keyframes hurt { from { box-shadow: inset 0 0 140px 40px rgba(200,0,0,.65); } to { box-shadow: inset 0 0 120px 30px rgba(200,0,0,0); } }
@@ -73,9 +101,11 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #9fdcf5; fon
 #help p { margin: 12px 0 0; font-size: 14px; }
 @media (prefers-reduced-motion: reduce) { #stars.flash span.on, #hurt.on { animation: none; } }
 @media (max-width: 700px), (max-height: 520px) {
-  #minimap { width: 110px; height: 110px; }
-  #bottomleft { width: 180px; }
-  #weapon { font-size: 16px; }
+  #bottomleft { width: 130px; }
+  #minimap { width: 130px; height: 130px; }
+  #chat { left: 156px; }
   #stars { font-size: 22px; }
+  #weaponIcon svg { width: 44px; height: 22px; }
   #topleft { font-size: 11px; }
+  #speedo b { font-size: 34px; }
 }

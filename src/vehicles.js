@@ -10,7 +10,7 @@ export const TYPES = [
   { name: 'Van', len: 5.0, wid: 2.1, hgt: 2.2, max: 28, acc: 10, turn: 1.6, grip: 6.5, mass: 2, hp: 140, van: true },
   { name: 'Motorbike', len: 2.1, wid: 0.8, hgt: 1.1, max: 44, acc: 20, turn: 2.6, grip: 9, mass: 0.45, hp: 50, bike: true },
   { name: 'Scooter', len: 1.8, wid: 0.7, hgt: 1.05, max: 22, acc: 12, turn: 2.8, grip: 9, mass: 0.3, hp: 40, bike: true },
-  { name: 'Police car', len: 4.6, wid: 2.0, hgt: 1.5, max: 39, acc: 17, turn: 2.0, grip: 8, mass: 1.4, hp: 160, police: true },
+  { name: 'Police car', len: 4.6, wid: 2.0, hgt: 1.5, max: 33, acc: 14, turn: 2.0, grip: 8, mass: 1.4, hp: 160, police: true },
 ];
 export const POLICE = 6;
 const CAR_COLORS = [0xe74c3c, 0x3498db, 0xf1c40f, 0x2ecc71, 0xecf0f1, 0x34495e, 0x9b59b6, 0xe67e22, 0x1abc9c, 0x161616, 0xff6fa8];
@@ -20,7 +20,7 @@ const wheelGeo = new THREE.CylinderGeometry(0.36, 0.36, 0.26, 10);
 wheelGeo.rotateZ(Math.PI / 2);
 function bx(g, c, sx, sy, sz, x, y, z, material) {
   const m = new THREE.Mesh(box, material || mat(c));
-  m.scale.set(sx, sy, sz); m.position.set(x, y, z); g.add(m); return m;
+  m.scale.set(sx, sy, sz); m.position.set(x, y, z); m.castShadow = true; g.add(m); return m;
 }
 
 export function makeVehicleMesh(T, color) {
@@ -51,8 +51,13 @@ export function makeVehicleMesh(T, color) {
     bx(body, 0xfff8c4, 0.35, 0.16, 0.05, -Wd / 2 + 0.3, 0.3 + lower * 0.7, L / 2 + 0.01);
     bx(body, 0xd50000, 0.35, 0.14, 0.05, Wd / 2 - 0.3, 0.3 + lower * 0.7, -L / 2 - 0.01);
     bx(body, 0xd50000, 0.35, 0.14, 0.05, -Wd / 2 + 0.3, 0.3 + lower * 0.7, -L / 2 - 0.01);
+    bx(body, 0x2b2b2b, Wd + 0.04, 0.22, 0.25, 0, 0.42, L / 2 - 0.05);   // bumpers
+    bx(body, 0x2b2b2b, Wd + 0.04, 0.22, 0.25, 0, 0.42, -L / 2 + 0.05);
+    bx(body, color, 0.12, 0.1, 0.2, Wd / 2 + 0.06, 0.3 + lower + 0.05, cabZ + cabLen / 2 - 0.2);  // mirrors
+    bx(body, color, 0.12, 0.1, 0.2, -Wd / 2 - 0.06, 0.3 + lower + 0.05, cabZ + cabLen / 2 - 0.2);
     if (T.police) {
       bx(body, 0x111111, Wd + 0.01, lower * 0.5, L * 0.45, 0, 0.3 + lower * 0.5, 0);
+      bx(body, 0xffd54f, 0.02, 0.25, 0.3, Wd / 2 + 0.01, 0.3 + lower * 0.55, 0); bx(body, 0xffd54f, 0.02, 0.25, 0.3, -Wd / 2 - 0.01, 0.3 + lower * 0.55, 0);
       const red = new THREE.MeshBasicMaterial({ color: 0xff1744 }), blue = new THREE.MeshBasicMaterial({ color: 0x2979ff });
       bx(body, 0, 0.6, 0.18, 0.3, 0.32, 0.3 + lower + T.hgt * 0.5, cabZ, red);
       bx(body, 0, 0.6, 0.18, 0.3, -0.32, 0.3 + lower + T.hgt * 0.5, cabZ, blue);
@@ -64,6 +69,7 @@ export function makeVehicleMesh(T, color) {
       const w = new THREE.Mesh(wheelGeo, mat(0x111111));
       w.position.set(sx * (Wd / 2 - 0.08), 0.36, sz * (L / 2 - (T.truck ? 1.0 : 0.85)));
       body.add(w);
+      bx(body, 0xcfd8dc, 0.04, 0.34, 0.34, sx * (Wd / 2 + 0.06), 0.36, w.position.z);
     }
     // NPC driver head, shown for traffic and cops
     const head = bx(body, 0xe0ac69, 0.3, 0.3, 0.3, 0.42, 0.3 + T.hgt * 0.72, T.truck ? L / 2 - 0.9 : -0.1);
@@ -108,14 +114,23 @@ export function stepVehicle(v, inp, dt) {
   if (inp.handbrake) vf -= vf * 1.4 * dt;
   if (vf > T.max) vf = T.max;
   vr *= Math.exp(-(inp.handbrake ? 1.6 : T.grip) * dt);
-  const yaw = alive ? inp.steer * T.turn * clamp(vf / 5, -1, 1) * (1 - 0.35 * Math.min(1, Math.abs(vf) / T.max)) : 0;
+  const yaw = alive ? (inp.steer || 0) * T.turn * clamp(vf / 5, -1, 1) * (1 - 0.35 * Math.min(1, Math.abs(vf) / T.max)) : 0;
   v.h += yaw * dt * (inp.handbrake ? 1.35 : 1);
   const nfx = Math.sin(v.h), nfz = Math.cos(v.h), nrx = -Math.cos(v.h), nrz = Math.sin(v.h);
   v.vx = nfx * vf + nrx * vr; v.vz = nfz * vf + nrz * vr;
+  const ox = v.x, oz = v.z;
   v.x += v.vx * dt; v.z += v.vz * dt;
   v.speed = vf;
+  v.slip = Math.abs(vr);
   v.tilt = T.bike ? clamp(-yaw * Math.abs(vf) * 0.03, -0.5, 0.5) : 0;
   let impact = 0;
+  // ramps: hitting the tall end is a wall
+  let gh = W.groundHeight(v.x, v.z);
+  if (gh - v.y > 0.7) {
+    impact = Math.hypot(v.vx, v.vz);
+    v.x = ox; v.z = oz; v.vx *= -0.3; v.vz *= -0.3;
+    gh = W.groundHeight(v.x, v.z);
+  }
   for (const c of circles(v)) {
     const p = W.pushOutCircle(c.x, c.z, c.r);
     if (!p.hit) continue;
@@ -123,9 +138,27 @@ export function stepVehicle(v, inp, dt) {
     const vn = v.vx * p.nx + v.vz * p.nz;
     if (vn < 0) { impact = Math.max(impact, -vn); v.vx -= p.nx * vn * 1.3; v.vz -= p.nz * vn * 1.3; }
   }
-  if (!W.isLand(v.x, v.z)) { v.sinkT += dt; v.vx *= Math.exp(-2.5 * dt); v.vz *= Math.exp(-2.5 * dt); }
-  else v.sinkT = 0;
-  v.y = -Math.min(2.2, v.sinkT * 0.8);
+  v.landed = 0;
+  if (!W.isLand(v.x, v.z) && v.y < 0.3) {
+    v.sinkT += dt; v.vx *= Math.exp(-2.5 * dt); v.vz *= Math.exp(-2.5 * dt);
+    v.y = -Math.min(2.2, v.sinkT * 0.8); v.vy = 0; v.air = 0;
+  } else {
+    v.sinkT = 0;
+    const floor = W.isLand(v.x, v.z) ? gh : -5;
+    if (v.y > floor + 0.05) {
+      // airborne
+      v.air = (v.air || 0) + dt;
+      v.vy = (v.vy || 0) - 22 * dt;
+      v.y += v.vy * dt;
+      if (v.y <= floor) { v.landed = -v.vy; v.y = floor; v.vy = 0; }
+    } else {
+      // on the ground (or riding up a ramp): vertical speed follows the slope
+      v.vy = dt > 0 ? (floor - v.y) / dt : 0;
+      if (v.vy < 0) v.vy = 0;
+      v.y = floor;
+      v.lastAir = v.air || 0; v.air = 0;
+    }
+  }
   return impact;
 }
 
