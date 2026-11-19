@@ -78,8 +78,33 @@ export function makeCharacter(look, opts = {}) {
   part(gun, 0x1d1d1d, 0.09, 0.14, 0.45, 0, -0.7, 0.16); part(gun, 0x3a3a3a, 0.07, 0.16, 0.08, 0, -0.78, 0.02);
   const bat = part(shR, 0x9c6b3a, 0.08, 0.08, 1.0, 0, -0.7, 0.5);
   gun.visible = false; bat.visible = false;
+  // one vertex-coloured mesh per limb: a person is ~6 draw calls instead of ~25
+  for (const grp of [body, head, shL, shR, hipL, hipR]) bake(grp, new Set([bat]));
   return { g, body, hipL, hipR, shL, shR, head, gun, bat, walk: 0, deadT: 0, roll: (Math.random() - 0.5) * 0.8 };
 }
+const CHAR_MAT = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.82, metalness: 0 });
+const tmpC = new THREE.Color();
+function bake(group, keep) {
+  const list = group.children.filter((m) => m.isMesh && !keep.has(m));
+  if (list.length < 2) return;
+  const pos = [], nor = [], col = [], idx = [];
+  for (const m of list) {
+    m.updateMatrix();
+    const gg = m.geometry.clone().applyMatrix4(m.matrix), base = pos.length / 3;
+    pos.push(...gg.attributes.position.array); nor.push(...gg.attributes.normal.array);
+    tmpC.copy(m.material.color);
+    for (let i = 0; i < gg.attributes.position.count; i++) col.push(tmpC.r, tmpC.g, tmpC.b);
+    for (const i of gg.index.array) idx.push(base + i);
+    group.remove(m);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); geo.setIndex(idx);
+  const mm = new THREE.Mesh(geo, CHAR_MAT); mm.castShadow = true;
+  group.add(mm);
+}
+// throw away a character's own geometry when it leaves for good
+export function disposeCharacter(c) { c.g.traverse((m) => { if (m.isMesh && m.material === CHAR_MAT) m.geometry.dispose(); }); }
 
 // st: { speed, aim, swim, sit, dead, swing (0..1), weapon: 'gun'|'bat'|'none' }
 // Put a character somewhere (ignored while physics owns it as a ragdoll).

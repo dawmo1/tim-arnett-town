@@ -5,9 +5,9 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import * as W from './world.js';
 import { makeCharacter, animateCharacter, placeCharacter, randomLook, nameTag, mat } from './character.js';
-import { createAllVehicles, makeParked, stepVehicle, collideVehicles, pushCharOut, circles, charVehicle, makeVehicleMesh, damageZone, applyDamageVisual, applyBump } from './vehicles.js';
+import { createAllVehicles, makeParked, initFarCars, farCarsBegin, farCarAdd, farCarsEnd, stepVehicle, collideVehicles, pushCharOut, circles, charVehicle, makeVehicleMesh, damageZone, applyDamageVisual, applyBump } from './vehicles.js';
 import { initTraffic, updateTraffic as tickTraffic, bumpTraffic, scareTraffic, updateSignals, traffic } from './traffic.js';
-import { initWalkers, updateWalkers, walkers, panicNear, spawnFleeing, scare, provoke, setNpcContext } from './npc.js';
+import { initWalkers, updateWalkers, walkers, panicNear, spawnFleeing, scare, provoke, setNpcContext, cartNear } from './npc.js';
 import { initDayNight, updateDayNight, sky as weather, clockText, view as fogView } from './daynight.js';
 import { initLife, updateLife, startle } from './life.js';
 import { glowMats } from './vehicles.js';
@@ -161,6 +161,7 @@ const enginesReady = Promise.all([
 const headlight = new THREE.SpotLight(0xfff2c8, 0, 55, 0.55, 0.6, 1.2);
 scene.add(headlight, headlight.target);
 const vehicles = createAllVehicles(scene, []);
+initFarCars(scene);
 ui.drawMapBase();
 ui.buildWheel(WEAPONS, (i) => { selectWeapon(i); closeWheel(false); });
 ui.setWheelInfo((i) => { const w = WEAPONS[i]; if (!me.owned.has(i)) return `Buy at Arnett Arms · $${w.price}`; if (w.melee) return 'Melee'; const a = ammoOf(i); return w.grenade ? `${a.mag + a.res} grenades` : `${a.mag} / ${a.res} rounds`; });
@@ -419,7 +420,6 @@ net.handlers.vehicleGone = (id) => { const v = vehById.get(id); if (v) resetVehi
 net.handlers.event = (e) => {
   switch (e.type) {
     case 'hit': if (e.to === net.uid) damageMe(+e.dmg || 0, String(e.by || 'someone'), e.from, e.ix !== undefined ? { x: +e.ix, y: 3.5, z: +e.iz } : null); break;
-    case 'npc': { const w = walkers[e.id]; if (w && !w.dead) { w.dead = { x: e.x, z: e.z, h: e.h, t: e.t }; w.hp = 0; fx.bloodPool(e.x, e.z, 1.4); knock(w, { x: 0, y: 1, z: 0 }, true); } break; }
     case 'vehHit': if (me.veh && me.veh.id === e.id) damageVehicle(me.veh, +e.dmg || 0, e.imp ? { cp: [e.px, e.pz], imp: e.imp } : null); break;
     case 'bump': {
       if (me.veh && me.veh.id === e.id) applyBump(me.veh, e);
@@ -581,7 +581,6 @@ function hurtWalker(w, dmg, dx, dz, p, force = 3) {
   if (w.hp <= 0) {
     w.dead = { x: r1(w.x), z: r1(w.z), h: r2(w.h), t: net.now() };
     setTimeout(() => { const p = w.ch.rag ? ragPos(w.ch) : w; fx.bloodPool(p.x, p.z, 1.4); }, 1300); // pool forms where the body comes to rest
-    sendEvent('npc', { id: w.id, ...w.dead });
     report('kill', w.x, w.z);
     if (Math.random() < 0.75) dropCash(w.x, w.z, 5 + Math.floor(Math.random() * 40));
     return true;
@@ -956,8 +955,12 @@ function updateTraffic(dt, tSec) {
   updateSignals(tSec);
 }
 
+// beyond this distance a car is drawn as a simple instanced silhouette
+const farCarDist = () => (activeQuality === 'low' ? 45 : activeQuality === 'medium' ? 70 : 95) * (weather.night > 0.5 ? 1.6 : 1);
 function updateVehicles(dt, tSec, nowMs) {
   updateTraffic(dt, tSec);
+  farCarsBegin();
+  const FAR = farCarDist(), cx = camera.position.x, cz = camera.position.z;
   for (const v of vehicles) {
     const head = v.mesh.userData.driverHead;
     if (v.mode === 'traffic') {
@@ -1003,6 +1006,9 @@ function updateVehicles(dt, tSec, nowMs) {
     if (dl) { v.doorAng = (v.doorAng || 0) + ((v.doorOpen ? 1.15 : 0) - (v.doorAng || 0)) * Math.min(1, dt * 9); dl.rotation.y = -v.doorAng; }
     v.mesh.position.set(v.x, v.y, v.z);
     v.mesh.rotation.y = v.h;
+    const isFar = v !== me.veh && !v.fire && Math.hypot(v.x - cx, v.z - cz) > FAR && farCarAdd(v);
+    v.mesh.visible = !isFar;
+    if (isFar) continue;
     const body = v.mesh.userData.body;
     body.rotation.z = v.T.bike ? (v.driver ? v.tilt : 0.3) : 0;
     body.rotation.x = v.T.boat || v.T.heli ? v.pitch || 0 : v.air > 0.05 ? clamp(-(v.vy || 0) * 0.025, -0.35, 0.35) + (v.gp || 0) : v.gp || 0;
@@ -1285,13 +1291,15 @@ function updateRobbery(dt) {
 const storesRobbing = new Set();
 
 // Shops you walk (or drive) into with E. Returns true if a shop opened.
+function storeAt(x, z, r) { const c = !me.veh && cartNear(x, z, 3.5); return c ? { kind: 'food', name: 'Hot dog cart', x: c.x, z: c.z } : storeNear(x, z, r); }
 function useStore() {
   if (me.dead || me.enter) return false;
-  const st = storeNear(me.veh ? me.veh.x : me.x, me.veh ? me.veh.z : me.z, me.veh ? 7 : 3.2);
+  const st = storeAt(me.veh ? me.veh.x : me.x, me.veh ? me.veh.z : me.z, me.veh ? 7 : 3.2);
   if (!st) return false;
   if (st.kind === 'body' && me.veh && !me.veh.T.boat && !me.veh.T.heli) { bodyShop(me.veh); return true; }
   if (me.veh) return false;
   if (st.kind === 'guns') { openShop('Arnett Arms', gunShopItems()); return true; }
+  if (st.kind === 'food') { if (me.hp >= 100) { ui.flashPrompt("You're not hungry"); return true; } if (!spend(8)) { ui.flashPrompt('A hot dog is $8'); return true; } me.hp = Math.min(100, me.hp + 30); fx.soundCash(); ui.flashPrompt('Hot dog: +30 health'); return true; }
   if (st.kind === 'meds') { openShop('Hospital Pharmacy', [{ label: 'Patch me up', sub: 'Full health', price: 60, ok: () => me.hp < 100, buy: () => { me.hp = 100; } }]); return true; }
   return false;
 }
@@ -1409,7 +1417,12 @@ function updateThreat(dt) {
   }
   threatState = armed ? { x: me.x, z: me.z, armed: w.kind === 'gun', aimAt } : null;
 }
+// where the camera is and which way it looks (so people and cars appear out of sight)
+const camDir = new THREE.Vector3();
+function camView() { camera.getWorldDirection(camDir); const l = Math.hypot(camDir.x, camDir.z) || 1; return { x: camera.position.x, z: camera.position.z, fx: camDir.x / l, fz: camDir.z / l }; }
 setNpcContext({
+  focus: () => (playing ? { x: me.veh ? me.veh.x : me.x, z: me.veh ? me.veh.z : me.z } : W.places.menu),
+  quality: () => activeQuality,
   threat: () => threatState,
   target: () => (playing && !me.dead ? { x: me.veh ? me.veh.x : me.x, y: me.veh ? me.veh.y : me.y, z: me.veh ? me.veh.z : me.z, dead: me.dead, inVeh: !!me.veh } : null),
   hitPlayer: (dmg, by, w) => damageMe(dmg, by, '', w && w.hostile === 'melee' && Math.random() < 0.2 ? { x: Math.sin(w.h) * 6, y: 2, z: Math.cos(w.h) * 6 } : null),
@@ -1472,8 +1485,9 @@ function updateHud(dt, t) {
   }
   let prompt = robberyPrompt;
   if (!me.dead && !prompt) {
-    const st = storeNear(me.veh ? me.veh.x : me.x, me.veh ? me.veh.z : me.z, me.veh ? 7 : 3.2);
-    if (st && st.kind === 'guns' && !me.veh) prompt = 'E: Shop at Arnett Arms';
+    const st = storeAt(me.veh ? me.veh.x : me.x, me.veh ? me.veh.z : me.z, me.veh ? 7 : 3.2);
+    if (st && st.kind === 'food') prompt = 'E: Buy a hot dog ($8, +30 health)';
+    else if (st && st.kind === 'guns' && !me.veh) prompt = 'E: Shop at Arnett Arms';
     else if (st && st.kind === 'meds' && !me.veh) prompt = 'E: Pharmacy (heal $60)';
     else if (st && st.kind === 'body' && me.veh && !me.veh.T.boat && !me.veh.T.heli) prompt = 'E: Repair & respray ($150)';
     else if (st && st.kind === 'rob' && !me.veh && st.cooldown <= 0) prompt = `Aim a gun at the door (right click) to rob ${st.name}`;
@@ -1546,10 +1560,11 @@ function update(dt, t) {
   updateVehicles(dt, tSec, nowMs);
   updatePlayer(dt);
   updateRemotes(dt);
-  updateWalkers(dt, tSec, nowMs, camera.position);
+  updateWalkers(dt, tSec, nowMs, camView());
   if (isHost) { police.hostUpdate(dt, policePlayers()); hostChores(dt, nowMs); }
   for (const v of vehicles) if (v.pending) flushBump(v);
-  police.render(dt, isHost, t);
+  police.render(dt, isHost, t, camera.position, farCarDist());
+  farCarsEnd();
   updateGrenades(dt);
   updateWantedLevel(dt);
   updateRagdolls(dt);
@@ -1584,8 +1599,9 @@ function frame(now) {
   else {
     const nowMs = net.now();
     updateVehicles(dt, nowMs / 1000, nowMs);
+    farCarsEnd();
     updateNav(dt);
-    updateWalkers(dt, nowMs / 1000, nowMs, camera.position);
+    updateWalkers(dt, nowMs / 1000, nowMs, camView());
     updateRagdolls(dt);
     menuCamera(now / 1000);
     updateWorldLife(dt, nowMs, now / 1000);

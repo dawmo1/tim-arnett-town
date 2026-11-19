@@ -541,6 +541,33 @@ export function stepVehicle(v, inp, dt) {
   return impact;
 }
 
+// ---------- far-away cars: one instanced silhouette each (two draw calls for all of them) ----------
+const far = { body: null, cab: null, n: 0, o: new THREE.Object3D(), c: new THREE.Color() };
+export function initFarCars(scene) {
+  const g = new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0);
+  far.body = new THREE.InstancedMesh(g, new THREE.MeshStandardMaterial({ roughness: 0.6 }), 260);
+  far.cab = new THREE.InstancedMesh(g, new THREE.MeshStandardMaterial({ color: 0x2a3440, roughness: 0.3 }), 260);
+  for (const m of [far.body, far.cab]) { m.count = 0; m.frustumCulled = false; scene.add(m); }
+}
+export function farCarsBegin() { far.n = 0; }
+export function farCarAdd(v) {
+  if (!far.body || far.n >= 260 || v.T.heli || v.T.boat) return false;
+  const T = v.T, o = far.o, lo = T.bike ? 0.9 : 0.3 + T.hgt * 0.5;
+  o.position.set(v.x, v.y + (T.monster ? 1 : 0.25), v.z); o.rotation.set(v.gp || 0, v.h, v.gr || 0, 'YXZ'); o.scale.set(T.bike ? 0.5 : T.wid, lo, T.len); o.updateMatrix();
+  far.body.setMatrixAt(far.n, o.matrix); far.body.setColorAt(far.n, v.exploded ? far.c.setHex(0x2b2b2b) : far.c.setHex(v.color));
+  const big = T.bus || T.truck || T.cabbed || T.van;
+  o.position.y += lo; o.scale.set(T.wid * 0.86, T.bike ? 0.01 : T.hgt * (big ? 0.45 : 0.4), T.len * (big ? 0.85 : 0.5)); o.updateMatrix();
+  far.cab.setMatrixAt(far.n, o.matrix);
+  far.n++;
+  return true;
+}
+export function farCarsEnd() {
+  if (!far.body) return;
+  far.body.count = far.cab.count = far.n;
+  far.body.instanceMatrix.needsUpdate = far.cab.instanceMatrix.needsUpdate = true;
+  if (far.body.instanceColor) far.body.instanceColor.needsUpdate = true;
+}
+
 // Lean with the slope of the ground under the wheels (v.gp pitch, v.gr roll).
 export function alignToGround(v, dt) {
   const T = v.T; if (T.bike) return;

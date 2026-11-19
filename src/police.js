@@ -2,7 +2,7 @@
 // Unit kinds: 0 patrol car, 1 roadblock car, 2 officer on foot, 3 helicopter.
 import * as THREE from 'three';
 import * as W from './world.js';
-import { makeVehicle, stepVehicle, collideVehicles, circles, charVehicle, POLICE } from './vehicles.js';
+import { makeVehicle, stepVehicle, collideVehicles, circles, charVehicle, POLICE, farCarAdd } from './vehicles.js';
 import { makeCharacter, animateCharacter, placeCharacter, mat } from './character.js';
 import { ragdoll, ragPos } from './ragdoll.js';
 import * as nav from './nav.js';
@@ -366,7 +366,7 @@ export function damageCop(id, dmg) {
   return false;
 }
 
-export function render(dt, isHost, t) {
+export function render(dt, isHost, t, cam = null, farDist = 1e9) {
   const flash = Math.floor(t * 6) % 2;
   for (const u of cops.values()) {
     if (u.kind < 2) {
@@ -378,6 +378,8 @@ export function render(dt, isHost, t) {
       v.mesh.position.set(v.x, v.y, v.z);
       v.mesh.rotation.y = v.h;
       v.mesh.userData.body.rotation.set(v.gp || 0, 0, v.gr || 0);
+      const isFar = cam && !u.fire && Math.hypot(v.x - cam.x, v.z - cam.z) > farDist && farCarAdd(v);
+      v.mesh.visible = !isFar;
       const L = v.mesh.userData.lights;
       if (L && !v.exploded) { L[0].color.setHex(flash ? 0xff1744 : 0x550000); L[1].color.setHex(flash ? 0x0d1b55 : 0x2979ff); }
       v.mesh.userData.driverHead.visible = !v.exploded && !u.deployed?.length;

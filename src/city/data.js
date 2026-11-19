@@ -110,7 +110,7 @@ const HOODS = [
   ['Eagle Point', 41.5212, -90.5538, 500], ['East Circle', 41.5191, -90.5406, 400], ['Hilltop', 41.5305, -90.5760, 650],
   ['Vander Veer', 41.5395, -90.5715, 600], ['Central Davenport', 41.5470, -90.5720, 800], ['Gold Coast', 41.5275, -90.5880, 550],
   ['West End', 41.5195, -90.6060, 900], ['Black Hawk', 41.5209, -90.6376, 700], ['Fejervary', 41.5160, -90.6150, 600],
-  ['Northwest Davenport', 41.5520, -90.6120, 1100], ['NorthPark', 41.5600, -90.5650, 700], ['Kimberly Road', 41.5585, -90.5870, 800],
+  ['Northwest Davenport', 41.5520, -90.6120, 1100], ['NorthPark', 41.5635, -90.5741, 700], ['Kimberly Road', 41.5585, -90.5870, 800],
   ['Prospect Park', 41.5420, -90.5520, 700], ['Hamburg', 41.5265, -90.5930, 450], ['Lincoln Park', 41.5370, -90.6000, 700],
   ['Garfield Park', 41.5420, -90.5950, 600], ['Hillcrest', 41.5490, -90.6300, 900], ['Oakdale', 41.5340, -90.5850, 500],
 ].map(([name, lat, lon, r]) => { const [x, z] = ll(lat, lon); return { name, x, z, r }; });
