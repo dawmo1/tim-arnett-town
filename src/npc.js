@@ -276,6 +276,7 @@ export function scare(x, z, radius, kind = 'gunfire') {
 }
 export const panicNear = (x, z, radius) => scare(x, z, radius, 'gunfire');
 function startFlee(w, x, z, short) {
+  if (!short && Math.random() < 0.4 && w.mode !== 'flee') say(w, line('scream'));
   w.mode = 'flee'; w.modeT = short ? 2 : 6 + Math.random() * 4; w.fx = x; w.fz = z;
   w.fh = Math.atan2(w.x - x, w.z - z) + (Math.random() - 0.5) * 0.8;
 }
@@ -293,10 +294,11 @@ export function knock(w, vel, dead) {
   });
   return !!r;
 }
-export function flinch(w) { w.ch.flinch = 1; }
+export function flinch(w) { w.ch.flinch = 1; say(w, line('hurt'), 1.2); }
 // The player hurt this person without killing them.
 export function provoke(w) {
   if (w.dead) return;
+  if (w.temper !== 'normal') say(w, line('fight'));
   if (w.temper === 'brawler') goHostile(w, 'melee');
   else if (w.temper === 'gunman') goHostile(w, 'gun');
   else startFlee(w, w.x - Math.sin(w.h), w.z - Math.cos(w.h));
@@ -341,7 +343,7 @@ export function updateWalkers(dt, tSec, nowMs, cam) {
       manageCrowds(focus, hour, 0.2);
       for (const g of [...groups]) if (Math.hypot(g.x - focus.x, g.z - focus.z) > R + 90 && hidden(g.x, g.z, cam)) removeGroup(g);
       for (const w of [...walkers]) {
-        if (w.grp) continue;
+        if (w.grp || w.mode === 'script') continue;
         const d = Math.hypot(w.x - focus.x, w.z - focus.z);
         if ((d > R + 40 && hidden(w.x, w.z, cam)) || d > R + 160 || (w.mode === 'gone' && w.modeT <= 0) || (w.dead && nowMs - w.dead.t > 90000 && hidden(w.x, w.z, cam))) removeWalker(w);
       }
@@ -359,6 +361,8 @@ export function updateWalkers(dt, tSec, nowMs, cam) {
     }
     if (w.dead) {
       w.x = w.dead.x; w.z = w.dead.z; w.h = w.dead.h;
+    } else if (w.mode === 'script') {
+      speed = w.script.speed; pose = w.script.pose;
     } else if (freeModes.has(w.mode)) {
       w.modeT -= dt;
       if (w.mode === 'flee') {
@@ -569,3 +573,39 @@ export function revive(w) {
   if (w.grp) { w.mode = 'gone'; w.modeT = 25; } else calmDown(w);
   return true;
 }
+
+// ---------- speech bubbles ----------
+const bubbleCache = new Map();
+function bubbleTex(text) {
+  if (bubbleCache.has(text)) return bubbleCache.get(text);
+  const c = document.createElement('canvas'); c.width = 256; c.height = 96;
+  const g = c.getContext('2d');
+  g.fillStyle = 'rgba(255,255,255,.94)'; g.strokeStyle = 'rgba(0,0,0,.55)'; g.lineWidth = 4;
+  g.beginPath(); g.roundRect(6, 6, 244, 62, 18); g.moveTo(110, 66); g.lineTo(128, 90); g.lineTo(146, 66); g.fill(); g.stroke();
+  g.fillStyle = '#111'; g.font = 'bold 30px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, 128, 38, 230);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; bubbleCache.set(text, t);
+  return t;
+}
+// Show a short line over someone's head for a few seconds (only near the player).
+export function say(w, text, secs = 2.2) {
+  if (!w || !w.ch || w.dead) return;
+  const now = performance.now();
+  if (w.saidAt && now - w.saidAt < 1500) return;
+  w.saidAt = now;
+  if (w.bubble) w.ch.g.remove(w.bubble);
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: bubbleTex(text), depthTest: true, transparent: true }));
+  s.scale.set(1.9, 0.7, 1); s.position.y = 2.45; w.ch.g.add(s); w.bubble = s;
+  setTimeout(() => { if (w.bubble === s) { w.ch.g.remove(s); w.bubble = null; } }, secs * 1000);
+}
+const LINES = { scream: ['AAAH!', 'Help!', 'Run!', 'Oh no!', 'Somebody help!'], hurt: ['Oof!', 'Ow!', 'Ugh!', 'Hey!'], greet: ['Hi!', 'Hey there!', 'Morning!', "How's it going?", 'Go Hawks!'], insulted: ['Excuse me?!', 'Get lost!', "What's your problem?", 'Rude.', 'Watch it, pal!'], fight: ['You want some?!', "Let's go!", 'Big mistake!'] };
+export const line = (k) => pick(LINES[k]);
+
+// ---------- scripted people (street events drive them directly) ----------
+export function addScripted(role, x, z, h, look) {
+  const w = newWalker(role, x, z, h, null);
+  if (look) { scene.remove(w.ch.g); disposeCharacter(w.ch); w.ch = makeCharacter(look); scene.add(w.ch.g); }
+  w.mode = 'script'; w.script = { speed: 0, pose: {} }; w.scripted = true;
+  return w;
+}
+export function dropScripted(w) { if (walkers.includes(w)) removeWalker(w); }
+export function freeScripted(w, fromX, fromZ) { if (w.mode === 'script') startFlee(w, fromX, fromZ); }

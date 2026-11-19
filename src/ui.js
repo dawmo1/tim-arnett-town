@@ -129,7 +129,10 @@ export function setSpeedo(v, station = '', nitro = 0) {
   el.speedo.hidden = false;
   const alt = v.T.heli ? `<span>Altitude ${Math.round(v.alt ?? v.y)} m</span>` : '';
   const nb = !v.T.bike && !v.T.heli ? `<div id="nitro" title="Nitro"><i style="width:${Math.round(nitro * 100)}%"></i></div>` : '';
-  el.speedo.innerHTML = `<b>${Math.round(Math.abs(v.speed) * 3.6)}</b><small>km/h</small><span>${v.T.name}${station ? ' · ' + station : ''}</span>${alt}${nb}`;
+  // damage meter: green when healthy, red when it's about to give up
+  const hp = Math.max(0, Math.min(1, v.hp / v.T.hp)), hc = hp > 0.6 ? '#7cf29a' : hp > 0.3 ? '#ffc94a' : '#ff5e5b';
+  const dm = `<div id="vdmg" title="Damage"><i style="width:${Math.round(hp * 100)}%;background:${hc}"></i></div>`;
+  el.speedo.innerHTML = `<b>${Math.round(Math.abs(v.speed) * 3.6)}</b><small>km/h</small><span>${v.T.name}${station ? ' · ' + station : ''}</span>${alt}${nb}${dm}`;
 }
 let hitT = 0;
 export function hitMarker(kill) {

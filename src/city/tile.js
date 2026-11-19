@@ -217,7 +217,7 @@ function pointInPoly(x, z, pts) {
   }
   return c;
 }
-function buildBuildings(t, B, boxes, foot, SB) {
+function buildBuildings(t, B, boxes, foot, SB, GB, junk) {
   t.b.forEach((rec, bi) => {
     const [rel, baseY, hgt, pitched, style, name, kind = 0] = rec;
     const pts = new Float32Array(rel.length);
@@ -290,6 +290,28 @@ function buildBuildings(t, B, boxes, foot, SB) {
           const c = SB.v(bx, y1, bz, best.ox, 0, best.oz, 1, 1, 1, flip ? su + 1 / 8 : su, sv + 1 / 16), d = SB.v(ax, y1, az, best.ox, 0, best.oz, 1, 1, 1, flip ? su : su + 1 / 8, sv + 1 / 16);
           if (flip) SB.quad(a, b, c, d); else SB.quad(b, a, d, c);
         }
+      }
+    }
+    // a little grit in the older and rougher parts of town: tags on walls, bags and a dumpster out back
+    const gritty = dist === 'west' || dist === 'riverfront' || kind === 4 || (dist === 'hilltop' && !pitched);
+    if (GB && gritty && !pitched && hash(seed + 21) < 0.35) {
+      for (let i = 0; i < n; i++) {
+        const x0 = pts[i * 2], z0 = pts[i * 2 + 1], x1 = pts[((i + 1) % n) * 2], z1 = pts[((i + 1) % n) * 2 + 1], L = Math.hypot(x1 - x0, z1 - z0);
+        if (L < 6 || hash(seed + i * 3) > 0.4) continue;
+        let ox = (z1 - z0) / L, oz = -(x1 - x0) / L;
+        if (pointInPoly((x0 + x1) / 2 + ox * 0.3, (z0 + z1) / 2 + oz * 0.3, pts)) { ox = -ox; oz = -oz; }
+        const ux = (x1 - x0) / L, uz = (z1 - z0) / L, w = 3.4, f = 0.2 + hash(seed + i) * 0.6, mx = x0 + ux * L * f + ox * 0.08, mz = z0 + uz * L * f + oz * 0.08;
+        const ti = Math.floor(hash(seed + i * 7) * 8), su = (ti % 4) / 4, sv = 1 - (Math.floor(ti / 4) + 1) / 2, flip = ux * oz - uz * ox > 0;
+        const y0 = baseY + 0.3, y1 = baseY + 2.1, ax = mx - ux * w / 2, az = mz - uz * w / 2, bx = mx + ux * w / 2, bz = mz + uz * w / 2;
+        const a = GB.v(ax, y0, az, ox, 0, oz, 1, 1, 1, flip ? su : su + 0.25, sv), b = GB.v(bx, y0, bz, ox, 0, oz, 1, 1, 1, flip ? su + 0.25 : su, sv);
+        const c = GB.v(bx, y1, bz, ox, 0, oz, 1, 1, 1, flip ? su + 0.25 : su, sv + 0.5), d = GB.v(ax, y1, az, ox, 0, oz, 1, 1, 1, flip ? su : su + 0.25, sv + 0.5);
+        if (flip) GB.quad(a, b, c, d); else GB.quad(b, a, d, c);
+        if (junk && hash(seed + i * 11) < 0.5) {
+          const jx = x0 + ux * L * (1 - f) + ox * 1.1, jz = z0 + uz * L * (1 - f) + oz * 1.1;
+          junk.push({ kind: 'dumpster', x: jx, z: jz, y: terrainHeight(jx, jz), h: Math.atan2(ux, uz) });
+          for (let k = 0; k < 3; k++) junk.push({ kind: 'bag', x: jx + ux * (1.6 + k * 0.5), z: jz + uz * (1.6 + k * 0.5), y: terrainHeight(jx, jz), h: k });
+        }
+        break;
       }
     }
     // roof
@@ -396,10 +418,11 @@ export function buildTile(t) {
   add(walkB.geometry(), M.walk, false);
   add(roadB.geometry(), M.road, false);
   add(markB.geometry(), M.mark, false);
-  const bB = new Buf(true), sB = new Buf(), boxes = [], foot = [];
-  buildBuildings(t, bB, boxes, foot, sB);
+  const bB = new Buf(true), sB = new Buf(), gB = new Buf(), boxes = [], foot = [], junk = [];
+  buildBuildings(t, bB, boxes, foot, sB, gB, junk);
   add(bB.geometry(), M.building, true);
   add(sB.geometry(), M.signs, false);
+  add(gB.geometry(), M.graffiti, false);
   const rB = new Buf(); buildRail(t, rB); add(rB.geometry(), M.rail, false);
   const trees = [];
   for (let i = 0; i < t.t.length; i += 4) {
@@ -409,5 +432,5 @@ export function buildTile(t) {
   }
   const lights = streetLights(t);
   for (const l of lights) boxes.push(makeBox(l.x, l.z, 1, 0, 0.12, 0.12, l.y - 0.5, 8));
-  return { group, boxes, trees, lights, foot };
+  return { group, boxes, trees, lights, foot, junk };
 }

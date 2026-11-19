@@ -121,6 +121,8 @@ function makeInstanced() {
   inst.arm = mk(new THREE.BoxGeometry(0.1, 0.1, 2.2).translate(0, 0, 1.1), poleMat, false);
   M.lamp = M.lamp || new THREE.MeshBasicMaterial({ color: 0xfff3c4 });
   inst.lamp = mk(new THREE.BoxGeometry(0.5, 0.16, 0.8), M.lamp, false);
+  inst.bag = mk(new THREE.IcosahedronGeometry(0.4, 0).scale(1, 0.75, 1).translate(0, 0.28, 0), new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.35 }), true);
+  inst.dumpster = mk(new THREE.BoxGeometry(1.9, 1.3, 1.1).translate(0, 0.65, 0), new THREE.MeshStandardMaterial({ color: 0x2e5d3a, roughness: 0.7, metalness: 0.3 }), true);
 }
 function ensure(name, n) {
   let m = inst[name];
@@ -134,8 +136,13 @@ function ensure(name, n) {
 }
 const GREENS = [0x4f7d32, 0x5b8a38, 0x46702c, 0x6a9440, 0x3f6a2c, 0x7a9a3c, 0x557f3a];
 function rebuildInstances() {
-  const all = { trees: [], lights: [] };
-  for (const b of built.values()) { all.trees.push(...b.trees); all.lights.push(...b.lights); }
+  const all = { trees: [], lights: [], junk: [] };
+  for (const b of built.values()) { all.trees.push(...b.trees); all.lights.push(...b.lights); all.junk.push(...(b.junk || [])); }
+  const bags = all.junk.filter((j) => j.kind === 'bag'), dumps = all.junk.filter((j) => j.kind === 'dumpster');
+  const bagM = ensure('bag', bags.length), dumpM = ensure('dumpster', dumps.length), oj = new THREE.Object3D();
+  bags.forEach((j, i) => { oj.position.set(j.x, j.y, j.z); oj.rotation.set(0, j.h, 0); oj.updateMatrix(); bagM.setMatrixAt(i, oj.matrix); });
+  dumps.forEach((j, i) => { oj.position.set(j.x, j.y, j.z); oj.rotation.set(0, j.h, 0); oj.updateMatrix(); dumpM.setMatrixAt(i, oj.matrix); });
+  bagM.count = bags.length; dumpM.count = dumps.length; bagM.instanceMatrix.needsUpdate = dumpM.instanceMatrix.needsUpdate = true;
   const T = all.trees, o = new THREE.Object3D(), c = new THREE.Color();
   const trunk = ensure('trunk', T.length), leafy = ensure('leafy', T.length), cone = ensure('cone', T.length), round = ensure('round', T.length);
   let nl = 0, nc = 0, nr = 0;

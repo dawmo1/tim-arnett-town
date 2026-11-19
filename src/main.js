@@ -11,8 +11,10 @@ import { initWalkers, updateWalkers, walkers, panicNear, spawnFleeing, scare, pr
 import { initEmergency, updateEmergency, reportDown } from './emergency.js';
 import { initLandmarks, updateLandmarks, doors, closedCrossings, trainCars, bargeList } from './landmarks.js';
 import * as interior from './interiors.js';
+import { initEvents, updateEvents, eventBlips } from './events.js';
+import { say, line } from './npc.js';
 import { initDayNight, updateDayNight, sky as weather, clockText, view as fogView } from './daynight.js';
-import { initLife, updateLife, startle } from './life.js';
+import { initLife, updateLife, startle, updateAnimals } from './life.js';
 import { glowMats } from './vehicles.js';
 import { initPhysics, updateRagdolls, ragdoll, release, ragPos, syncPhysics } from './ragdoll.js';
 import { initNav, updateNav } from './nav.js';
@@ -210,6 +212,7 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyN' && me.veh && !me.veh.T.bike) { const st = nextStation(); ui.flashPrompt(st.sub ? `📻 ${st.name} · ${st.sub}` : st.name); }
   if (/^Digit[0-9]$/.test(e.code)) { const n = +e.code.slice(5); selectWeapon(n === 0 ? 9 : n - 1); }
   if (e.code === 'KeyP') openPhone();
+  if (e.code === 'KeyG' || e.code === 'KeyH') talk(e.code === 'KeyG');
 });
 addEventListener('keyup', (e) => { keys.delete(e.code); if ((e.code === 'Tab' || e.code === 'KeyQ') && wheelOpen) closeWheel(true); });
 addEventListener('blur', () => { keys.clear(); mouseDown = false; });
@@ -288,7 +291,7 @@ ui.el.bigmap.addEventListener('click', (e) => {
 // ---------- GPS: a route along real streets to the waypoint ----------
 let gpsRoute = null, routeT = 0;
 function updateRoute(dt) {
-  if (!waypoint) { gpsRoute = null; return; }
+  if (!waypoint) { gpsRoute = null; gpsEl.hidden = true; return; }
   const x = me.veh ? me.veh.x : me.x, z = me.veh ? me.veh.z : me.z;
   routeT -= dt;
   if (gpsRoute) {
@@ -298,12 +301,41 @@ function updateRoute(dt) {
     const off = Math.hypot(gpsRoute[1][0] - x, gpsRoute[1][1] - z) > 45;
     if (routeT <= 0 && off) { gpsRoute = W.route(x, z, waypoint.x, waypoint.z); routeT = 3; }
   } else if (routeT <= 0) { gpsRoute = W.route(x, z, waypoint.x, waypoint.z); routeT = 3; }
+  gpsText(x, z);
+}
+// "In 120 m turn right onto Brady Street"
+const gpsEl = Object.assign(document.createElement('div'), { id: 'gpsNext', hidden: true });
+document.getElementById('hud').append(gpsEl);
+let gpsTextT = 0;
+function gpsText(x, z) {
+  gpsTextT -= 0.016; if (gpsTextT > 0) return; gpsTextT = 0.25;
+  const R = gpsRoute;
+  if (!R || R.length < 3 || !waypoint) { gpsEl.hidden = true; return; }
+  let dist = Math.hypot(R[1][0] - x, R[1][1] - z), msg = null;
+  for (let i = 1; i < R.length - 1; i++) {
+    const ax = R[i][0] - R[i - 1][0], az = R[i][1] - R[i - 1][1], bx = R[i + 1][0] - R[i][0], bz = R[i + 1][1] - R[i][1];
+    const la = Math.hypot(ax, az), lb = Math.hypot(bx, bz);
+    if (la > 0.5 && lb > 0.5) {
+      const turn = Math.atan2(ax * bz - az * bx, ax * bx + az * bz); // + = right (x east, z south)
+      if (Math.abs(turn) > 0.6) {
+        const q = W.nearestEdge(R[i][0] + (bx / lb) * Math.min(12, lb), R[i][1] + (bz / lb) * Math.min(12, lb), 10);
+        const onto = q && q.e.name ? ` onto ${q.e.name}` : '';
+        const dir = Math.abs(turn) > 2.4 ? 'Make a U-turn' : turn > 0 ? 'Turn right' : 'Turn left';
+        msg = `<b>${turn > 0 ? '↱' : '↰'}</b>${dist < 25 ? 'Now' : `In ${Math.round(dist / 10) * 10} m`} · ${dir}${onto}`;
+        break;
+      }
+    }
+    dist += lb;
+  }
+  if (!msg) msg = `<b>⚑</b>${dist < 60 ? 'Arriving at your waypoint' : `Waypoint in ${dist > 1000 ? (dist / 1000).toFixed(1) + ' km' : Math.round(dist / 10) * 10 + ' m'}`}`;
+  gpsEl.innerHTML = msg; gpsEl.hidden = false;
 }
 function mapBlips() {
   const b = [];
   for (const h of W.places.hospitals) b.push({ x: h.x, z: h.z, color: '#e5484d', size: 6, shape: 'square', label: '+', name: h.name.replace(/^MercyOne /, ''), dy: 12 });
   for (const p of W.places.police) b.push({ x: p.x, z: p.z, color: '#2f6fdc', size: 6, shape: 'square', label: '★', name: p.name });
   for (const s of storeList(true)) b.push(s);
+  for (const e of eventBlips()) b.push(e);
   for (const r of remotes.values()) if (!r.dead) b.push({ x: r.x, z: r.z, color: '#4aa3ff', size: 5, name: r.name });
   return b;
 }
@@ -386,7 +418,9 @@ playBtn.addEventListener('click', async () => {
   await enginesReady;
   // drop in somewhere random in the city (load the streets around you first)
   const sp = W.randomSpawn();
-  await W.preload(sp.x, sp.z, 260, (p) => { playBtn.textContent = `Loading Davenport… ${Math.round(p * 100)}%`; });
+  ui.el.menu.hidden = true; loading(true, W.areaAt(sp.x, sp.z)[0]);
+  await W.preload(sp.x, sp.z, 260, (p) => { loadProgress(p); playBtn.textContent = `Loading Davenport… ${Math.round(p * 100)}%`; });
+  loading(false);
   manageParked(0, sp.x, sp.z, true);
   me.name = name; me.look = randomLook();
   try { await joinRoom(room, name, me.look); }
@@ -402,6 +436,7 @@ playBtn.addEventListener('click', async () => {
   ui.help('Welcome to <b>Tim Arnett Town</b>. <kbd>WASD</kbd> to move, mouse to look. Press <kbd>Esc</kbd> or <kbd>M</kbd> for the map.', 7);
   ui.help('Walk up to any car and press <kbd>E</kbd>. If someone is driving, you will drag them out.', 6);
   ui.help('Hold <kbd>Tab</kbd> for the weapon wheel. Crimes seen by the cops or reported by witnesses give you stars.', 7);
+  ui.help('<kbd>G</kbd> says hi, <kbd>H</kbd> insults. <kbd>P</kbd> calls the mechanic. Hold <kbd>C</kbd> in a car to look back. An orange <b>!</b> on the map is a crime you can stop.', 8);
   ui.help('Looking for something to do? Press <kbd>Esc</kbd> and open <b>Goals</b> for crime sprees that pay cash. Click the map to set a GPS route.', 8);
   lockMouse();
 });
@@ -631,13 +666,25 @@ function die() {
   ui.el.dead.hidden = false;
   canvas.classList.add('dead');
 }
+// Loading screen: a slow pan over the city with the logo, a tip and a progress bar.
+const TIPS = ['Hold Tab for the weapon wheel.', 'Press M for the map, click it to set a GPS route.', "Stores, Arnett Arms, Tim's Threads and the casino have doors: press E.", 'Hide in a shop or a parking ramp to shake the cops faster.', 'P calls the mechanic: he drops a car off near you.', 'Hold C while driving to look behind you.', 'G says hi. H insults people. Some swing back.', "Freight trains don't stop. Neither do barges.", 'Re-elect Mayor Tim Arnett.'];
+const loadEl = Object.assign(document.createElement('div'), { id: 'loading', hidden: true });
+loadEl.innerHTML = '<h1>TIM ARNETT <span>TOWN</span></h1><p></p><div class="bar"><i></i></div>';
+document.body.append(loadEl);
+function loading(on, label) {
+  loadEl.hidden = !on;
+  if (on) { loadEl.querySelector('p').textContent = (label ? label + ' · ' : '') + TIPS[Math.floor(Math.random() * TIPS.length)]; loadEl.querySelector('i').style.width = '0%'; }
+}
+const loadProgress = (p) => { loadEl.querySelector('i').style.width = Math.round(p * 100) + '%'; };
 // After dying you wake up outside the nearest hospital (the streets there load first).
 let respawning = false;
 async function beginRespawn() {
   if (respawning) return;
   respawning = true;
   const sp = W.hospitalSpawn(me.x, me.z);
-  await W.preload(sp.x, sp.z, 200);
+  loading(true, sp.name || 'To the hospital');
+  await W.preload(sp.x, sp.z, 200, loadProgress);
+  loading(false);
   manageParked(0, sp.x, sp.z, true);
   respawn(false, sp);
   ui.addFeed(`Patched up at ${sp.name || 'the hospital'}`);
@@ -654,6 +701,26 @@ function respawn(first, sp) {
   ui.el.dead.hidden = true;
   canvas.classList.remove('dead');
   me.ch.g.rotation.set(0, me.h, 0);
+}
+
+// G: say hi to whoever's in front of you. H: insult them (some people swing back).
+function talk(nice) {
+  if (me.dead || me.veh || interior.room) return;
+  let best = null, bd = 7;
+  for (const w of walkers) {
+    if (w.dead || w.mode === 'flee' || w.mode === 'gone') continue;
+    const dx = w.x - me.x, dz = w.z - me.z, d = Math.hypot(dx, dz);
+    if (d < bd && Math.abs(angDiff(me.h, Math.atan2(dx, dz))) < 1) { bd = d; best = w; }
+  }
+  say(me, nice ? ['Hey!', 'Hi there!', "How's it going?", 'Nice day!'][Math.floor(Math.random() * 4)] : ['Nice shirt... not.', 'Move it!', 'What are you looking at?', 'Hey, loser!'][Math.floor(Math.random() * 4)]);
+  if (!best) return;
+  setTimeout(() => {
+    if (best.dead) return;
+    best.h = Math.atan2(me.x - best.x, me.z - best.z);
+    if (nice) say(best, line('greet'));
+    else if (best.temper !== 'normal' && Math.random() < 0.6) provoke(best);
+    else say(best, line('insulted'));
+  }, 500);
 }
 
 // ---------- vehicles: enter / exit ----------
@@ -1356,7 +1423,9 @@ function updateRemotes(dt) {
       const sw = r.y < W.SWIM_Y + 0.4;
       animateCharacter(r.ch, dt, { speed: r.speed, aim: wk === 'gun', swim: sw, dead: r.dead, weapon: sw ? 'none' : wk });
     }
-    r.tag.visible = !r.dead;
+    r.tagT = (r.tagT || 0) - dt;
+    if (r.tagT <= 0) { r.tagT = 0.3; const d = Math.hypot(r.x - camera.position.x, r.z - camera.position.z); r.tagOn = !r.dead && d < 40 && W.lineOfSight(camera.position.x, camera.position.y, camera.position.z, r.x, r.y + 2.2, r.z); }
+    r.tag.visible = !!r.tagOn;
   }
   for (const [uid, r] of remotes) if (!net.players[uid]) { scene.remove(r.ch.g); remotes.delete(uid); ui.addFeed(`${r.name} left`); }
 }
@@ -1630,6 +1699,12 @@ initEmergency(scene, {
   extinguish: (v) => { v.burnAt = 0; v.burnBy = ''; fx.stopFire(v.fire); v.fire = null; v.hp = Math.max(v.hp, -v.T.hp * 0.3); writeVeh(v, true); },
 });
 interior.initInteriors(scene);
+initEvents({
+  vehicles: () => vehicles,
+  add: (v) => { scene.add(v.mesh); vehicles.push(v); vehById.set(v.id, v); },
+  reward: (amount, text) => { addCash(amount); ui.announce('GOOD SAMARITAN', `${text} · +$${amount}`, '#7cf29a'); fx.soundCash(); },
+  alarm: (v) => { let n = 0; const iv = setInterval(() => { fx.soundHorn(distCam(v.x, v.z)); if (++n > 6) clearInterval(iv); }, 600); },
+});
 initLandmarks(scene, {
   onCasino: (door, face) => stores.push({ name: 'The Arnett Belle', kind: 'casino', x: door.x, z: door.z, face, cooldown: 0, progress: 0 }),
   addHeli: (x, y, z) => { const v = makeVehicle('heli-roof', V.HELI, 0x263238, { x, z, h: 0 }); v.y = y; v.keep = true; scene.add(v.mesh); vehicles.push(v); vehById.set(v.id, v); },
@@ -1708,6 +1783,7 @@ function updateHud(dt, t) {
     for (const h of W.places.hospitals) if (Math.abs(h.x - me.x) < 400 && Math.abs(h.z - me.z) < 400) blips.push({ x: h.x, z: h.z, color: '#e53935', size: 6, shape: 'square', label: '+' });
     for (const r of remotes.values()) if (!r.dead) blips.push({ x: r.x, z: r.z, color: '#40c4ff', size: 4.5 });
     for (const sb of storeList(false)) blips.push(sb);
+    for (const e of eventBlips()) blips.push(e);
     for (const u of police.cops.values()) if (!police.isDown(u)) { const P = police.posOf(u); blips.push({ x: P.x, z: P.z, color: flash, size: u.kind === 3 ? 6 : u.kind === 2 ? 2.5 : 4 }); }
     const spd = me.veh ? Math.abs(me.veh.speed) : 0;
     ui.drawMinimap({ x: me.veh ? me.veh.x : me.x, z: me.veh ? me.veh.z : me.z, yaw: camYaw }, me, blips, spd > 15 ? 0.75 : 1.1, wanted.search ? cones() : null, waypoint, gpsRoute);
@@ -1738,6 +1814,7 @@ function updateWorldLife(dt, nowMs, t) {
   for (const r of remotes.values()) threats.push({ x: r.x, z: r.z, r: 3.2 });
   for (const v of vehicles) if (v.speed > 3) threats.push({ x: v.x, z: v.z, r: 3.5 });
   updateLife(dt, threats, t);
+  updateAnimals(dt, playing ? { x: me.veh ? me.veh.x : me.x, z: me.veh ? me.veh.z : me.z } : null, threats, t);
   if (Math.random() < 0.25) {
     const c = camera.position;
     let wet = 0; for (const [ox, oz] of [[0, 0], [45, 0], [-45, 0], [0, 45], [0, -45]]) if (!W.isLand(c.x + ox, c.z + oz)) wet++;
@@ -1767,6 +1844,7 @@ function update(dt, t) {
   updateEmergency(dt, { x: me.veh ? me.veh.x : me.x, z: me.veh ? me.veh.z : me.z }, camView(), tSec);
   updateLandmarks(dt, tSec, { x: me.veh ? me.veh.x : me.x, z: me.veh ? me.veh.z : me.z }, weather.night);
   interior.updateRoom(dt, me, threatState);
+  updateEvents(dt, { x: me.veh ? me.veh.x : me.x, z: me.veh ? me.veh.z : me.z }, camView(), wanted.stars > 0 || !!interior.room);
   // hiding: inside a shop or a parking ramp they lose you faster, unless they know you're in there (you just robbed it)
   me.pinned = !!(interior.room && interior.room.store.alarmed);
   me.hiding = !me.pinned && (!!interior.room || (!me.veh && W.buildingKindAt(me.x, me.z) === 1) || (me.veh && W.buildingKindAt(me.veh.x, me.veh.z) === 1));

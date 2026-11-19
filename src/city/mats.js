@@ -158,6 +158,21 @@ function signAtlas(lit) {
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
   return t;
 }
+// spray-paint tags for older walls (4 x 2 grid)
+function graffitiAtlas() {
+  const c = document.createElement('canvas'); c.width = 1024; c.height = 512;
+  const g = c.getContext('2d'); const r = rng(77);
+  const TAGS = ['TIM!', 'QC', 'BIX', 'RIVR', 'IOWA', 'SK8', 'DVN', 'ARNT'];
+  for (let i = 0; i < 8; i++) {
+    const x = (i % 4) * 256, y = Math.floor(i / 4) * 256, col = ['#ff1744', '#00e5ff', '#76ff03', '#ffea00', '#d500f9', '#ff9100'][Math.floor(r() * 6)];
+    g.save(); g.translate(x + 128, y + 128); g.rotate((r() - 0.5) * 0.4);
+    g.font = `900 ${70 + r() * 30}px Impact, Arial Black`; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.lineWidth = 14; g.strokeStyle = '#111'; g.strokeText(TAGS[i], 0, 0); g.fillStyle = col; g.fillText(TAGS[i], 0, 0);
+    for (let k = 0; k < 6; k++) { g.fillStyle = col; g.fillRect(-90 + r() * 180, 30 + r() * 20, 3, 20 + r() * 40); } // drips
+    g.restore();
+  }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
 export const M = {};
 export function initMaterials() {
   if (M.building) return M;
@@ -168,6 +183,7 @@ export function initMaterials() {
   M.walk = new THREE.MeshStandardMaterial({ vertexColors: true, map: noiseTex(128, '#e4e1db', 0.12, 5, (g, s) => { g.fillStyle = 'rgba(80,80,80,.35)'; g.fillRect(0, 0, s, 2); g.fillRect(0, 0, 2, s); }), roughness: 0.92, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 });
   M.mark = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -6 });
   M.signs = new THREE.MeshStandardMaterial({ map: signAtlas(false), emissiveMap: signAtlas(true), emissive: 0xffffff, emissiveIntensity: 0, roughness: 0.5, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+  M.graffiti = new THREE.MeshStandardMaterial({ map: graffitiAtlas(), transparent: true, alphaTest: 0.3, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
   M.rail = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, metalness: 0.2, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
   M.water = new THREE.MeshStandardMaterial({ color: 0x3f6f7a, roughness: 0.12, metalness: 0.1, transparent: true, opacity: 0.93 });
   M.far = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 });
