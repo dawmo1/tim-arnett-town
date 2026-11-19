@@ -238,7 +238,7 @@ export function updateWalkers(dt, tSec, nowMs, cam) {
       if (w.panic > 0) { w.panic -= dt; w.extra += dt * w.speed * 2.6; }
       const p = walkerPose(w, tSec);
       w.x = p.x; w.z = p.z; w.h = p.h;
-      speed = w.call ? 0 : w.mode === 'fixed' ? 0 : w.act === 'jog' ? 7 : w.panic > 0 ? 6 : w.speed * 1.4;
+      speed = w.call ? 0 : w.mode === 'fixed' ? 0 : w.panic > 0 ? w.speed * 3.6 : w.speed * (w.act === 'jog' ? 1.6 : 1.4); // legs match how fast they really move
       if (w.fixed) pose = { sit: w.fixed.pose === 'sit', lie: w.fixed.pose === 'lie', chat: w.fixed.pose === 'chat', phone: w.fixed.pose === 'phone' };
     }
     const hidden = w.mode === 'gone' && !w.dead;

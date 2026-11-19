@@ -63,7 +63,8 @@ export function fleeTarget(a, x, z, fx, fz, dist = 35) {
   if (r.success) a.requestMoveTarget(r.randomPoint); else moveTo(a, tx, tz);
 }
 export function agentState(a) {
-  const p = a.interpolatedPosition, v = a.velocity();
+  // position(), not interpolatedPosition: the interpolated value only updates in fixed-step mode
+  const p = a.position(), v = a.velocity();
   return { x: p.x, z: p.z, vx: v.x, vz: v.z, speed: Math.hypot(v.x, v.z) };
 }
 export function updateNav(dt) { if (ready) crowd.update(Math.min(dt, 0.1)); }

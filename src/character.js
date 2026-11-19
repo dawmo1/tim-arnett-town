@@ -141,6 +141,7 @@ export function animateCharacter(c, dt, st) {
     return;
   }
   const sp = st.speed || 0;
+  c.animSpeed = sp; // remembered so we can spot anyone running in place
   c.walk += dt * (st.swim ? 4 : sp * 2.2);
   const amp = st.swim ? 1.4 : Math.min(1, sp / 4) * 0.75;
   const s = Math.sin(c.walk) * amp;
