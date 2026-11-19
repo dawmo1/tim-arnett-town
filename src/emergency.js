@@ -24,7 +24,7 @@ function spawnUnit(kind, tx, tz, target) {
   // fires can't wait: a truck already out on the streets nearby takes the call
   const sp = (base && kind === 'amb' && W.roadNear(base.x, base.z, tx, tz)) || (kind === 'fire' ? W.roadSpot(tx, tz, 90, 140) : W.roadSpot(tx, tz, 170, 260));
   if (!sp) return null;
-  const v = makeVehicle('e' + nextId++, kind === 'amb' ? V.AMBULANCE : V.FIRE, kind === 'amb' ? 0xf4f4f4 : 0xc62828, sp);
+  const v = makeVehicle(ctx.newId ? ctx.newId('e') : 'e' + nextId++, kind === 'amb' ? V.AMBULANCE : V.FIRE, kind === 'amb' ? 0xf4f4f4 : 0xc62828, sp);
   v.mode = 'service'; v.npcDriver = true; v.sirenOn = true;
   ctx.add(v);
   const u = { kind, v, target, state: 'drive', pathT: 0, path: null, pi: 0, crew: [], t: 0, stuck: 0 };

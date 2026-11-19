@@ -5,7 +5,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import * as W from './world.js';
 import { makeCharacter, animateCharacter, placeCharacter, randomLook, nameTag, mat } from './character.js';
-import { createAllVehicles, makeParked, makeVehicle, V, initFarCars, farCarsBegin, farCarAdd, farCarsEnd, stepVehicle, collideVehicles, pushCharOut, circles, charVehicle, makeVehicleMesh, damageZone, applyDamageVisual, applyBump } from './vehicles.js';
+import { createAllVehicles, makeParked, makeVehicle, V, TYPES, initFarCars, farCarsBegin, farCarAdd, farCarsEnd, stepVehicle, collideVehicles, pushCharOut, circles, charVehicle, makeVehicleMesh, damageZone, applyDamageVisual, applyBump } from './vehicles.js';
 import { initTraffic, updateTraffic as tickTraffic, bumpTraffic, scareTraffic, updateSignals, traffic, patrolViewers } from './traffic.js';
 import { initWalkers, updateWalkers, walkers, panicNear, spawnFleeing, scare, provoke, setNpcContext, cartNear, revive } from './npc.js';
 import { initEmergency, updateEmergency, reportDown } from './emergency.js';
@@ -445,7 +445,13 @@ playBtn.addEventListener('click', async () => {
 net.handlers.chat = (c) => c && ui.addChat(String(c.n || '?').slice(0, 16), String(c.m || '').slice(0, 120));
 net.handlers.cops = (obj) => { if (!isHost) police.applyRemote(obj); };
 net.handlers.vehicle = (id, rec) => {
-  const v = vehById.get(id);
+  let v = vehById.get(id);
+  if (!v && rec && Number.isInteger(rec.ti) && rec.ti >= 0 && rec.ti < V_COUNT) {
+    // a car another player is using that we haven't seen yet
+    v = makeVehicle(id, rec.ti, typeof rec.c === 'number' ? rec.c : 0xffffff, { x: +rec.x || 0, z: +rec.z || 0, h: +rec.h || 0 });
+    for (const o of [...vehicles]) if (o.mode === 'parked' && !o.keep && Math.hypot(o.x - v.x, o.z - v.z) < 3) resetVehicle(o); // our copy of the same kerb car
+    v.mode = 'free'; v.remote = true; scene.add(v.mesh); vehicles.push(v); vehById.set(id, v);
+  }
   if (!v || !rec) return;
   v.touchedAt = net.now();
   if (me.veh === v) {
@@ -489,7 +495,7 @@ function writeVeh(v, force) {
   if (!force && n - v.lastWrite < 100) return;
   v.lastWrite = n;
   v.touchedAt = net.now();
-  setVehicle(v.id, { x: r1(v.x), y: r2(v.y), z: r1(v.z), h: r2(v.h), hp: Math.round(v.hp), d: v.driver || '', b: v.burnAt || 0, bb: v.burnBy || '', e: v.exploded ? 1 : 0, dz: [v.dz.f, v.dz.b, v.dz.l, v.dz.r].map(Math.round) });
+  setVehicle(v.id, { ti: v.ti, c: v.color, x: r1(v.x), y: r2(v.y), z: r1(v.z), h: r2(v.h), hp: Math.round(v.hp), d: v.driver || '', b: v.burnAt || 0, bb: v.burnBy || '', e: v.exploded ? 1 : 0, dz: [v.dz.f, v.dz.b, v.dz.l, v.dz.r].map(Math.round) });
 }
 function resetVehicle(v) {
   if (me.veh === v) return;
@@ -499,6 +505,10 @@ function resetVehicle(v) {
   vehById.delete(v.id);
   if (v.spotKey) usedSpots.delete(v.spotKey);
 }
+const V_COUNT = TYPES.length;
+// Vehicles this player spawns get ids nobody else uses (a<uid>_<tag><n>); landmark ones are shared.
+let idN = 0;
+const newId = (tag = '') => `a${(net.uid || 'me').replace(/[^A-Za-z0-9]/g, '').slice(0, 28)}_${tag}${idN++}`;
 // ---------- parked cars on real curbs and lots around you ----------
 const usedSpots = new Set();
 let parkT = 0, parkN = 0;
@@ -507,7 +517,7 @@ function manageParked(dt, x, z, force) {
   parkT -= dt; if (parkT > 0 && !force) return; parkT = 2.5;
   const R = activeQuality === 'low' ? 170 : 240, want = activeQuality === 'low' ? 18 : activeQuality === 'medium' ? 32 : 44;
   for (const v of [...vehicles]) {
-    if (v === me.veh || v.driver || v.localSim || v.keep) continue;
+    if (v === me.veh || v.driver || v.localSim || v.keep || v.remote) continue;
     const d = Math.hypot(v.x - x, v.z - z);
     if ((v.mode === 'parked' && !v.stolenOnce && d > R + 120) || (v.mode === 'free' && d > 480)) resetVehicle(v);
   }
@@ -529,7 +539,7 @@ function manageParked(dt, x, z, force) {
   for (const c of cand) {
     if (have >= want) break;
     if (vehicles.some((v) => Math.abs(v.x - c.x) < 5 && Math.abs(v.z - c.z) < 5)) continue;
-    const v = makeParked(`a${net.uid || 'me'}_${parkN++}`, c, () => spotHash(c.x, c.z + parkN));
+    const v = makeParked(newId(), c, () => spotHash(c.x, c.z + parkN++));
     v.spotKey = c.key; usedSpots.add(c.key);
     scene.add(v.mesh); vehicles.push(v); vehById.set(v.id, v); have++;
   }
@@ -1569,7 +1579,7 @@ function openPhone() {
 let deliverN = 0;
 function deliverCar(ti, label) {
   const sp = W.roadSpot(me.x, me.z, 25, 60) || { x: me.x + 6, z: me.z, h: 0 };
-  const v = makeVehicle(`a${net.uid || 'me'}_d${deliverN++}`, ti, [0xc62828, 0x1565c0, 0x111214, 0xf2f2f0, 0xe0a526][Math.floor(Math.random() * 5)], sp);
+  const v = makeVehicle(newId('d'), ti, [0xc62828, 0x1565c0, 0x111214, 0xf2f2f0, 0xe0a526][Math.floor(Math.random() * 5)], sp);
   v.stolenOnce = true; v.keep = true; scene.add(v.mesh); vehicles.push(v); vehById.set(v.id, v);
   waypoint = { x: sp.x, z: sp.z }; gpsRoute = null; routeT = 0;
   ui.addFeed(`Your ${label} is parked nearby (follow the GPS)`);
@@ -1686,12 +1696,14 @@ setNpcContext({
   shot: (w, to) => { const from = { x: w.x + Math.sin(w.h) * 0.5, y: (w.y || 0) + 1.4, z: w.z + Math.cos(w.h) * 0.5 }; fx.tracer(from, to); fx.muzzleFlash(from); fx.soundShot('pistol', distCam(w.x, w.z)); },
 });
 initTraffic(scene, {
+  newId,
   vehicles: () => allCars,
   add: (v) => { scene.add(v.mesh); vehicles.push(v); vehById.set(v.id, v); },
   remove: (v) => resetVehicle(v),
   honk: (v) => fx.soundHorn(distCam(v.x, v.z)),
 });
 initEmergency(scene, {
+  newId,
   vehicles: () => vehicles,
   add: (v) => { scene.add(v.mesh); vehicles.push(v); vehById.set(v.id, v); },
   remove: (v) => resetVehicle(v),
@@ -1700,6 +1712,7 @@ initEmergency(scene, {
 });
 interior.initInteriors(scene);
 initEvents({
+  newId,
   vehicles: () => vehicles,
   add: (v) => { scene.add(v.mesh); vehicles.push(v); vehById.set(v.id, v); },
   reward: (amount, text) => { addCash(amount); ui.announce('GOOD SAMARITAN', `${text} · +$${amount}`, '#7cf29a'); fx.soundCash(); },
@@ -1708,7 +1721,7 @@ initEvents({
 initLandmarks(scene, {
   onCasino: (door, face) => stores.push({ name: 'The Arnett Belle', kind: 'casino', x: door.x, z: door.z, face, cooldown: 0, progress: 0 }),
   addHeli: (x, y, z) => { const v = makeVehicle('heli-roof', V.HELI, 0x263238, { x, z, h: 0 }); v.y = y; v.keep = true; scene.add(v.mesh); vehicles.push(v); vehById.set(v.id, v); },
-  addBoat: (x, z, h) => { const v = makeVehicle('boat' + vehicles.length + '_' + Math.round(x), V.BOAT, [0xffffff, 0xe5484d, 0x1e88e5][Math.floor(Math.random() * 3)], { x, z, h }); v.y = W.WATER_Y - 0.35; v.keep = true; scene.add(v.mesh); vehicles.push(v); vehById.set(v.id, v); },
+  addBoat: (x, z, h) => { const v = makeVehicle(`boat_${Math.round(x)}_${Math.round(z)}`, V.BOAT, [0xffffff, 0xe5484d, 0x1e88e5][Math.floor(Math.random() * 3)], { x, z, h }); v.y = W.WATER_Y - 0.35; v.keep = true; scene.add(v.mesh); vehicles.push(v); vehById.set(v.id, v); },
   horn: (x, z) => fx.soundHorn(distCam(x, z) * 0.6),
 });
 police.initPolice(scene, {

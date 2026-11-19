@@ -1,6 +1,6 @@
 # Tim Arnett Town
 
-A free multiplayer 3D island sandbox that runs in the browser. Steal cars, cause chaos, run from the cops, all on one long tropical key named after a local legend.
+A free multiplayer 3D open-world sandbox that runs in the browser, set in **Davenport, Iowa at full 1:1 scale**: the real streets, hills, buildings and riverfront, streamed in as you move. Steal cars, rob stores, run from the cops, and keep an eye out for Mayor Tim Arnett's billboards.
 
 **Play:** https://dawmo1.github.io/tim-arnett-town/
 
@@ -13,35 +13,29 @@ Everyone who types the same **room code** ends up in the same game. You can also
 | WASD | Move / drive |
 | Mouse | Look and aim (click the game first) |
 | Click | Attack / shoot |
-| Hold Tab or Q | Weapon wheel (move the mouse, release to equip). 1–7 or scroll also work |
-| Right click | Aim (zooms in and locks onto nearby targets) |
+| Hold Tab or Q | Weapon wheel (move the mouse, release to equip). 1–0 or scroll also work |
+| Right click | Aim (zooms in and locks onto nearby targets; the sniper zooms further) |
 | R | Reload |
-| Shift (driving) | Nitro. In the helicopter: descend (Space climbs) |
-| N | Change radio station |
-| Esc or M | Pause menu: map and waypoints, goals, players, controls, settings |
-| Shift | Sprint |
+| Shift | Sprint. Driving: nitro. Helicopter: descend (Space climbs) |
 | Space | Jump / handbrake |
-| E | Get in or out of a vehicle (steals it if someone's driving) |
+| E | Get in or out of a vehicle (yanks the driver out) · go into shops, take stairs, use counters |
+| C (driving) | Look behind |
+| P | Phone: call the mechanic to drop off a car |
+| G / H | Say hi / insult someone (some swing back) |
+| N | Change radio station |
+| Esc or M | Pause menu: map and GPS, goals, players, controls, settings |
 | T | Chat |
-| H | Controls help |
 
-**Wanted level** works on witnesses and how bad the crime was:
-- Punching someone or stealing a parked car only counts if a cop sees it.
-- Gunfire counts if a cop hears it, or a bystander may call it in.
-- Killing someone: a bystander phones the cops (2 stars, unless you stop them), or 3 stars if a cop sees it.
-- Attacking a cop: 3. Killing a cop: 4. Keep killing cops (or down the helicopter) and it climbs to 5.
+## What's in Davenport
 
-When no cop can see you, the stars flash and the police search your last known spot. Their vision cones show on the minimap (walls block them). Stay out of every cone until the stars clear.
-
-Getting into a car takes a moment: you walk to the door, open it and yank out whoever's driving. You can't grab a car that's moving. Jump out of a fast car and you'll tumble.
-
-Traffic stops for people in the road, unless you're wanted or just attacked someone.
-
-**Money and things to do:** you start with $200. Earn cash from stunt jumps, robbing stores (stand at the door and hold your aim on the clerk; the alarm brings the cops), whatever people drop, the 15 hidden Tim gnomes, and the Goals list in the pause menu. Spend it at Arnett Arms (guns, ammo, body armor), the clinic pharmacy (health) and Arnett Auto (repair and respray, which also shakes off searching cops). There are speedboats at the docks and a helicopter on the beach helipad.
-
-**Living world:** one day lasts 24 real minutes and the weather changes every 6 (clear, cloudy, rain, thunderstorms), the same for everyone in the room. At night windows light up, streetlights glow and cars run their headlights. Rain makes the roads slippery. Townspeople walk dogs, jog, sit on benches, sunbathe, chat and talk on the phone. When trouble starts they run, cower, call the cops, and some fight back with fists or a pistol. Pigeons scatter, gulls circle the beach and ducks paddle by the docks.
-
-Find the yellow-and-black stunt ramps on the beach, at the far tip, and at the end of the broken bridge. Yes, you can jump it.
+- **The city:** downtown and the riverfront, the East Village, Hilltop and Vander Veer, Brady, Harrison and Main up to Kimberly Road and NorthPark, and west Davenport. Real elevation, so the bluffs are steep. Illinois is across the river; the Centennial and Government bridges end at **ROAD CLOSED** halfway over.
+- **Landmarks:** Centennial Bridge's arches, the Skybridge (lit at night), Modern Woodmen Park with its Ferris wheel, the LeClaire Park bandshell, the Adler Theatre, Hotel Blackhawk, the Figge, Palmer College, the Vander Veer fountain, NorthPark, and a freight train down 5th Street with crossing gates. Barge tows work the Mississippi. Shops have made-up names; public landmarks keep theirs.
+- **Traffic** follows the real lanes, one-way streets, traffic lights and stop signs, pulls over for sirens and floors it away from gunfire. Lots of parked cars to steal, plus taxis, buses, garbage and tow trucks, limos, muscle cars and the odd monster truck.
+- **People** walk the sidewalks and cross at corners on the walk signal: office workers downtown, students by Palmer, shoppers at NorthPark, joggers and dog walkers on the riverfront, bus stops, buskers, hot dog carts (buy one to heal), road crews, crowds at the ballpark and bandshell in the evening and outside bars at night. Squirrels, rabbits and cats too.
+- **Police** patrol with traffic and give you a star the moment they see a crime. Units roll out of the real police stations and route along the streets; the helicopter lifts off the station roof. Ambulances revive people who went down nearby, fire trucks put out burning cars.
+- **Crime and money:** rob 15 corner stores and gas stations (hold a gun on the clerk) or the **Arnett Belle** riverboat casino. Buy guns at Arnett Arms (knife, crowbar, pistol, SMG, shotgun, rifle, sniper, grenades, Molotovs, RPG), clothes at Tim's Threads, and upgrades at Arnett Auto (paint, rims, engine, brakes, tires, nitro, armor, bulletproof tires). A helicopter waits on a downtown rooftop: take the roof-access stairs. Stop muggings, purse snatchers and car thieves for a reward.
+- **Wanted level** works on witnesses: a cop has to see it or a bystander has to call it in. To shake the cops, get out of every vision cone (they show on the minimap while they search). Hiding inside a shop or a parking ramp loses them faster, unless they know you're in the place you just robbed. Respraying only repairs the car now.
+- **Living world:** a day lasts 24 real minutes and the weather changes (clear, cloudy, rain, storms), the same for everyone in the room. At night windows and shop signs light up, there are fewer people and more cops, and the odd drunk driver.
 
 ## Turn on multiplayer (one-time, about 5 minutes)
 
@@ -72,7 +66,15 @@ Then open http://localhost:8765. Open two browser tabs with the same room code t
 
 ## How it works
 
-- Plain HTML + JavaScript with no build step. Libraries are bundled into `vendor/` (three.js for 3D, Rapier for ragdoll physics, Recast for NPC navigation), so the game loads nothing from CDNs. To update them: `cd tools && npm install && npm run vendor`.
-- Each player's browser sends its own position 10 times a second. Walkers and traffic follow the same clock-driven routes on every computer, so only events (a walker dies, a car gets stolen) go over the network.
-- The player who joined first runs the police for everyone. If they leave, the next player takes over.
+- Plain HTML + JavaScript with no build step. Libraries are bundled into `vendor/` (three.js for 3D, Rapier for ragdoll physics), so the game loads nothing from CDNs. To update them: `cd tools && npm install && npm run vendor`.
+- **The map** is baked once from OpenStreetMap and open elevation data by `tools/build-map.mjs` into `data/`: 200 m tiles (ground heights and land use, building footprints, trees, parking spots), the road graph (lanes, one-ways, signals, stop signs, names), the railways and a low-detail overview. The game streams tiles around you (a small first load, the rest in the background) and builds each one a few milliseconds per frame. To rebuild it: `cd tools && npm install && npm run fetch && npm run map`.
+- **Graphics settings:** Low (no shadows or bloom, shorter view, fewer cars and people) is meant for school Chromebooks; Auto drops a level if the game runs slowly.
+- Traffic and pedestrians are local to each player. A car you interact with (steal, crash, set on fire) gets its own id and syncs to everyone. Traffic lights, trains, barges, time and weather run on a shared clock, so everyone sees the same thing.
+- Each player's browser sends its own position 10 times a second. The player who joined first runs the police for everyone; if they leave, the next player takes over.
 - It trusts each player's own computer, which is fine for friends but not cheat-proof.
+
+## Credits
+
+- Map data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors, available under the Open Database License (ODbL).
+- Elevation from the [AWS Open Data Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) (USGS and other public sources).
+- Business names in the game are made up. Tim Arnett is not actually the mayor. Yet.

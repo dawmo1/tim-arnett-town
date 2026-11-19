@@ -349,6 +349,8 @@ export function drawBigMap(me, blips, waypoint, route) {
   bm.fillStyle = 'rgba(0,0,0,.55)'; bm.fillRect(8, Ht - 26, 330, 18);
   bm.fillStyle = '#fff'; bm.font = '12px system-ui'; bm.textAlign = 'left'; bm.textBaseline = 'middle';
   bm.fillText('Scroll to zoom · drag to move · click to set a waypoint', 14, Ht - 17);
+  bm.textAlign = 'right'; bm.fillStyle = 'rgba(0,0,0,.55)'; bm.fillRect(Wd - 250, Ht - 22, 244, 16);
+  bm.fillStyle = '#fff'; bm.font = '11px system-ui'; bm.fillText('Map data © OpenStreetMap contributors', Wd - 12, Ht - 14);
 }
 const canvasPt = (ev) => { const r = el.bigmap.getBoundingClientRect(); return [((ev.clientX - r.left) / r.width) * el.bigmap.width, ((ev.clientY - r.top) / r.height) * el.bigmap.height]; };
 export function bigMapToWorld(ev) {

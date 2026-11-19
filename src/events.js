@@ -56,8 +56,8 @@ function startFenderBender(focus, cam) {
   const p = spot(focus, cam, 70, 140); if (!p) return false;
   const q = p.q, e = q.e; if (e.lf === 0 || e.lb === 0 || e.width < 7) return false;
   const lane = e.width / 4, hx = Math.sin(q.h), hz = Math.cos(q.h), rx = -Math.cos(q.h), rz = Math.sin(q.h);
-  const a = makeVehicle('fb' + Math.random().toString(36).slice(2, 7), [V.SEDAN, V.SUV, V.HATCH, V.PICKUP][Math.floor(Math.random() * 4)], CAR_COLORS[Math.floor(Math.random() * CAR_COLORS.length)], { x: q.x + rx * lane, z: q.z + rz * lane, h: q.h + 0.25 });
-  const b = makeVehicle('fb' + Math.random().toString(36).slice(2, 7), [V.SEDAN, V.MINIVAN, V.HATCH][Math.floor(Math.random() * 3)], CAR_COLORS[Math.floor(Math.random() * CAR_COLORS.length)], { x: q.x + rx * lane + hx * 4.6, z: q.z + rz * lane + hz * 4.6, h: q.h - 0.15 });
+  const a = makeVehicle(ctx.newId('f'), [V.SEDAN, V.SUV, V.HATCH, V.PICKUP][Math.floor(Math.random() * 4)], CAR_COLORS[Math.floor(Math.random() * CAR_COLORS.length)], { x: q.x + rx * lane, z: q.z + rz * lane, h: q.h + 0.25 });
+  const b = makeVehicle(ctx.newId('f'), [V.SEDAN, V.MINIVAN, V.HATCH][Math.floor(Math.random() * 3)], CAR_COLORS[Math.floor(Math.random() * CAR_COLORS.length)], { x: q.x + rx * lane + hx * 4.6, z: q.z + rz * lane + hz * 4.6, h: q.h - 0.15 });
   for (const v of [a, b]) { v.mode = 'free'; v.keep = true; ctx.add(v); }
   damageZone(a, a.x + hx * 2.2, a.z + hz * 2.2, 25); damageZone(b, b.x - hx * 2.2, b.z - hz * 2.2, 25);
   const off = e.width / 2 + 1.2;

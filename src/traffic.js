@@ -81,7 +81,7 @@ function trySpawn(fx, fz, R, cam, night, patrol = false) {
     if (cam && d < 220) { const dx = p.x - cam.x, dz = p.z - cam.z, l = Math.hypot(dx, dz) || 1; if ((dx * cam.fx + dz * cam.fz) / l > 0.35) continue; }
     if (ctx.vehicles().some((v) => Math.abs(v.x - p.x) < 14 && Math.abs(v.z - p.z) < 14)) continue;
     const r = Math.random(), ti = patrol ? V.POLICE : chooseType(p.x, p.z, night, r);
-    const v = makeVehicle('t' + nextId++, ti, patrol ? 0xffffff : colorFor(ti, Math.random()), { x: p.x, z: p.z, h: p.h });
+    const v = makeVehicle(ctx.newId ? ctx.newId('t') : 't' + nextId++, ti, patrol ? 0xffffff : colorFor(ti, Math.random()), { x: p.x, z: p.z, h: p.h });
     v.mode = 'traffic'; v.patrol = patrol;
     v.ag = { e, dir, lane, s, off, offT: off, speed: e.speed * 0.6, phase: 'edge', temper: 0.85 + Math.random() * 0.25, next: null, blockT: 0, honkT: 0, drunk: night && Math.random() < 0.05 };
     ctx.add(v);

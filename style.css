@@ -168,6 +168,8 @@ button { font: inherit; }
 #nitro i { display: block; height: 100%; background: #6fd3ff; }
 #vdmg { height: 4px; width: 120px; background: rgba(0,0,0,.5); margin-left: auto; margin-top: 4px; }
 #vdmg i { display: block; height: 100%; }
+.credit { margin-top: 8px; font-size: 11px; color: var(--muted); }
+.credit a { color: inherit; }
 #gpsNext { position: absolute; left: 14px; bottom: 214px; padding: 6px 10px; background: rgba(8,12,18,.78); color: #fff; font: 600 14px Inter, system-ui, sans-serif; border-left: 3px solid #b678ff; border-radius: 3px; max-width: 300px; }
 #gpsNext b { font: 400 20px var(--display); margin-right: 6px; color: #d4b3ff; }
 #loading { position: fixed; inset: 0; z-index: 40; display: flex; flex-direction: column; justify-content: flex-end; padding: 0 6vw 7vh; background: linear-gradient(to top, rgba(5,8,14,.92) 0%, rgba(5,8,14,.35) 45%, rgba(5,8,14,0) 70%); pointer-events: none; }

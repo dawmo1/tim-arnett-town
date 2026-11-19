@@ -11,14 +11,17 @@
         },
         "vehicles": {
           "$vid": {
-            ".write": "auth != null && $room.matches(/^[A-Z0-9]{1,6}$/) && $vid.matches(/^[pt][0-9]{1,3}$/)"
+            ".write": "auth != null && $room.matches(/^[A-Z0-9]{1,6}$/) && $vid.matches(/^(a[A-Za-z0-9]{1,40}_[a-z]?[0-9]{1,7}|heli-roof|boat_-?[0-9]{1,5}_-?[0-9]{1,5})$/)",
+            ".validate": "!newData.exists() || (newData.child('x').isNumber() && newData.child('z').isNumber())"
           }
         },
         "cops": {
           ".write": "auth != null && $room.matches(/^[A-Z0-9]{1,6}$/)"
         },
         "events": {
-          ".indexOn": ["t"],
+          ".indexOn": [
+            "t"
+          ],
           "$e": {
             ".write": "auth != null && $room.matches(/^[A-Z0-9]{1,6}$/) && (newData.exists() ? newData.child('from').val() === auth.uid : data.child('from').val() === auth.uid)"
           }
