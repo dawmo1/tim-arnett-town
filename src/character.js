@@ -103,6 +103,14 @@ export function animateCharacter(c, dt, st) {
     c.shL.rotation.x = -1.2; c.shR.rotation.x = -1.2;
     return;
   }
+  if (st.reach || st.pull !== undefined) {
+    // reaching for a car door / dragging a driver out
+    const k = st.pull !== undefined ? Math.sin(Math.min(1, st.pull) * Math.PI) : 0;
+    c.shL.rotation.x = c.shR.rotation.x = -1.4 + k * 0.6;
+    c.hipL.rotation.x = 0.3 * k; c.hipR.rotation.x = -0.2 * k;
+    c.body.rotation.x = -0.25 * k;
+    return;
+  }
   const sp = st.speed || 0;
   c.walk += dt * (st.swim ? 4 : sp * 2.2);
   const amp = st.swim ? 1.4 : Math.min(1, sp / 4) * 0.75;
@@ -113,6 +121,7 @@ export function animateCharacter(c, dt, st) {
   if (st.swing > 0) c.shR.rotation.x = -Math.PI / 2 - Math.sin(st.swing * Math.PI) * 1.4 + 0.6;
   else if (st.aim) c.shR.rotation.x = -Math.PI / 2;
   else c.shR.rotation.x = st.swim ? -Math.PI / 2 + Math.sin(c.walk + Math.PI) * 1.2 : s * 0.8;
+  if (st.phone) { c.shL.rotation.x = -2.6; c.shL.rotation.z = -0.5; }
 }
 
 export function nameTag(text, color = '#ffffff') {

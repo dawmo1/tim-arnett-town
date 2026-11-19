@@ -51,7 +51,9 @@ export function addChat(name, msg) {
   while (el.chatLog.children.length > 8) el.chatLog.firstChild.remove();
   setTimeout(() => li.classList.add('old'), 15000);
 }
-export function setPrompt(t) { el.prompt.textContent = t || ''; el.prompt.hidden = !t; }
+let promptHold = 0;
+export function setPrompt(t) { if (performance.now() < promptHold) return; el.prompt.textContent = t || ''; el.prompt.hidden = !t; }
+export function flashPrompt(t) { el.prompt.textContent = t; el.prompt.hidden = false; promptHold = performance.now() + 1500; }
 export function setPlayers(room, list, online) {
   el.roomInfo.textContent = online ? `Room ${room}` : 'Solo mode';
   el.playerList.innerHTML = '';
@@ -158,7 +160,7 @@ export function drawMapBase() {
   for (const r of W.ramps) { g.beginPath(); g.arc(mx(r.x), mz(r.z), 3, 0, 7); g.fill(); }
 }
 // view: {x, z, yaw}; blips: [{x, z, color, size, h}]
-export function drawMinimap(view, me, blips, zoom = 1) {
+export function drawMinimap(view, me, blips, zoom = 1, cones = null) {
   const S = el.minimap.width, c = S / 2, k = zoom;
   const alpha = -Math.PI / 2 - Math.atan2(Math.cos(view.yaw), Math.sin(view.yaw));
   mm.save();
@@ -175,6 +177,19 @@ export function drawMinimap(view, me, blips, zoom = 1) {
     if (d > lim) { sx *= lim / d; sy *= lim / d; }
     return [c + sx, c + sy];
   };
+  // police vision cones (only while they're searching for you); already cut off by buildings
+  if (cones) {
+    const raw = (x, z) => { const dx = (x - view.x) * SCALE * k, dz = (z - view.z) * SCALE * k; return [c + dx * Math.cos(alpha) - dz * Math.sin(alpha), c + dx * Math.sin(alpha) + dz * Math.cos(alpha)]; };
+    mm.save(); mm.beginPath(); mm.arc(c, c, c, 0, 7); mm.clip();
+    for (const cn of cones) {
+      mm.fillStyle = 'rgba(255, 64, 64, 0.28)'; mm.strokeStyle = 'rgba(255, 64, 64, 0.6)'; mm.lineWidth = 1;
+      mm.beginPath();
+      if (cn.heli) { const [hx, hy] = raw(cn.x, cn.z); mm.arc(hx, hy, cn.r * SCALE * k, 0, 7); }
+      else { const [sx, sy] = raw(cn.x, cn.z); mm.moveTo(sx, sy); for (const p of cn.pts) { const [px, py] = raw(p[0], p[1]); mm.lineTo(px, py); } mm.closePath(); }
+      mm.fill(); mm.stroke();
+    }
+    mm.restore();
+  }
   for (const b of blips) {
     const [x, y] = toScreen(b.x, b.z);
     mm.fillStyle = b.color; mm.strokeStyle = 'rgba(0,0,0,.6)'; mm.lineWidth = 1.5;

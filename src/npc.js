@@ -54,11 +54,17 @@ export function updateWalkers(dt, tSec, nowMs, cam) {
     if (far) continue;
     w.ch.g.position.set(w.x, 0, w.z);
     w.ch.g.rotation.y = w.h;
-    animateCharacter(w.ch, dt, { speed: w.panic > 0 ? 6 : w.speed * 1.4, dead: !!w.dead });
+    animateCharacter(w.ch, dt, { speed: w.call ? 0 : w.panic > 0 ? 6 : w.speed * 1.4, dead: !!w.dead, phone: !!w.call });
   }
   for (let i = fleeing.length - 1; i >= 0; i--) {
     const f = fleeing[i];
     f.t -= dt;
+    if (f.down > 0) { // dragged out and thrown on the ground, then scrambles up
+      f.down -= dt;
+      f.ch.g.position.set(f.x, 0, f.z); f.ch.g.rotation.y = f.h + Math.PI;
+      animateCharacter(f.ch, dt, { dead: true });
+      continue;
+    }
     const p = W.pushOutCircle(f.x + Math.sin(f.h) * 6 * dt, f.z + Math.cos(f.h) * 6 * dt, 0.4);
     f.x = p.x; f.z = p.z;
     f.ch.g.position.set(f.x, 0, f.z); f.ch.g.rotation.y = f.h;
@@ -71,8 +77,8 @@ export function panicNear(x, z, radius) {
   for (const w of walkers) if (!w.dead && Math.hypot(w.x - x, w.z - z) < radius) w.panic = 6;
 }
 
-export function spawnFleeing(x, z, h) {
+export function spawnFleeing(x, z, h, down = 0) {
   const ch = makeCharacter(randomLook());
   scene.add(ch.g);
-  fleeing.push({ ch, x, z, h, t: 7 });
+  fleeing.push({ ch, x, z, h, t: 7 + down, down });
 }

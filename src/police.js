@@ -96,13 +96,14 @@ export function hostUpdate(dt, players) {
         if (u.kind === 0 && !isDown(u)) have++;
         if (u.kind === 3 && !u.dead) heli = true;
       }
-      const sd = W.toSD(p.x, p.z);
+      const sd = p.search ? W.toSD(p.lkx, p.lkz) : W.toSD(p.x, p.z);
       if (have < want) {
         let dir = Math.random() < 0.5 ? -1 : 1;
         if (sd.s + dir * 180 < 15 || sd.s + dir * 180 > W.L - 15) dir = -dir;
         const s = clamp(sd.s + dir * 180, 15, W.L - 15);
         const q = W.P(s, Math.random() < 0.5 ? 3.5 : -3.5);
         spawnCar('c' + nextId++, q.x, q.z, Math.atan2(p.x - q.x, p.z - q.z), 0, p.uid);
+        cops.get('c' + (nextId - 1)).aimT = 0;
       }
       if (p.stars >= 5 && !heli) {
         const q = W.P(clamp(sd.s + 220, 0, W.L), 0);
@@ -126,7 +127,13 @@ export function hostUpdate(dt, players) {
   const findTarget = (u) => {
     let p = players.find((q) => q.uid === u.target && q.alive && q.stars > 0);
     if (!p) { p = players.find((q) => q.alive && q.stars > 0); if (p) u.target = p.uid; }
-    return p;
+    if (!p || !p.search) return p;
+    // suspect is hiding: sweep around the last known spot instead of homing in on them
+    if (!u.sweep || now > u.sweep.until || Math.hypot(u.sweep.cx - p.lkx, u.sweep.cz - p.lkz) > 1) {
+      const a = Math.random() * Math.PI * 2, r = 8 + Math.random() * 35;
+      u.sweep = { cx: p.lkx, cz: p.lkz, x: p.lkx + Math.cos(a) * r, z: p.lkz + Math.sin(a) * r, until: now + 7000 };
+    }
+    return { ...p, x: u.sweep.x, z: u.sweep.z, sweeping: true };
   };
   for (const u of [...cops.values()]) {
     if (u.kind === 2) { officerStep(u, dt, now, findTarget(u)); continue; }
@@ -134,9 +141,10 @@ export function hostUpdate(dt, players) {
     const v = u.v;
     if (v.exploded) { u.life = Math.min(u.life, 6) - dt; if (u.life <= 0) remove(u.id); continue; }
     if (v.hp <= 0) {
-      if (!v.burnAt) v.burnAt = now;
-      stepVehicle(v, {}, dt);
-      if (now - v.burnAt > 2500) { v.exploded = true; ctx.explode(v.x, 0, v.z, 'a police car'); }
+      // wrecked: engine dead. Only catches fire if you keep wrecking it.
+      if (!v.burnAt && v.hp <= -v.T.hp * 0.4) v.burnAt = now;
+      stepVehicle(v, { handbrake: true }, dt);
+      if (v.burnAt && now - v.burnAt > 5000) { v.exploded = true; ctx.explode(v.x, 0, v.z, 'a police car'); }
       continue;
     }
     if (u.kind === 1) { u.life -= dt; if (u.life <= 0) remove(u.id); continue; }
@@ -162,7 +170,7 @@ export function hostUpdate(dt, players) {
     u.noTarget = 0;
     const dx = p.x - v.x, dz = p.z - v.z, dist = Math.hypot(dx, dz);
     // suspect on foot and we're close: stop and get out
-    if (!p.inVeh && dist < 18 && Math.abs(v.speed) < 3 && u.deployCd <= 0) {
+    if (!p.inVeh && dist < 18 && Math.abs(v.speed) < 3 && u.deployCd <= 0 && (!p.sweeping || dist < 12)) {
       const lx = Math.cos(v.h), lz = -Math.sin(v.h);
       for (const side of [1, -1]) {
         const o = spawnOfficer('o' + nextId++, v.x + lx * side * 1.8, v.z + lz * side * 1.8, v.h, p.uid, u.id);
@@ -180,7 +188,7 @@ export function hostUpdate(dt, players) {
     }
     const ad = angDiff(v.h, Math.atan2(gx - v.x, gz - v.z));
     let inp = { throttle: 1, brake: 0, steer: clamp(ad * 2, -1, 1), handbrake: Math.abs(ad) > 1.2 && v.speed > 12 };
-    if (dist < 14 && !p.inVeh) inp = { throttle: 0, brake: v.speed > 0.5 ? 1 : 0, steer: inp.steer };
+    if (dist < (p.sweeping ? 6 : 14) && !p.inVeh) inp = { throttle: 0, brake: v.speed > 0.5 ? 1 : 0, steer: inp.steer };
     if (u.revT > 0) { u.revT -= dt; inp = { throttle: 0, brake: 1, steer: -inp.steer }; }
     else if (inp.throttle > 0 && Math.abs(v.speed) < 1.5) { u.stuckT += dt; if (u.stuckT > 1.5) { u.revT = 1.3; u.stuckT = 0; } }
     else u.stuckT = 0;
@@ -198,10 +206,13 @@ export function hostUpdate(dt, players) {
     // shoot from the side window only (no shooting through the windshield)
     u.cd -= dt;
     const side = Math.abs(angDiff(v.h, Math.atan2(dx, dz)));
-    if (u.cd <= 0 && dist < 30 && (side > 0.9 || Math.abs(v.speed) < 3) && W.lineOfSight(v.x, 1.4, v.z, p.x, 1.2, p.z)) {
-      u.cd = 1.6 - p.stars * 0.12;
-      let acc = 0.2 + p.stars * 0.05;
+    const canShoot = !p.sweeping && dist < 30 && (side > 0.9 || Math.abs(v.speed) < 3) && W.lineOfSight(v.x, 1.4, v.z, p.x, 1.2, p.z);
+    u.aimT = canShoot ? (u.aimT || 0) + dt : 0; // they need a moment to line up a shot
+    if (u.cd <= 0 && canShoot && u.aimT > 1.2) {
+      u.cd = 1.8 - p.stars * 0.12;
+      let acc = 0.1 + p.stars * 0.03;
       if (p.speed > 10) acc *= 0.5;
+      if (Math.abs(v.speed) > 5) acc *= 0.6;
       shoot(u, { x: v.x, y: 1.5, z: v.z }, p, acc, 6 + Math.random() * 3);
     }
   }
@@ -232,7 +243,7 @@ function officerStep(u, dt, now, p) {
   if (goCar && dist < 2.4) { remove(u.id); return; } // got back in
   let move = 0;
   if (goCar) move = 5.5;
-  else if (dist > 11) move = 5.2;
+  else if (dist > (p.sweeping ? 3 : 11)) move = p.sweeping ? 3.5 : 5.2;
   else if (dist < 5) move = -2;
   u.h += angDiff(u.h, Math.atan2(dx, dz)) * Math.min(1, dt * 8);
   if (move) {
@@ -242,9 +253,11 @@ function officerStep(u, dt, now, p) {
   }
   u.spd = Math.abs(move);
   u.cd -= dt;
-  if (!goCar && p && u.cd <= 0 && dist < 32 && W.lineOfSight(u.x, 1.4, u.z, p.x, 1.2, p.z)) {
-    u.cd = 1.1 + Math.random() * 0.6;
-    let acc = 0.3 + p.stars * 0.05;
+  const canShoot = !goCar && p && !p.sweeping && dist < 32 && W.lineOfSight(u.x, 1.4, u.z, p.x, 1.2, p.z);
+  u.aimT = canShoot ? (u.aimT || 0) + dt : 0;
+  if (canShoot && u.cd <= 0 && u.aimT > 0.9) {
+    u.cd = 1.2 + Math.random() * 0.8;
+    let acc = 0.15 + p.stars * 0.035;
     if (p.inVeh) acc *= 0.6;
     if (p.speed > 6) acc *= 0.6;
     shoot(u, { x: u.x, y: 1.4, z: u.z }, p, acc, 7 + Math.random() * 3);
@@ -270,9 +283,11 @@ function heliStep(u, dt, now, p) {
   u.x += (gx - u.x) * k; u.z += (gz - u.z) * k; u.y += (gy - u.y) * k;
   u.h += angDiff(u.h, Math.atan2(p.x - u.x, p.z - u.z)) * Math.min(1, dt * 2);
   u.cd -= dt;
-  if (u.cd <= 0 && W.lineOfSight(u.x, u.y - 1.5, u.z, p.x, 1.2, p.z)) {
-    u.cd = 0.8;
-    shoot(u, { x: u.x, y: u.y - 1.2, z: u.z }, p, p.inVeh ? 0.15 : 0.25, 7);
+  const canShoot = !p.sweeping && W.lineOfSight(u.x, u.y - 1.5, u.z, p.x, 1.2, p.z);
+  u.aimT = canShoot ? (u.aimT || 0) + dt : 0;
+  if (u.cd <= 0 && canShoot && u.aimT > 1.5) {
+    u.cd = 1.1;
+    shoot(u, { x: u.x, y: u.y - 1.2, z: u.z }, p, p.inVeh ? 0.07 : 0.12, 7);
   }
 }
 
@@ -311,7 +326,7 @@ export function applyRemote(obj) {
 export function damageCop(id, dmg) {
   const u = cops.get(id);
   if (!u) return false;
-  if (u.kind < 2) { if (u.v.hp <= 0) return false; u.v.hp -= dmg; return u.v.hp <= 0; }
+  if (u.kind < 2) { const was = u.v.hp; u.v.hp = Math.max(-u.v.T.hp, u.v.hp - dmg); return was > 0 && u.v.hp <= 0; }
   if (u.dead) return false;
   u.hp -= dmg;
   if (u.hp <= 0) {
@@ -337,7 +352,8 @@ export function render(dt, isHost, t) {
       const L = v.mesh.userData.lights;
       if (L && !v.exploded) { L[0].color.setHex(flash ? 0xff1744 : 0x550000); L[1].color.setHex(flash ? 0x0d1b55 : 0x2979ff); }
       v.mesh.userData.driverHead.visible = !v.exploded && !u.deployed?.length;
-      if (v.hp <= 0 && !v.exploded && !u.fire) u.fire = fx.startFire(v.mesh);
+      if (v.burnAt && !v.exploded && !u.fire) u.fire = fx.startFire(v.mesh);
+      if (v.hp <= 0 && !v.exploded && Math.random() < 0.3) fx.smokePuff(v.x, v.y + 1.2, v.z);
       if (v.exploded && !v.charred) { v.charred = true; fx.stopFire(u.fire); u.fire = null; charVehicle(v); v.mesh.userData.driverHead.visible = false; }
       if (v.hp > 0 && v.hp < 50) fx.damageSmoke(v);
       continue;
@@ -362,13 +378,14 @@ export function render(dt, isHost, t) {
   }
 }
 
-// Things that can spot a wanted player: [{x, y, z, heli}]
-export function watchers() {
+// Police eyes: cars and officers see in a cone, the helicopter sees all around.
+export function viewers() {
   const out = [];
   for (const u of cops.values()) {
-    if (isDown(u) || u.kind === 1) continue;
+    if (isDown(u)) continue;
     const P = posOf(u);
-    out.push({ x: P.x, y: u.kind === 3 ? u.y : 1.4, z: P.z, heli: u.kind === 3 });
+    if (u.kind === 3) out.push({ x: P.x, y: u.y - 1.5, z: P.z, h: u.h, heli: true, range: 60, fov: Math.PI * 2 });
+    else out.push({ x: P.x, y: 1.5, z: P.z, h: P.h, heli: false, range: u.kind === 2 ? 50 : 65, fov: 2.0 });
   }
   return out;
 }

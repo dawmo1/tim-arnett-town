@@ -20,7 +20,15 @@ Everyone who types the same **room code** ends up in the same game. You can also
 | T | Chat |
 | H | Controls help |
 
-Crimes (killing people, stealing cars, attacking cops) give you wanted stars. Cops get out and chase you on foot if you're on foot, set up roadblocks at 4+ stars, and send a helicopter at 5. Stay out of sight long enough and the stars go away.
+**Wanted level** works on witnesses and how bad the crime was:
+- Punching someone or stealing a parked car only counts if a cop sees it.
+- Gunfire counts if a cop hears it, or a bystander may call it in.
+- Killing someone: a bystander phones the cops (2 stars, unless you stop them), or 3 stars if a cop sees it.
+- Attacking a cop: 3. Killing a cop: 4. Keep killing cops (or down the helicopter) and it climbs to 5.
+
+When no cop can see you, the stars flash and the police search your last known spot. Their vision cones show on the minimap (walls block them). Stay out of every cone until the stars clear.
+
+Getting into a car takes a moment: you walk to the door, open it and yank out whoever's driving. You can't grab a car that's moving. Jump out of a fast car and you'll tumble.
 
 Traffic stops for people in the road, unless you're wanted or just attacked someone.
 
