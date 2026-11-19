@@ -22,9 +22,30 @@ const WEATHERS = ['clear', 'clear', 'clear', 'cloudy', 'cloudy', 'rain', 'rain',
 const hash = (n) => { let x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
 export function weatherAt(nowMs) { return WEATHERS[Math.floor(hash(Math.floor(nowMs / 1000 / 360)) * WEATHERS.length)]; }
 
-// refs: { scene, sun, hemi, skyMat }
+// The sky also lights the world: a tiny copy of the sky (plus the ground's bounce color) is turned into
+// an environment map every couple of seconds, so shadows and dark sides get soft, colored fill light.
+let pmrem = null, envScene = null, envRT = null, envGround = null, envT = 0;
+function initEnvLight() {
+  pmrem = new THREE.PMREMGenerator(R.renderer);
+  envScene = new THREE.Scene();
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(10, 24, 12), R.skyMat);
+  envScene.add(dome);
+  envGround = new THREE.Mesh(new THREE.CircleGeometry(9.5, 24).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x5f7a55, side: THREE.DoubleSide }));
+  envGround.position.y = -0.5; envScene.add(envGround);
+}
+function refreshEnvLight() {
+  if (!pmrem) return;
+  envGround.material.color.copy(C(0x6f8a60).lerp(C(0x1a2236), sky.night).lerp(C(0x555a60), sky.cloud * 0.5));
+  const rt = pmrem.fromScene(envScene, 0, 0.1, 50);
+  R.scene.environment = rt.texture;
+  if (envRT) envRT.dispose();
+  envRT = rt;
+}
+
+// refs: { scene, sun, hemi, skyMat, renderer }
 export function initDayNight(refs) {
   R = refs;
+  if (R.renderer) initEnvLight();
   const sp = [];
   for (let i = 0; i < 700; i++) {
     const u = Math.random() * 2 - 1, a = Math.random() * Math.PI * 2, y = Math.abs(u) * 0.9 + 0.1;
@@ -94,7 +115,7 @@ export function updateDayNight(dt, nowMs, cam) {
   R.sun.intensity = 2.4 * sky.day * (1 - 0.6 * sky.cloud) + 0.55 * moonLight;
   R.sun.castShadow = (sky.day > 0.25 && sky.cloud < 0.6) || moonLight > 0.5;
   if (sky.night > 0.5) sky.sunDir.set(-sky.sunDir.x, Math.max(0.35, -Math.sin(ang)), sky.sunDir.z).normalize();
-  R.hemi.intensity = 1.0 + 1.3 * sky.day * (1 - 0.3 * sky.cloud) + sky.flash * 3;
+  R.hemi.intensity = 0.55 + 0.55 * sky.day * (1 - 0.3 * sky.cloud) + sky.flash * 3;
   R.hemi.color.copy(C(0xffffff).lerp(C(0x8ea2e0), sky.night));
   R.hemi.groundColor.copy(C(0x99bb99).lerp(C(0x2a3550), sky.night));
 
@@ -111,6 +132,9 @@ export function updateDayNight(dt, nowMs, cam) {
   stars.position.set(cam.x, 0, cam.z);
   moon.material.opacity = n * (1 - sky.cloud * 0.8);
   moon.position.set(cam.x - sky.sunDir.x * 300, 40 + Math.max(0, -Math.sin(ang)) * 220, cam.z - sky.sunDir.z * 300);
+
+  envT -= dt;
+  if (envT <= 0) { envT = 2.5; refreshEnvLight(); }
 
   // rain streaks around the camera
   rain.visible = sky.rain > 0.05;

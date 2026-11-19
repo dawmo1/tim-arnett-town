@@ -659,12 +659,32 @@ export function buildWorld(scene) {
     pad.position.set(p.x, 0.06, p.z); pad.rotation.y = -theta(s); pad.receiveShadow = true;
     scene.add(pad);
   }
+  upgradeMaterials(scene);
   // walkable spawn spots along the sidewalks
   places.spawns = [];
   for (let k = 0; k < 12; k++) { const s = 200 + k * 60; const p = P(s, k % 2 ? 8.8 : -8.8); places.spawns.push({ x: p.x, z: p.z, h: roadHeading(s) }); }
 }
 
 const DOCK_S = [272, 637, 905];
+
+// Swap the simple (Lambert) materials for physically based ones so the sky light blends smoothly
+// across every surface. Shiny things (water, glass) get low roughness and pick up sky reflections.
+function upgradeMaterials(root) {
+  const done = new Map();
+  const conv = (m) => {
+    if (!m || !m.isMeshLambertMaterial && !m.isMeshPhongMaterial) return m;
+    if (done.has(m)) return done.get(m);
+    const n = new THREE.MeshStandardMaterial({
+      color: m.color, map: m.map, vertexColors: m.vertexColors, emissive: m.emissive, emissiveMap: m.emissiveMap,
+      emissiveIntensity: m.emissiveIntensity, side: m.side, transparent: m.transparent, opacity: m.opacity, depthWrite: m.depthWrite,
+      roughness: m.isMeshPhongMaterial ? 0.12 : 0.88, metalness: 0,
+    });
+    done.set(m, n);
+    return n;
+  };
+  root.traverse((o) => { if (o.material) o.material = Array.isArray(o.material) ? o.material.map(conv) : conv(o.material); });
+  for (const k of ['buildings', 'ground', 'water']) if (env[k] && done.has(env[k])) env[k] = done.get(env[k]);
+}
 
 // 4x4 windows per texture. Day: glass. Night (emissive): a random mix of lit and dark windows.
 function windowTextures() {

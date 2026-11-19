@@ -16,7 +16,7 @@ const LINES = [
 export const RESPAWN_MS = 45000;
 export const walkers = [];
 export const fleeing = [];
-let scene, ctx = { target: () => null, hitPlayer() {}, shot() {}, vehicles: () => [] };
+let scene, ctx = { target: () => null, hitPlayer() {}, shot() {}, vehicles: () => [], threat: () => null };
 export function setNpcContext(c) { ctx = { ...ctx, ...c }; }
 
 // ---------- dogs ----------
@@ -142,7 +142,7 @@ export function provoke(w) {
   else startFlee(w, w.x - Math.sin(w.h), w.z - Math.cos(w.h));
 }
 
-const freeModes = new Set(['flee', 'cower', 'hostile', 'gone']);
+const freeModes = new Set(['flee', 'cower', 'hostile', 'gone', 'surrender']);
 export function updateWalkers(dt, tSec, nowMs, cam) {
   const target = ctx.target();
   for (const w of walkers) {
@@ -163,9 +163,13 @@ export function updateWalkers(dt, tSec, nowMs, cam) {
       if (w.mode === 'flee') {
         if (w.agent) {
           const st = nav.agentState(w.agent);
-          w.x = st.x; w.z = st.z; if (st.speed > 0.3) w.h = Math.atan2(st.vx, st.vz); speed = st.speed + 1;
-          w.retarget -= dt;
-          if (st.speed < 0.5 && w.retarget <= 0) { w.retarget = 1; nav.fleeTarget(w.agent, w.x, w.z, w.fx, w.fz, 30); }
+          w.x = st.x; w.z = st.z; if (st.speed > 0.3) w.h = Math.atan2(st.vx, st.vz); speed = st.speed;
+          w.stuck = st.speed < 0.4 ? (w.stuck || 0) + dt : 0;
+          if (w.stuck > 0.7) {
+            w.stuck = 0; w.tries = (w.tries || 0) + 1;
+            if (w.tries > 3) { dropAgent(w); w.tries = 0; } // give up on paths: just run
+            else nav.fleeTarget(w.agent, w.x, w.z, w.x + (Math.random() - 0.5) * 20, w.z + (Math.random() - 0.5) * 20, 22);
+          }
         } else {
           const p = W.pushOutCircle(w.x + Math.sin(w.fh) * 6 * dt, w.z + Math.cos(w.fh) * 6 * dt, 0.4);
           if (Math.hypot(p.x - w.x, p.z - w.z) < 6 * dt * 0.5) w.fh += 1.2;
@@ -182,6 +186,13 @@ export function updateWalkers(dt, tSec, nowMs, cam) {
         speed = w.spd || 0;
         pose = { aim: w.hostile === 'gun', weapon: w.hostile === 'gun' ? 'gun' : 'none', swing: w.swing || 0 };
         if (w.modeT <= 0 || !target || target.dead || Math.hypot(target.x - w.x, target.z - w.z) > 70) { startFlee(w, target ? target.x : w.x, target ? target.z : w.z); }
+      } else if (w.mode === 'surrender') {
+        // hands up, frozen, eyes on the gun
+        const th = ctx.threat();
+        if (th) w.h += angDiff(w.h, Math.atan2(th.x - w.x, th.z - w.z)) * Math.min(1, dt * 6);
+        if (th && th.aimAt === w) w.modeT = Math.max(w.modeT, 1.2);
+        pose = { handsUp: true };
+        if (w.modeT <= 0) { if (Math.random() < 0.3) { w.mode = 'cower'; w.modeT = 3; w.fx = th ? th.x : w.x; w.fz = th ? th.z : w.z; } else startFlee(w, th ? th.x : w.x, th ? th.z : w.z); }
       } else if (w.mode === 'gone') {
         dropAgent(w);
         // out of sight for a while, then back to normal life
@@ -204,6 +215,26 @@ export function updateWalkers(dt, tSec, nowMs, cam) {
         }
         if (w.mode === 'flee') continue;
       }
+      const th = ctx.threat();
+      let look = 0;
+      if (th && !w.call) {
+        const d = Math.hypot(th.x - w.x, th.z - w.z);
+        if (th.aimAt === w) {
+          // a gun pointed right at them
+          scare(w.x, w.z, 15, 'gunfire'); // bystanders scatter first
+          if (w.temper === 'gunman' && Math.random() < 0.7) goHostile(w, 'gun');
+          else if (w.temper === 'brawler' && Math.random() < 0.25) goHostile(w, 'melee');
+          else { dropAgent(w); w.mode = 'surrender'; w.modeT = 2.5 + Math.random() * 2; w.panic = 0; }
+          continue;
+        }
+        if (th.armed && d < 13) {
+          w.wary = (w.wary || 0) + dt;
+          look = angDiff(w.h, Math.atan2(th.x - w.x, th.z - w.z));
+          if (w.mode === 'path') w.extra += dt * w.speed * 0.6; // hurry along
+          if (w.wary > 2.5 && d < 8 && (w.fixed || Math.random() < 0.01)) { startFlee(w, th.x, th.z); w.wary = 0; continue; }
+        } else w.wary = Math.max(0, (w.wary || 0) - dt);
+      }
+      w.look = Math.max(-1.1, Math.min(1.1, look));
       if (w.panic > 0) { w.panic -= dt; w.extra += dt * w.speed * 2.6; }
       const p = walkerPose(w, tSec);
       w.x = p.x; w.z = p.z; w.h = p.h;
@@ -216,7 +247,7 @@ export function updateWalkers(dt, tSec, nowMs, cam) {
     if (w.dog) w.dog.g.visible = !far && !w.dead;
     if (far) continue;
     placeCharacter(w.ch, w.x, w.fixed && !w.dead && w.mode === 'fixed' ? (w.fixed.pose === 'sit' ? -0.35 : 0) : 0, w.z, w.h);
-    animateCharacter(w.ch, dt, { speed, dead: !!w.dead, phone: !!w.call || pose.phone, ...pose });
+    animateCharacter(w.ch, dt, { speed, dead: !!w.dead, phone: !!w.call || pose.phone, look: w.mode === 'path' || w.mode === 'fixed' ? w.look || 0 : 0, ...pose });
     if (w.dog && !w.dead) {
       const d = w.dog, side = 0.8;
       const tx = w.x - Math.sin(w.h) * 1.1 + Math.cos(w.h) * side, tz = w.z - Math.cos(w.h) * 1.1 - Math.sin(w.h) * side;
@@ -233,15 +264,35 @@ export function updateWalkers(dt, tSec, nowMs, cam) {
     const f = fleeing[i];
     f.t -= dt;
     if (f.ch.rag) continue;
+    let spd = 6;
+    if (f.angry && f.t > 0) {
+      // an angry driver storms over and throws punches
+      const t = ctx.target();
+      f.cd = (f.cd || 0) - dt; f.swing = Math.max(0, (f.swing || 0) - dt * 3);
+      if (t && !t.dead) {
+        const dx = t.x - f.x, dz = t.z - f.z, d = Math.hypot(dx, dz);
+        f.h = Math.atan2(dx, dz);
+        if (d > 1.3) { const p = W.pushOutCircle(f.x + (dx / d) * 4.5 * dt, f.z + (dz / d) * 4.5 * dt, 0.4); f.x = p.x; f.z = p.z; spd = 4.5; }
+        else { spd = 0; if (f.cd <= 0 && !t.inVeh) { f.cd = 1; f.swing = 1; ctx.hitPlayer(5 + Math.random() * 4, 'an angry driver', { hostile: 'melee', h: f.h }); } }
+        if (d > 40) f.angry = false;
+      }
+      placeCharacter(f.ch, f.x, 0, f.z, f.h);
+      animateCharacter(f.ch, dt, { speed: spd, swing: f.swing });
+      if (f.t <= 4) { f.angry = false; f.t = 8; }
+      continue;
+    }
     if (f.agent) {
       const st = nav.agentState(f.agent);
-      f.x = st.x; f.z = st.z; if (st.speed > 0.3) f.h = Math.atan2(st.vx, st.vz);
+      f.x = st.x; f.z = st.z; spd = st.speed; if (st.speed > 0.3) f.h = Math.atan2(st.vx, st.vz);
+      f.stuck = st.speed < 0.4 ? (f.stuck || 0) + dt : 0;
+      if (f.stuck > 0.7) { f.stuck = 0; nav.removeAgent(f.agent); f.agent = null; } // blocked: run straight instead
     } else {
       const p = W.pushOutCircle(f.x + Math.sin(f.h) * 6 * dt, f.z + Math.cos(f.h) * 6 * dt, 0.4);
+      if (Math.hypot(p.x - f.x, p.z - f.z) < 6 * dt * 0.4) f.h += 1.3;
       f.x = p.x; f.z = p.z;
     }
     placeCharacter(f.ch, f.x, 0, f.z, f.h);
-    animateCharacter(f.ch, dt, { speed: 7 });
+    animateCharacter(f.ch, dt, { speed: spd > 0.3 ? spd + 1 : 0 });
     if (f.t <= 0) { if (f.agent) nav.removeAgent(f.agent); scene.remove(f.ch.g); fleeing.splice(i, 1); }
   }
 }
@@ -286,11 +337,12 @@ function hostileStep(w, dt, t) {
   }
 }
 
-export function spawnFleeing(x, z, h, down = 0) {
+export function spawnFleeing(x, z, h, down = 0, angry = false) {
   const ch = makeCharacter(randomLook());
   scene.add(ch.g);
   ch.g.position.set(x, 0, z); ch.g.rotation.y = h;
-  const f = { ch, x, z, h, t: 8 + down, agent: null };
+  const f = { ch, x, z, h, t: (angry ? 16 : 8) + down, agent: null, angry };
+  if (angry) { fleeing.push(f); return; }
   const run = () => { f.agent = nav.addAgent(f.x, f.z, 6.5); if (f.agent) nav.fleeTarget(f.agent, f.x, f.z, f.x - Math.sin(f.h), f.z - Math.cos(f.h), 40); };
   if (down > 0) {
     // thrown onto the street

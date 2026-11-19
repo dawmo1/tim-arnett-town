@@ -126,7 +126,6 @@ export function setSpeedo(v, station = '', nitro = 0) {
   const nb = !v.T.bike && !v.T.heli ? `<div id="nitro" title="Nitro"><i style="width:${Math.round(nitro * 100)}%"></i></div>` : '';
   el.speedo.innerHTML = `<b>${Math.round(Math.abs(v.speed) * 3.6)}</b><small>km/h</small><span>${v.T.name}${station ? ' · ' + station : ''}</span>${alt}${nb}`;
 }
-export function setWheelLocked(owned) { slots.forEach((s, i) => s.classList.toggle('locked', !owned.has(i))); }
 let hitT = 0;
 export function hitMarker(kill) {
   el.crosshair.classList.add(kill ? 'kill' : 'hit');
@@ -134,37 +133,63 @@ export function hitMarker(kill) {
   hitT = setTimeout(() => el.crosshair.classList.remove('hit', 'kill'), 160);
 }
 
-// ---------- weapon wheel ----------
-let slots = [];
+// ---------- weapon wheel: a ring of slices, the hovered one lights up ----------
+let slices = [];
+const SVGNS = 'http://www.w3.org/2000/svg';
+function sector(a0, a1, r0, r1) {
+  const p = (r, a) => `${(Math.cos(a) * r).toFixed(2)} ${(Math.sin(a) * r).toFixed(2)}`;
+  const large = a1 - a0 > Math.PI ? 1 : 0;
+  return `M ${p(r1, a0)} A ${r1} ${r1} 0 ${large} 1 ${p(r1, a1)} L ${p(r0, a1)} A ${r0} ${r0} 0 ${large} 0 ${p(r0, a0)} Z`;
+}
 export function buildWheel(weapons, onPick) {
   const ring = el.wheel.querySelector('.ring');
-  const n = weapons.length;
-  slots = weapons.map((w, i) => {
-    const a = -Math.PI / 2 + (i * Math.PI * 2) / n;
-    const b = document.createElement('button');
-    b.className = 'slot';
-    b.style.left = `calc(50% + ${Math.cos(a) * 41}% )`;
-    b.style.top = `calc(50% + ${Math.sin(a) * 41}% )`;
-    b.innerHTML = `<svg viewBox="0 0 48 24" fill="currentColor" aria-hidden="true">${ICONS[w.name] || ''}</svg><span>${i + 1}</span>`;
-    b.setAttribute('aria-label', w.name);
-    b.addEventListener('click', () => onPick(i));
-    ring.append(b);
-    return b;
+  const n = weapons.length, gap = 0.025;
+  const svg = document.createElementNS(SVGNS, 'svg');
+  svg.setAttribute('viewBox', '-100 -100 200 200'); svg.classList.add('wheelSvg');
+  const hubBg = document.createElementNS(SVGNS, 'circle');
+  hubBg.setAttribute('r', '47'); hubBg.classList.add('hubBg'); svg.append(hubBg);
+  slices = weapons.map((w, i) => {
+    const mid = -Math.PI / 2 + (i * Math.PI * 2) / n, half = Math.PI / n;
+    const g = document.createElementNS(SVGNS, 'g'); g.classList.add('slice');
+    const path = document.createElementNS(SVGNS, 'path');
+    path.setAttribute('d', sector(mid - half + gap, mid + half - gap, 50, 97));
+    g.append(path);
+    const ix = Math.cos(mid) * 73, iy = Math.sin(mid) * 73;
+    const icon = document.createElementNS(SVGNS, 'g');
+    icon.setAttribute('transform', `translate(${(ix - 20).toFixed(1)} ${(iy - 13).toFixed(1)}) scale(0.84)`);
+    icon.innerHTML = ICONS[w.name] || '';
+    icon.classList.add('icon'); g.append(icon);
+    const num = document.createElementNS(SVGNS, 'text');
+    num.setAttribute('x', (Math.cos(mid) * 90).toFixed(1)); num.setAttribute('y', (Math.sin(mid) * 90 + 2).toFixed(1));
+    num.textContent = i + 1; num.classList.add('num'); g.append(num);
+    const price = document.createElementNS(SVGNS, 'text');
+    price.setAttribute('x', ix.toFixed(1)); price.setAttribute('y', (iy + 19).toFixed(1));
+    price.classList.add('price'); g.append(price);
+    g.addEventListener('pointerenter', () => wheelHighlight(i, weapons[i]));
+    g.addEventListener('click', () => onPick(i));
+    svg.append(g);
+    return { g, price };
   });
+  ring.prepend(svg);
 }
 export function showWheel(on) { el.wheel.hidden = !on; }
+let wheelInfo = () => '';
+export function setWheelInfo(fn) { wheelInfo = fn; }
 export function wheelHighlight(i, w) {
-  slots.forEach((s, k) => s.classList.toggle('sel', k === i));
+  slices.forEach((s, k) => s.g.classList.toggle('sel', k === i));
   el.wheelName.textContent = w.name;
   const dmg = w.grenade ? 100 : Math.min(100, (w.dmg * (w.pellets || 1)) / 0.9);
   const rate = Math.min(100, w.rate * 8);
   const range = w.melee ? 5 : w.grenade ? 30 : Math.min(100, w.range / 2);
-  el.wheelStats.innerHTML = [['Damage', dmg], ['Fire rate', rate], ['Range', range]]
+  el.wheelStats.innerHTML = `<p class="ammoLine">${wheelInfo(i)}</p>` + [['Damage', dmg], ['Fire rate', rate], ['Range', range]]
     .map(([k, v]) => `<div><span>${k}</span><i><b style="width:${v}%"></b></i></div>`).join('');
 }
 export function wheelIndex(dx, dy, n) {
   const a = Math.atan2(dy, dx) + Math.PI / 2;
   return ((Math.round(a / ((Math.PI * 2) / n)) % n) + n) % n;
+}
+export function setWheelLocked(owned, prices) {
+  slices.forEach((s, i) => { const locked = !owned.has(i); s.g.classList.toggle('locked', locked); s.price.textContent = locked ? `$${prices[i]}` : ''; });
 }
 
 // ---------- rotating minimap ----------

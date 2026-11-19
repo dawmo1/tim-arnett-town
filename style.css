@@ -100,20 +100,27 @@ button { font: inherit; }
 #announce .sub { font-weight: 800; font-size: 16px; letter-spacing: 3px; margin-top: 4px; text-transform: uppercase; }
 @keyframes pop { 0% { opacity: 0; transform: translateX(-50%) scale(1.25); } 12% { opacity: 1; transform: translateX(-50%) scale(1); } 80% { opacity: 1; } 100% { opacity: 0; } }
 
-#wheel { position: absolute; inset: 0; display: grid; place-items: center; background: radial-gradient(circle, rgba(0,0,0,.15), rgba(0,0,0,.6)); pointer-events: auto; }
-#wheel .ring { position: relative; width: min(440px, 86vmin); aspect-ratio: 1; border-radius: 50%; background: rgba(8,12,18,.55); border: 1px solid var(--line); }
-#wheel .slot { position: absolute; width: 22%; aspect-ratio: 1; transform: translate(-50%, -50%); border-radius: 50%; border: 1px solid var(--line); background: rgba(255,255,255,.06); color: #fff; display: block; cursor: pointer; padding: clamp(8px, 2.5vmin, 18px); }
-#wheel .slot svg { width: 100%; height: 100%; display: block; }
-#wheel .slot span { position: absolute; top: 6%; right: 14%; font-size: 11px; font-weight: 800; opacity: .7; }
-#wheel .slot.locked { opacity: .3; }
-#wheel .slot.sel { background: rgba(255,255,255,.92); color: var(--ink); transform: translate(-50%, -50%) scale(1.12); }
-#wheel .hub { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 44%; text-align: center; }
-#wheelName { font: 400 24px var(--display); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 8px; }
-#wheelStats div { display: grid; grid-template-columns: 70px 1fr; gap: 6px; align-items: center; font-size: 11px; font-weight: 600; margin: 3px 0; text-align: left; }
-#wheelStats i { display: block; height: 5px; background: rgba(255,255,255,.2); overflow: hidden; }
-#wheelStats b { display: block; height: 100%; background: #fff; }
-#wheel .hub small { display: block; margin-top: 8px; opacity: .7; font-size: 11px; }
-
+#wheel { position: absolute; inset: 0; display: grid; place-items: center; background: radial-gradient(circle, rgba(0,0,0,.1), rgba(0,0,0,.65)); pointer-events: auto; }
+#wheel .ring { position: relative; width: min(520px, 88vmin); aspect-ratio: 1; }
+.wheelSvg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; filter: drop-shadow(0 6px 18px rgba(0,0,0,.45)); }
+.slice { cursor: pointer; }
+.hubBg { fill: rgba(8, 12, 18, .92); stroke: rgba(255,255,255,.12); stroke-width: .6; }
+.slice > path { fill: rgba(10, 14, 20, .78); stroke: rgba(255,255,255,.12); stroke-width: .6; transition: fill .12s; }
+.slice .icon { fill: #fff; transition: fill .12s; }
+.slice .num { fill: rgba(255,255,255,.55); font: 800 7px var(--body); text-anchor: middle; }
+.slice .price { fill: var(--cash); font: 800 6.5px var(--body); text-anchor: middle; }
+.slice.sel > path { fill: rgba(255,255,255,.94); }
+.slice.sel .icon { fill: var(--ink); }
+.slice.sel .num { fill: rgba(0,0,0,.5); }
+.slice.locked .icon { opacity: .45; }
+.slice.locked.sel > path { fill: rgba(255,255,255,.55); }
+#wheel .hub { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 40%; text-align: center; pointer-events: none; }
+#wheelName { font: 400 clamp(18px, 3.4vmin, 28px) var(--display); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 4px; }
+.ammoLine { margin: 0 0 8px; font-weight: 800; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+#wheelStats div { display: grid; grid-template-columns: 62px 1fr; gap: 6px; align-items: center; font-size: 10.5px; font-weight: 600; margin: 3px 0; text-align: left; }
+#wheelStats i { display: block; height: 4px; background: rgba(255,255,255,.2); overflow: hidden; }
+#wheelStats b { display: block; height: 100%; background: var(--accent); }
+#wheel .hub small { display: block; margin-top: 8px; opacity: .6; font-size: 10.5px; }
 #hurt { position: absolute; inset: 0; }
 #hurt.on { animation: hurt .5s ease-out; }
 @keyframes hurt { from { box-shadow: inset 0 0 160px 50px rgba(190,0,0,.6); } to { box-shadow: inset 0 0 120px 30px rgba(190,0,0,0); } }

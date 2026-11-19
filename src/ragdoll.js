@@ -14,7 +14,7 @@ const groups = (member, filter) => (member << 16) | filter;
 
 export async function initPhysics() {
   await RAPIER.init();
-  world = new RAPIER.World({ x: 0, y: -18, z: 0 });
+  world = new RAPIER.World({ x: 0, y: -14, z: 0 });
   const fixed = (desc, x, y, z, q) => {
     const body = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(x, y, z).setRotation(q || { x: 0, y: 0, z: 0, w: 1 }));
     world.createCollider(desc.setCollisionGroups(groups(GROUP_WORLD, 0xffff)).setFriction(0.9), body);
@@ -35,6 +35,8 @@ export async function initPhysics() {
 }
 export const physicsReady = () => ready;
 
+// hinge limits (radians, rotation about the body's side-to-side axis; negative = forward)
+const LIMITS = { head: [-0.7, 0.5], shL: [-2.9, 0.9], shR: [-2.9, 0.9], hipL: [-1.7, 0.45], hipR: [-1.7, 0.45] };
 const PARTS = [
   // key, pivot (relative to character feet), collider
   ['body', [0, 0, 0], () => RAPIER.ColliderDesc.cuboid(0.26, 0.36, 0.15).setTranslation(0, 1.15, 0)],
@@ -63,18 +65,26 @@ export function ragdoll(ch, vel, opts = {}) {
   for (const [key, , collider] of PARTS) {
     const obj = key === 'body' ? ch.g : ch[key];
     obj.getWorldPosition(tv); obj.getWorldQuaternion(tq);
-    const desc = RAPIER.RigidBodyDesc.dynamic().setTranslation(tv.x, tv.y + 0.02, tv.z).setRotation(tq).setLinearDamping(0.2).setAngularDamping(1.2).setCcdEnabled(true);
+    const desc = RAPIER.RigidBodyDesc.dynamic().setTranslation(tv.x, tv.y + 0.02, tv.z).setRotation(tq)
+      .setLinearDamping(0.12).setAngularDamping(key === 'body' ? 1.6 : 2.6).setCcdEnabled(true);
     const body = world.createRigidBody(desc);
-    world.createCollider(collider().setDensity(key === 'body' ? 3 : 1.5).setFriction(0.8).setRestitution(0.05).setCollisionGroups(groups(GROUP_RAG, GROUP_WORLD)), body);
+    world.createCollider(collider().setDensity(key === 'body' ? 3.2 : 1.4).setFriction(1.1).setRestitution(0).setCollisionGroups(groups(GROUP_RAG, GROUP_WORLD)), body);
     const s = key === 'body' ? 1 : 0.95 + Math.random() * 0.1;
     body.setLinvel({ x: vel.x * s, y: vel.y * s, z: vel.z * s }, true);
-    body.setAngvel({ x: (Math.random() - 0.5) * (opts.spin || 3), y: (Math.random() - 0.5) * 2, z: (Math.random() - 0.5) * (opts.spin || 3) }, true);
+    // tip over the way you were pushed, with only a little randomness
+    const sp = opts.spin ?? 1.2, hv = Math.hypot(vel.x, vel.z) || 1;
+    body.setAngvel({ x: (vel.z / hv) * Math.min(4, hv * 0.5) + (Math.random() - 0.5) * sp, y: (Math.random() - 0.5) * sp * 0.5, z: -(vel.x / hv) * Math.min(4, hv * 0.5) + (Math.random() - 0.5) * sp }, true);
     map[key] = body; rag.bodies.push(body);
   }
   for (const [key, pivot] of PARTS) {
     if (key === 'body') continue;
-    const j = RAPIER.JointData.spherical({ x: pivot[0], y: pivot[1], z: pivot[2] }, { x: 0, y: 0, z: 0 });
-    rag.joints.push(world.createImpulseJoint(j, map.body, map[key], true));
+    const jd = RAPIER.JointData.revolute({ x: pivot[0], y: pivot[1], z: pivot[2] }, { x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 });
+    const j = world.createImpulseJoint(jd, map.body, map[key], true);
+    j.setLimits(LIMITS[key][0], LIMITS[key][1]);
+    // a little muscle tone: the living resist more than the dead
+    if (rag.dead) j.configureMotorVelocity(0, 0.25);
+    else j.configureMotorPosition(0, 6, 1.2);
+    rag.joints.push(j);
   }
   rag.map = map;
   ch.rag = rag;
@@ -136,6 +146,7 @@ function finishUp(rag) {
   tv2.set(0, 0, 1).applyQuaternion(ch.g.quaternion);
   const h = Math.atan2(tv2.x, tv2.z);
   release(ch);
+  ch.getUp = 0.7; // crouch, then stand (see animateCharacter)
   if (rag.onUp) rag.onUp(pos, h);
 }
 // The pose a dead ragdoll ended in stays on screen; this lets the caller know where the body is.

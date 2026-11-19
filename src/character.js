@@ -4,7 +4,7 @@ const box = new THREE.BoxGeometry(1, 1, 1);
 const mats = new Map();
 export function mat(c) {
   let m = mats.get(c);
-  if (!m) { m = new THREE.MeshLambertMaterial({ color: c }); mats.set(c, m); }
+  if (!m) { m = new THREE.MeshStandardMaterial({ color: c, roughness: 0.82, metalness: 0 }); mats.set(c, m); }
   return m;
 }
 function part(parent, c, sx, sy, sz, x, y, z) {
@@ -107,6 +107,14 @@ export function animateCharacter(c, dt, st) {
   c.body.position.y = 0;
   c.hipL.rotation.z = 0; c.hipR.rotation.z = 0; c.shL.rotation.z = 0; c.shR.rotation.z = 0;
   c.shL.rotation.y = 0; c.shR.rotation.y = 0;
+  if (c.getUp > 0) { // pushing up off the ground after a knockdown
+    c.getUp = Math.max(0, c.getUp - dt);
+    const k = c.getUp / 0.7;
+    c.body.position.y = -0.4 * k; c.body.rotation.x = 0.5 * k;
+    c.hipL.rotation.x = c.hipR.rotation.x = -1.4 * k;
+    c.shL.rotation.x = c.shR.rotation.x = -0.9 * k;
+    return;
+  }
   if (st.lie) { // sunbathing
     c.body.rotation.set(-Math.PI / 2, 0, 0); c.body.position.y = 0.17;
     c.shL.rotation.set(0, 0, -0.5); c.shR.rotation.set(0, 0, 0.5);
@@ -143,6 +151,9 @@ export function animateCharacter(c, dt, st) {
   else if (st.aim) c.shR.rotation.x = -Math.PI / 2;
   else c.shR.rotation.x = st.swim ? -Math.PI / 2 + Math.sin(c.walk + Math.PI) * 1.2 : s * 0.8;
   if (st.phone) { c.shL.rotation.x = -2.6; c.shL.rotation.z = -0.5; }
+  if (st.handsUp) { c.shL.rotation.set(-2.85, 0, -0.25); c.shR.rotation.set(-2.85, 0, 0.25); c.hipL.rotation.x = c.hipR.rotation.x = 0; }
+  // glance toward something (radians relative to the body)
+  c.head.rotation.y += ((st.look || 0) - c.head.rotation.y) * Math.min(1, dt * 6);
   if (c.flinch > 0) { c.flinch = Math.max(0, c.flinch - dt * 4); c.body.rotation.x = -0.35 * c.flinch; c.head.rotation.x = -0.4 * c.flinch; }
   if (st.chat) { c.talk = (c.talk || Math.random() * 10) + dt; c.shR.rotation.x = -0.6 - Math.max(0, Math.sin(c.talk * 2.3)) * 0.8; c.head.rotation.y = Math.sin(c.talk * 0.7) * 0.3; }
 }

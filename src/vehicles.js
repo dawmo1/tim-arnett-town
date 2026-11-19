@@ -52,7 +52,7 @@ export function makeVehicleMesh(T, color) {
   const g = new THREE.Group();
   const body = new THREE.Group(); g.add(body);
   const L = T.len, Wd = T.wid;
-  const glassMat = new THREE.MeshLambertMaterial({ color: 0x26323f });
+  const glassMat = new THREE.MeshStandardMaterial({ color: 0x26323f, roughness: 0.08, metalness: 0.4 });
   const parts = { wheels: [], glassMat, crushF: 0, crushB: 0 };
   if (T.bike) {
     bx(body, color, 0.32, 0.35, L * 0.55, 0, 0.72, 0.05);
@@ -163,7 +163,7 @@ function busSign() {
 
 let burntMat = null;
 export function charVehicle(v) {
-  burntMat = burntMat || new THREE.MeshLambertMaterial({ color: 0x2b2b2b });
+  burntMat = burntMat || new THREE.MeshStandardMaterial({ color: 0x2b2b2b, roughness: 1 });
   v.mesh.userData.body.traverse((m) => { if (m.isMesh && !(m.material && m.material.isMeshBasicMaterial)) m.material = burntMat; });
   // wheels fly off
   const parts = v.mesh.userData.parts;
