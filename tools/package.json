@@ -1,0 +1,13 @@
+{
+  "name": "tim-arnett-town-tools",
+  "private": true,
+  "type": "module",
+  "scripts": { "vendor": "node build-vendor.mjs" },
+  "devDependencies": {
+    "three": "0.160.0",
+    "@dimforge/rapier3d-compat": "0.21.0",
+    "@recast-navigation/core": "0.44.0",
+    "@recast-navigation/generators": "0.44.0",
+    "esbuild": "0.28.2"
+  }
+}

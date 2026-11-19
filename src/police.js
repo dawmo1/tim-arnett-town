@@ -3,7 +3,9 @@
 import * as THREE from 'three';
 import * as W from './world.js';
 import { makeVehicle, stepVehicle, collideVehicles, circles, charVehicle, POLICE } from './vehicles.js';
-import { makeCharacter, animateCharacter, mat } from './character.js';
+import { makeCharacter, animateCharacter, placeCharacter, mat } from './character.js';
+import { ragdoll, ragPos } from './ragdoll.js';
+import * as nav from './nav.js';
 import * as fx from './fx.js';
 import { clamp, angDiff } from './util.js';
 
@@ -62,7 +64,7 @@ function remove(id) {
   const u = cops.get(id);
   if (!u) return;
   if (u.kind < 2) { fx.stopFire(u.fire); scene.remove(u.v.mesh); }
-  else if (u.kind === 2) scene.remove(u.ch.g);
+  else if (u.kind === 2) { scene.remove(u.ch.g); if (u.agent) nav.removeAgent(u.agent); }
   else scene.remove(u.mesh);
   cops.delete(id);
 }
@@ -232,7 +234,7 @@ export function hostUpdate(dt, players) {
 const r1 = (n) => Math.round(n * 10) / 10, r2 = (n) => Math.round(n * 100) / 100;
 
 function officerStep(u, dt, now, p) {
-  if (u.dead) { if (now - u.deadAt > 15000) remove(u.id); return; }
+  if (u.dead) { if (u.agent) { nav.removeAgent(u.agent); u.agent = null; } if (now - u.deadAt > 15000) remove(u.id); return; }
   const car = cops.get(u.car);
   const goCar = car && car.kind === 0 && car.recall && !isDown(car);
   let tx, tz;
@@ -246,12 +248,27 @@ function officerStep(u, dt, now, p) {
   else if (dist > (p.sweeping ? 3 : 11)) move = p.sweeping ? 3.5 : 5.2;
   else if (dist < 5) move = -2;
   u.h += angDiff(u.h, Math.atan2(dx, dz)) * Math.min(1, dt * 8);
-  if (move) {
-    const nx = u.x + (dx / (dist || 1)) * move * dt, nz = u.z + (dz / (dist || 1)) * move * dt;
-    const q = W.pushOutCircle(nx, nz, 0.4);
-    if (W.isLand(q.x, q.z)) { u.x = q.x; u.z = q.z; }
+  if (!u.agent && nav.navReady()) u.agent = nav.addAgent(u.x, u.z, 5.5);
+  if (u.agent) {
+    // path around buildings and other people
+    u.retarget = (u.retarget || 0) - dt;
+    if (u.retarget <= 0) {
+      u.retarget = 0.4;
+      nav.setSpeed(u.agent, Math.abs(move) || 3);
+      if (move > 0) nav.moveTo(u.agent, tx, tz);
+      else if (move < 0) nav.moveTo(u.agent, u.x - dx / (dist || 1) * 4, u.z - dz / (dist || 1) * 4);
+      else u.agent.resetMoveTarget();
+    }
+    const st = nav.agentState(u.agent);
+    u.x = st.x; u.z = st.z; u.spd = st.speed;
+  } else {
+    if (move) {
+      const nx = u.x + (dx / (dist || 1)) * move * dt, nz = u.z + (dz / (dist || 1)) * move * dt;
+      const q = W.pushOutCircle(nx, nz, 0.4);
+      if (W.isLand(q.x, q.z)) { u.x = q.x; u.z = q.z; }
+    }
+    u.spd = Math.abs(move);
   }
-  u.spd = Math.abs(move);
   u.cd -= dt;
   const canShoot = !goCar && p && !p.sweeping && dist < 32 && W.lineOfSight(u.x, 1.4, u.z, p.x, 1.2, p.z);
   u.aimT = canShoot ? (u.aimT || 0) + dt : 0;
@@ -363,8 +380,9 @@ export function render(dt, isHost, t) {
       u.x += (u.tgt.x - u.x) * k; u.z += (u.tgt.z - u.z) * k; u.h += angDiff(u.h, u.tgt.h) * k; u.y += ((u.tgt.y || 0) - u.y) * k;
     }
     if (u.kind === 2) {
-      u.ch.g.position.set(u.x, 0, u.z);
-      u.ch.g.rotation.y = u.h;
+      if (u.dead && !u.ragged) { u.ragged = true; const k = u.hitDir || { x: 0, z: 0 }; ragdoll(u.ch, { x: k.x * 4, y: 2, z: k.z * 4 }, { dead: true }); }
+      if (u.ch.rag) { const rp = ragPos(u.ch); if (!isHost) { u.x = rp.x; u.z = rp.z; } continue; }
+      placeCharacter(u.ch, u.x, 0, u.z, u.h);
       animateCharacter(u.ch, dt, { speed: u.spd || 0, aim: !u.dead, dead: u.dead, weapon: 'gun' });
     } else {
       u.mesh.position.set(u.x, u.y, u.z);

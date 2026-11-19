@@ -11,10 +11,11 @@ export const sky = {
 let R, stars, rain, rainPos, moon;
 const RAIN_N = 1400, RAIN_BOX = 60;
 const C = (h) => new THREE.Color(h);
-const SKY = {
+const SKY = { // night is a deep blue, not black, so you can still see the street
+
   day: { top: C(0x2f8fe0), bot: C(0xa8def2) },
   dusk: { top: C(0x3b4a8c), bot: C(0xff9a5c) },
-  night: { top: C(0x03060f), bot: C(0x152038) },
+  night: { top: C(0x060d24), bot: C(0x22325a) },
   storm: { top: C(0x4a5260), bot: C(0x7d8794) },
 };
 const WEATHERS = ['clear', 'clear', 'clear', 'cloudy', 'cloudy', 'rain', 'rain', 'storm'];
@@ -86,13 +87,16 @@ export function updateDayNight(dt, nowMs, cam) {
   R.scene.fog.near = 140 - 80 * sky.rain; R.scene.fog.far = 345 - 140 * sky.rain;
 
   // lights
-  const sunCol = C(0xfff4e0).lerp(C(0xff8a3d), sky.dusk);
+  // the same light is the sun by day and the moon by night (cool, soft, still casting shadows)
+  const moonLight = sky.night * (1 - sky.cloud * 0.7);
+  const sunCol = C(0xfff4e0).lerp(C(0xff8a3d), sky.dusk).lerp(C(0x9fb6ff), sky.night);
   R.sun.color.copy(sunCol);
-  R.sun.intensity = 2.6 * sky.day * (1 - 0.65 * sky.cloud);
-  R.sun.castShadow = sky.day > 0.25 && sky.cloud < 0.6;
-  R.hemi.intensity = 0.65 + 1.65 * sky.day * (1 - 0.3 * sky.cloud) + sky.flash * 3;
-  R.hemi.color.copy(C(0xffffff).lerp(C(0x7d8fcf), sky.night));
-  R.hemi.groundColor.copy(C(0x99bb99).lerp(C(0x1c2333), sky.night));
+  R.sun.intensity = 2.4 * sky.day * (1 - 0.6 * sky.cloud) + 0.55 * moonLight;
+  R.sun.castShadow = (sky.day > 0.25 && sky.cloud < 0.6) || moonLight > 0.5;
+  if (sky.night > 0.5) sky.sunDir.set(-sky.sunDir.x, Math.max(0.35, -Math.sin(ang)), sky.sunDir.z).normalize();
+  R.hemi.intensity = 1.0 + 1.3 * sky.day * (1 - 0.3 * sky.cloud) + sky.flash * 3;
+  R.hemi.color.copy(C(0xffffff).lerp(C(0x8ea2e0), sky.night));
+  R.hemi.groundColor.copy(C(0x99bb99).lerp(C(0x2a3550), sky.night));
 
   // night lighting in the town
   const n = sky.night;

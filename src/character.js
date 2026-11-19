@@ -82,7 +82,15 @@ export function makeCharacter(look, opts = {}) {
 }
 
 // st: { speed, aim, swim, sit, dead, swing (0..1), weapon: 'gun'|'bat'|'none' }
+// Put a character somewhere (ignored while physics owns it as a ragdoll).
+export function placeCharacter(c, x, y, z, h) {
+  if (c.rag) return;
+  c.g.position.set(x, y, z);
+  c.g.rotation.set(0, h, 0);
+}
 export function animateCharacter(c, dt, st) {
+  if (c.rag) return;
+  if (st.flinch) c.flinch = 1;
   c.gun.visible = st.weapon === 'gun';
   c.bat.visible = st.weapon === 'bat';
   if (st.dead) {
@@ -135,6 +143,7 @@ export function animateCharacter(c, dt, st) {
   else if (st.aim) c.shR.rotation.x = -Math.PI / 2;
   else c.shR.rotation.x = st.swim ? -Math.PI / 2 + Math.sin(c.walk + Math.PI) * 1.2 : s * 0.8;
   if (st.phone) { c.shL.rotation.x = -2.6; c.shL.rotation.z = -0.5; }
+  if (c.flinch > 0) { c.flinch = Math.max(0, c.flinch - dt * 4); c.body.rotation.x = -0.35 * c.flinch; c.head.rotation.x = -0.4 * c.flinch; }
   if (st.chat) { c.talk = (c.talk || Math.random() * 10) + dt; c.shR.rotation.x = -0.6 - Math.max(0, Math.sin(c.talk * 2.3)) * 0.8; c.head.rotation.y = Math.sin(c.talk * 0.7) * 0.3; }
 }
 

@@ -4,7 +4,9 @@
 import * as THREE from 'three';
 import * as W from './world.js';
 import { rng, angDiff } from './util.js';
-import { makeCharacter, randomLook, animateCharacter, mat } from './character.js';
+import { makeCharacter, randomLook, animateCharacter, placeCharacter, mat } from './character.js';
+import { ragdoll, release, ragPos } from './ragdoll.js';
+import * as nav from './nav.js';
 
 const LINES = [
   { d: 8.6, s0: 15, s1: 1085 }, { d: -8.6, s0: 15, s1: 1085 },
@@ -14,7 +16,7 @@ const LINES = [
 export const RESPAWN_MS = 45000;
 export const walkers = [];
 export const fleeing = [];
-let scene, ctx = { target: () => null, hitPlayer() {}, shot() {} };
+let scene, ctx = { target: () => null, hitPlayer() {}, shot() {}, vehicles: () => [] };
 export function setNpcContext(c) { ctx = { ...ctx, ...c }; }
 
 // ---------- dogs ----------
@@ -100,13 +102,38 @@ export function scare(x, z, radius, kind = 'gunfire') {
 }
 export const panicNear = (x, z, radius) => scare(x, z, radius, 'gunfire');
 
-function startFlee(w, x, z) {
-  w.mode = 'flee'; w.modeT = 6 + Math.random() * 4;
+// Free-roaming people get a navigation agent so they path around buildings and each other.
+function needAgent(w, speed) {
+  if (!w.agent) w.agent = nav.addAgent(w.x, w.z, speed);
+  else nav.setSpeed(w.agent, speed);
+  return w.agent;
+}
+function dropAgent(w) { if (w.agent) { nav.removeAgent(w.agent); w.agent = null; } }
+function startFlee(w, x, z, short) {
+  w.mode = 'flee'; w.modeT = short ? 2.5 : 6 + Math.random() * 4; w.fx = x; w.fz = z; w.retarget = 0;
   w.fh = Math.atan2(w.x - x, w.z - z) + (Math.random() - 0.5) * 0.8;
+  const a = needAgent(w, 6.5);
+  if (a) nav.fleeTarget(a, w.x, w.z, x, z, short ? 8 : 35);
 }
 function goHostile(w, kind) {
-  w.mode = 'hostile'; w.hostile = kind; w.modeT = 18; w.cd = kind === 'gun' ? 1.2 : 0.6; w.call = null;
+  w.mode = 'hostile'; w.hostile = kind; w.modeT = 18; w.cd = kind === 'gun' ? 1.2 : 0.6; w.call = null; w.retarget = 0;
+  needAgent(w, kind === 'gun' ? 4.5 : 5.8);
 }
+// Physical hit: dead bodies flop, the living get knocked down and then get up and react.
+export function knock(w, vel, dead) {
+  const r = ragdoll(w.ch, vel, dead ? { dead: true } : {
+    getUp: 1.8 + Math.random(),
+    onUp: (p, h) => {
+      w.x = p.x; w.z = p.z; w.h = h; dropAgent(w);
+      if (w.dead) return;
+      if (w.temper !== 'normal' && Math.random() < 0.8) goHostile(w, w.temper === 'gunman' ? 'gun' : 'melee');
+      else startFlee(w, p.x - vel.x, p.z - vel.z);
+    },
+  });
+  if (r && dead) dropAgent(w);
+  return !!r;
+}
+export function flinch(w) { w.ch.flinch = 1; }
 // The player hurt this person without killing them.
 export function provoke(w) {
   if (w.dead) return;
@@ -119,18 +146,33 @@ const freeModes = new Set(['flee', 'cower', 'hostile', 'gone']);
 export function updateWalkers(dt, tSec, nowMs, cam) {
   const target = ctx.target();
   for (const w of walkers) {
-    if (w.dead && nowMs - w.dead.t > RESPAWN_MS) { w.dead = null; w.hp = 40; w.extra += 500; w.mode = w.fixed ? 'fixed' : 'path'; }
+    if (w.dead && nowMs - w.dead.t > RESPAWN_MS) { w.dead = null; w.hp = 40; w.extra += 500; w.mode = w.fixed ? 'fixed' : 'path'; release(w.ch); dropAgent(w); }
     let speed = 0, pose = {};
+    if (w.ch.rag) {
+      // physics owns the body right now
+      const p = ragPos(w.ch); w.x = p.x; w.z = p.z;
+      if (w.dead) { w.dead.x = p.x; w.dead.z = p.z; }
+      const far = Math.abs(w.x - cam.x) > 160 || Math.abs(w.z - cam.z) > 160;
+      w.ch.g.visible = !far; if (w.dog) w.dog.g.visible = false;
+      continue;
+    }
     if (w.dead) {
       w.x = w.dead.x; w.z = w.dead.z; w.h = w.dead.h;
     } else if (freeModes.has(w.mode)) {
       w.modeT -= dt;
       if (w.mode === 'flee') {
-        const p = W.pushOutCircle(w.x + Math.sin(w.fh) * 6 * dt, w.z + Math.cos(w.fh) * 6 * dt, 0.4);
-        if (Math.hypot(p.x - w.x, p.z - w.z) < 6 * dt * 0.5) w.fh += 1.2; // blocked: turn
-        if (W.isLand(p.x, p.z)) { w.x = p.x; w.z = p.z; } else w.fh += Math.PI;
-        w.h = w.fh; speed = 7;
-        if (w.modeT <= 0) { w.mode = 'gone'; w.modeT = 25; }
+        if (w.agent) {
+          const st = nav.agentState(w.agent);
+          w.x = st.x; w.z = st.z; if (st.speed > 0.3) w.h = Math.atan2(st.vx, st.vz); speed = st.speed + 1;
+          w.retarget -= dt;
+          if (st.speed < 0.5 && w.retarget <= 0) { w.retarget = 1; nav.fleeTarget(w.agent, w.x, w.z, w.fx, w.fz, 30); }
+        } else {
+          const p = W.pushOutCircle(w.x + Math.sin(w.fh) * 6 * dt, w.z + Math.cos(w.fh) * 6 * dt, 0.4);
+          if (Math.hypot(p.x - w.x, p.z - w.z) < 6 * dt * 0.5) w.fh += 1.2;
+          if (W.isLand(p.x, p.z)) { w.x = p.x; w.z = p.z; } else w.fh += Math.PI;
+          w.h = w.fh; speed = 7;
+        }
+        if (w.modeT <= 0) { w.mode = 'gone'; w.modeT = 25; dropAgent(w); }
       } else if (w.mode === 'cower') {
         w.h += angDiff(w.h, Math.atan2(w.fx - w.x, w.fz - w.z) + Math.PI) * Math.min(1, dt * 5);
         pose = { cower: true };
@@ -141,10 +183,27 @@ export function updateWalkers(dt, tSec, nowMs, cam) {
         pose = { aim: w.hostile === 'gun', weapon: w.hostile === 'gun' ? 'gun' : 'none', swing: w.swing || 0 };
         if (w.modeT <= 0 || !target || target.dead || Math.hypot(target.x - w.x, target.z - w.z) > 70) { startFlee(w, target ? target.x : w.x, target ? target.z : w.z); }
       } else if (w.mode === 'gone') {
+        dropAgent(w);
         // out of sight for a while, then back to normal life
         if (w.modeT <= 0) { w.mode = w.fixed ? 'fixed' : 'path'; w.extra += 300; }
       }
     } else {
+      // jump out of the way of a car coming straight at you
+      if (!w.call && w.mode !== 'fixed' || (w.fixed && w.fixed.pose !== 'lie')) {
+        for (const v of ctx.vehicles()) {
+          const vs = Math.hypot(v.vx, v.vz);
+          if (vs < 6) continue;
+          const dx = w.x - v.x, dz = w.z - v.z;
+          if (Math.abs(dx) > 14 || Math.abs(dz) > 14) continue;
+          const along = (dx * v.vx + dz * v.vz) / vs, lat = (dx * v.vz - dz * v.vx) / vs;
+          if (along > 0 && along / vs < 1.4 && Math.abs(lat) < 2.2) {
+            const side = lat >= 0 ? 1 : -1;
+            startFlee(w, w.x - (v.vz / vs) * side * 5, w.z + (v.vx / vs) * side * 5, true);
+            break;
+          }
+        }
+        if (w.mode === 'flee') continue;
+      }
       if (w.panic > 0) { w.panic -= dt; w.extra += dt * w.speed * 2.6; }
       const p = walkerPose(w, tSec);
       w.x = p.x; w.z = p.z; w.h = p.h;
@@ -156,8 +215,7 @@ export function updateWalkers(dt, tSec, nowMs, cam) {
     w.ch.g.visible = !far;
     if (w.dog) w.dog.g.visible = !far && !w.dead;
     if (far) continue;
-    w.ch.g.position.set(w.x, w.fixed && !w.dead && w.mode === 'fixed' ? (w.fixed.pose === 'sit' ? -0.35 : 0) : 0, w.z);
-    w.ch.g.rotation.y = w.h;
+    placeCharacter(w.ch, w.x, w.fixed && !w.dead && w.mode === 'fixed' ? (w.fixed.pose === 'sit' ? -0.35 : 0) : 0, w.z, w.h);
     animateCharacter(w.ch, dt, { speed, dead: !!w.dead, phone: !!w.call || pose.phone, ...pose });
     if (w.dog && !w.dead) {
       const d = w.dog, side = 0.8;
@@ -174,17 +232,17 @@ export function updateWalkers(dt, tSec, nowMs, cam) {
   for (let i = fleeing.length - 1; i >= 0; i--) {
     const f = fleeing[i];
     f.t -= dt;
-    if (f.down > 0) {
-      f.down -= dt;
-      f.ch.g.position.set(f.x, 0, f.z); f.ch.g.rotation.y = f.h + Math.PI;
-      animateCharacter(f.ch, dt, { dead: true });
-      continue;
+    if (f.ch.rag) continue;
+    if (f.agent) {
+      const st = nav.agentState(f.agent);
+      f.x = st.x; f.z = st.z; if (st.speed > 0.3) f.h = Math.atan2(st.vx, st.vz);
+    } else {
+      const p = W.pushOutCircle(f.x + Math.sin(f.h) * 6 * dt, f.z + Math.cos(f.h) * 6 * dt, 0.4);
+      f.x = p.x; f.z = p.z;
     }
-    const p = W.pushOutCircle(f.x + Math.sin(f.h) * 6 * dt, f.z + Math.cos(f.h) * 6 * dt, 0.4);
-    f.x = p.x; f.z = p.z;
-    f.ch.g.position.set(f.x, 0, f.z); f.ch.g.rotation.y = f.h;
+    placeCharacter(f.ch, f.x, 0, f.z, f.h);
     animateCharacter(f.ch, dt, { speed: 7 });
-    if (f.t <= 0) { scene.remove(f.ch.g); fleeing.splice(i, 1); }
+    if (f.t <= 0) { if (f.agent) nav.removeAgent(f.agent); scene.remove(f.ch.g); fleeing.splice(i, 1); }
   }
 }
 
@@ -194,14 +252,25 @@ function hostileStep(w, dt, t) {
   if (!t || t.dead) return;
   const dx = t.x - w.x, dz = t.z - w.z, d = Math.hypot(dx, dz);
   w.h += angDiff(w.h, Math.atan2(dx, dz)) * Math.min(1, dt * 8);
-  let move = 0;
-  if (w.hostile === 'melee') move = d > 1.3 ? 5.5 : 0;
-  else move = d > 16 ? 4.5 : d < 7 ? -2 : 0;
-  if (t.inVeh && w.hostile === 'melee') move = d > 3 ? 5 : 0;
-  if (move) {
-    const p = W.pushOutCircle(w.x + (dx / d) * move * dt, w.z + (dz / d) * move * dt, 0.4);
-    if (W.isLand(p.x, p.z)) { w.x = p.x; w.z = p.z; }
-    w.spd = Math.abs(move) + 1;
+  if (w.agent) {
+    w.retarget -= dt;
+    if (w.retarget <= 0) {
+      w.retarget = 0.3;
+      if (w.hostile === 'melee') nav.moveTo(w.agent, t.x - (dx / d) * 1.1, t.z - (dz / d) * 1.1);
+      else if (d > 16 || d < 7) nav.moveTo(w.agent, t.x - (dx / d) * 11, t.z - (dz / d) * 11);
+      else w.agent.resetMoveTarget();
+    }
+    const st = nav.agentState(w.agent);
+    w.x = st.x; w.z = st.z; w.spd = st.speed + (st.speed > 0.3 ? 1 : 0);
+  } else {
+    let move = 0;
+    if (w.hostile === 'melee') move = d > 1.3 ? 5.5 : 0;
+    else move = d > 16 ? 4.5 : d < 7 ? -2 : 0;
+    if (move) {
+      const p = W.pushOutCircle(w.x + (dx / d) * move * dt, w.z + (dz / d) * move * dt, 0.4);
+      if (W.isLand(p.x, p.z)) { w.x = p.x; w.z = p.z; }
+      w.spd = Math.abs(move) + 1;
+    }
   }
   w.cd -= dt;
   if (w.swing) w.swing = Math.max(0, w.swing - dt * 3);
@@ -220,5 +289,13 @@ function hostileStep(w, dt, t) {
 export function spawnFleeing(x, z, h, down = 0) {
   const ch = makeCharacter(randomLook());
   scene.add(ch.g);
-  fleeing.push({ ch, x, z, h, t: 7 + down, down });
+  ch.g.position.set(x, 0, z); ch.g.rotation.y = h;
+  const f = { ch, x, z, h, t: 8 + down, agent: null };
+  const run = () => { f.agent = nav.addAgent(f.x, f.z, 6.5); if (f.agent) nav.fleeTarget(f.agent, f.x, f.z, f.x - Math.sin(f.h), f.z - Math.cos(f.h), 40); };
+  if (down > 0) {
+    // thrown onto the street
+    const ok = ragdoll(ch, { x: Math.sin(h) * 4, y: 2.5, z: Math.cos(h) * 4 }, { getUp: down, onUp: (p, hh) => { f.x = p.x; f.z = p.z; f.h = hh; run(); } });
+    if (!ok) run();
+  } else run();
+  fleeing.push(f);
 }

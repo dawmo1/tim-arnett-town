@@ -131,6 +131,8 @@ export function lineOfSight(x1, y1, z1, x2, y2, z2) {
 
 // ---------- mesh building ----------
 const groundPos = [], groundCol = [], groundIdx = [];
+// walkable ground for the navigation mesh (same triangles as the visible ground)
+export const navSource = { pos: groundPos, idx: groundIdx };
 function addStrip(s0, s1, dA, dB, y, color, step = 8) {
   const fa = typeof dA === 'function' ? dA : () => dA;
   const fb = typeof dB === 'function' ? dB : () => dB;

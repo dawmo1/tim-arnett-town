@@ -3,7 +3,9 @@ import * as W from './world.js';
 const $ = (id) => document.getElementById(id);
 export const el = {
   hud: $('hud'), menu: $('menu'), stars: $('stars'), feed: $('feed'), chatLog: $('chatLog'), chatInput: $('chatInput'),
-  weapon: $('weapon'), weaponIcon: $('weaponIcon'), hpfill: $('hpfill'), prompt: $('prompt'), dead: $('dead'), click: $('clickToPlay'),
+  weapon: $('weapon'), weaponIcon: $('weaponIcon'), hpfill: $('hpfill'), prompt: $('prompt'), dead: $('dead'),
+  ammo: $('ammo'), armorfill: $('armorfill'), cash: $('cash'), helpbox: $('helpbox'), area: $('area'), areaName: $('areaName'), streetName: $('streetName'),
+  pause: $('pause'), bigmap: $('bigmap'), pauseTabs: $('pauseTabs'), resumeBtn: $('resumeBtn'), deadSub: $('deadSub'), shareHint: $('shareHint'),
   roomInfo: $('roomInfo'), playerList: $('playerList'), help: $('help'), minimap: $('minimap'), hurt: $('hurt'),
   wheel: $('wheel'), wheelName: $('wheelName'), wheelStats: $('wheelStats'), announce: $('announce'), speedo: $('speedo'),
   crosshair: $('crosshair'), clock: $('clock'),
@@ -25,8 +27,9 @@ export function setHealth(hp) {
   el.hpfill.style.background = hp > 50 ? '#43d17a' : hp > 25 ? '#f5b041' : '#ec4747';
 }
 export function flashHurt() { el.hurt.classList.remove('on'); void el.hurt.offsetWidth; el.hurt.classList.add('on'); }
-export function setWeapon(name) {
+export function setWeapon(name, ammo = '') {
   el.weapon.textContent = name;
+  el.ammo.textContent = ammo;
   el.weaponIcon.innerHTML = `<svg viewBox="0 0 48 24" fill="currentColor" aria-hidden="true">${ICONS[name] || ''}</svg>`;
 }
 let lastStars = 0;
@@ -54,8 +57,38 @@ export function addChat(name, msg) {
 let promptHold = 0;
 export function setPrompt(t) { if (performance.now() < promptHold) return; el.prompt.textContent = t || ''; el.prompt.hidden = !t; }
 export function flashPrompt(t) { el.prompt.textContent = t; el.prompt.hidden = false; promptHold = performance.now() + 1500; }
+export function setArmor(a) { el.armorfill.style.width = Math.max(0, Math.min(100, a)) + '%'; }
+let shownCash = -1;
+export function setCash(n) {
+  if (n === shownCash) return;
+  if (shownCash >= 0) { el.cash.classList.remove('bump'); void el.cash.offsetWidth; el.cash.classList.add('bump'); }
+  shownCash = n; el.cash.textContent = '$' + n.toLocaleString('en-US');
+}
+// Top-left help box: short tips, one at a time. Text may contain <kbd>X</kbd>.
+const helpQ = []; let helpT = 0;
+const seenHelp = new Set();
+export function help(html, secs = 6, once = true) {
+  if (once && seenHelp.has(html)) return;
+  seenHelp.add(html); helpQ.push({ html, secs });
+  if (!helpT) nextHelp();
+}
+function nextHelp() {
+  const h = helpQ.shift();
+  if (!h) { el.helpbox.hidden = true; helpT = 0; return; }
+  el.helpbox.innerHTML = h.html; el.helpbox.hidden = false;
+  helpT = setTimeout(nextHelp, h.secs * 1000);
+}
+// Area + street name, shown for a few seconds when it changes.
+let areaKey = '', areaT = 0;
+export function showArea(name, street) {
+  const key = name + '|' + street;
+  if (key === areaKey) return;
+  areaKey = key; el.areaName.textContent = name; el.streetName.textContent = street;
+  el.area.classList.add('on'); clearTimeout(areaT); areaT = setTimeout(() => el.area.classList.remove('on'), 4000);
+}
 export function setPlayers(room, list, online) {
-  el.roomInfo.textContent = online ? `Room ${room}` : 'Solo mode';
+  el.roomInfo.textContent = online ? `Room ${room} · ${list.length} playing` : 'Solo mode';
+  el.shareHint.textContent = online ? `Friends join with room code ${room}, or this link: ${location.origin}${location.pathname}#${room}` : 'Multiplayer turns on once Firebase is set up (see the README).';
   el.playerList.innerHTML = '';
   for (const p of list) {
     const li = document.createElement('li');
@@ -143,16 +176,16 @@ map.width = Math.ceil((maxX - minX) * SCALE); map.height = Math.ceil((maxZ - min
 const mx = (x) => (x - minX) * SCALE, mz = (z) => (z - minZ) * SCALE;
 export function drawMapBase() {
   const g = map.getContext('2d');
-  g.fillStyle = '#4fb3cf'; g.fillRect(0, 0, map.width, map.height);
-  g.fillStyle = '#e9dfae';
+  g.fillStyle = '#2f6d8c'; g.fillRect(0, 0, map.width, map.height);
+  g.fillStyle = '#7c8a72';
   g.beginPath(); pts.forEach((p, i) => (i ? g.lineTo(mx(p.x), mz(p.z)) : g.moveTo(mx(p.x), mz(p.z)))); g.closePath(); g.fill();
   for (const i of W.islets) { g.beginPath(); g.arc(mx(i.x), mz(i.z), i.r * SCALE, 0, 7); g.fill(); }
   const line = (s0, s1, d, w, c) => { g.strokeStyle = c; g.lineWidth = w * SCALE; g.beginPath(); for (let s = s0; s <= s1; s += 10) { const p = W.P(s, d); s === s0 ? g.moveTo(mx(p.x), mz(p.z)) : g.lineTo(mx(p.x), mz(p.z)); } g.stroke(); };
-  line(W.BRIDGE_END, W.L, 0, 14, '#ffffff');
+  line(W.BRIDGE_END, W.L, 0, 14, '#e9ecef');
   line(-198, -158, 5, 26, '#ffffff');
   line(135, 965, 48, 10, '#f5f5f5'); line(135, 965, -48, 10, '#f5f5f5');
   for (const c of W.CROSS) { const a = W.P(c, -53), b = W.P(c, 53); g.strokeStyle = '#f5f5f5'; g.lineWidth = 10 * SCALE; g.beginPath(); g.moveTo(mx(a.x), mz(a.z)); g.lineTo(mx(b.x), mz(b.z)); g.stroke(); }
-  g.fillStyle = '#b9b2a0';
+  g.fillStyle = '#58625a';
   for (const b of W.colliders) {
     if (b.h < 2) continue;
     g.save(); g.translate(mx(b.cx), mz(b.cz)); g.rotate(Math.atan2(b.uz, b.ux));
@@ -161,56 +194,87 @@ export function drawMapBase() {
   g.fillStyle = '#ffb300';
   for (const r of W.ramps) { g.beginPath(); g.arc(mx(r.x), mz(r.z), 3, 0, 7); g.fill(); }
 }
-// view: {x, z, yaw}; blips: [{x, z, color, size, h}]
-export function drawMinimap(view, me, blips, zoom = 1, cones = null) {
-  const S = el.minimap.width, c = S / 2, k = zoom;
+// view: {x, z, yaw}; blips: [{x, z, color, size, shape, label}]; waypoint: {x, z} or null
+export function drawMinimap(view, me, blips, zoom = 1, cones = null, waypoint = null) {
+  const Wd = el.minimap.width, Ht = el.minimap.height, cx = Wd / 2, cy = Ht * 0.6, k = zoom;
   const alpha = -Math.PI / 2 - Math.atan2(Math.cos(view.yaw), Math.sin(view.yaw));
+  const raw = (x, z) => { const dx = (x - view.x) * SCALE * k, dz = (z - view.z) * SCALE * k; return [cx + dx * Math.cos(alpha) - dz * Math.sin(alpha), cy + dx * Math.sin(alpha) + dz * Math.cos(alpha)]; };
+  // keep a point inside the frame (for blips that are off the edge)
+  const clampPt = ([x, y], m = 8) => {
+    const dx = x - cx, dy = y - cy;
+    const sx = dx ? (dx > 0 ? (Wd - m - cx) / dx : (m - cx) / dx) : Infinity, sy = dy ? (dy > 0 ? (Ht - m - cy) / dy : (m - cy) / dy) : Infinity;
+    const t = Math.min(1, sx, sy);
+    return [cx + dx * t, cy + dy * t, t < 1];
+  };
   mm.save();
-  mm.clearRect(0, 0, S, S);
-  mm.beginPath(); mm.arc(c, c, c, 0, 7); mm.clip();
-  mm.fillStyle = '#4fb3cf'; mm.fillRect(0, 0, S, S);
-  mm.translate(c, c); mm.rotate(alpha); mm.scale(k, k);
+  mm.clearRect(0, 0, Wd, Ht);
+  mm.fillStyle = '#3d8fb0'; mm.fillRect(0, 0, Wd, Ht);
+  mm.translate(cx, cy); mm.rotate(alpha); mm.scale(k, k);
   mm.drawImage(map, -mx(view.x), -mz(view.z));
   mm.restore();
-  const toScreen = (x, z) => {
-    const dx = (x - view.x) * SCALE * k, dz = (z - view.z) * SCALE * k;
-    let sx = dx * Math.cos(alpha) - dz * Math.sin(alpha), sy = dx * Math.sin(alpha) + dz * Math.cos(alpha);
-    const d = Math.hypot(sx, sy), lim = c - 7;
-    if (d > lim) { sx *= lim / d; sy *= lim / d; }
-    return [c + sx, c + sy];
-  };
-  // police vision cones (only while they're searching for you); already cut off by buildings
   if (cones) {
-    const raw = (x, z) => { const dx = (x - view.x) * SCALE * k, dz = (z - view.z) * SCALE * k; return [c + dx * Math.cos(alpha) - dz * Math.sin(alpha), c + dx * Math.sin(alpha) + dz * Math.cos(alpha)]; };
-    mm.save(); mm.beginPath(); mm.arc(c, c, c, 0, 7); mm.clip();
     for (const cn of cones) {
-      mm.fillStyle = 'rgba(255, 64, 64, 0.28)'; mm.strokeStyle = 'rgba(255, 64, 64, 0.6)'; mm.lineWidth = 1;
+      mm.fillStyle = 'rgba(229, 72, 77, 0.3)'; mm.strokeStyle = 'rgba(229, 72, 77, 0.7)'; mm.lineWidth = 1;
       mm.beginPath();
       if (cn.heli) { const [hx, hy] = raw(cn.x, cn.z); mm.arc(hx, hy, cn.r * SCALE * k, 0, 7); }
       else { const [sx, sy] = raw(cn.x, cn.z); mm.moveTo(sx, sy); for (const p of cn.pts) { const [px, py] = raw(p[0], p[1]); mm.lineTo(px, py); } mm.closePath(); }
       mm.fill(); mm.stroke();
     }
-    mm.restore();
+  }
+  if (waypoint) {
+    const [px, py] = raw(me.x, me.z), [wx, wy, edge] = clampPt(raw(waypoint.x, waypoint.z), 10);
+    mm.strokeStyle = 'rgba(190, 120, 255, 0.85)'; mm.lineWidth = 3; mm.setLineDash([6, 5]);
+    mm.beginPath(); mm.moveTo(px, py); mm.lineTo(wx, wy); mm.stroke(); mm.setLineDash([]);
+    mm.fillStyle = '#b678ff'; mm.strokeStyle = '#000'; mm.lineWidth = 1.5;
+    mm.beginPath(); mm.arc(wx, wy, edge ? 5 : 6.5, 0, 7); mm.fill(); mm.stroke();
   }
   for (const b of blips) {
-    const [x, y] = toScreen(b.x, b.z);
-    mm.fillStyle = b.color; mm.strokeStyle = 'rgba(0,0,0,.6)'; mm.lineWidth = 1.5;
+    const [x, y] = clampPt(raw(b.x, b.z));
+    mm.fillStyle = b.color; mm.strokeStyle = 'rgba(0,0,0,.65)'; mm.lineWidth = 1.5;
     mm.beginPath();
     if (b.shape === 'square') mm.rect(x - b.size, y - b.size, b.size * 2, b.size * 2);
     else mm.arc(x, y, b.size, 0, 7);
     mm.fill(); mm.stroke();
     if (b.label) { mm.fillStyle = '#fff'; mm.font = 'bold 10px system-ui'; mm.textAlign = 'center'; mm.textBaseline = 'middle'; mm.fillText(b.label, x, y + 0.5); }
   }
-  // north marker
-  const [nx, ny] = toScreen(view.x, view.z - 10000);
-  mm.fillStyle = '#263238'; mm.beginPath(); mm.arc(nx, ny, 8, 0, 7); mm.fill();
+  const [nx, ny] = clampPt(raw(view.x, view.z - 100000), 11);
+  mm.fillStyle = 'rgba(8,12,18,.85)'; mm.beginPath(); mm.arc(nx, ny, 8, 0, 7); mm.fill();
   mm.fillStyle = '#fff'; mm.font = 'bold 10px system-ui'; mm.textAlign = 'center'; mm.textBaseline = 'middle'; mm.fillText('N', nx, ny + 0.5);
-  // me
-  const [px, py] = toScreen(me.x, me.z);
+  const [px, py] = raw(me.x, me.z);
   const hx = Math.sin(me.h), hz = Math.cos(me.h);
   const ang = Math.atan2(hx * Math.sin(alpha) + hz * Math.cos(alpha), hx * Math.cos(alpha) - hz * Math.sin(alpha));
   mm.save(); mm.translate(px, py); mm.rotate(ang);
-  mm.fillStyle = '#ffeb3b'; mm.strokeStyle = '#000'; mm.lineWidth = 1.5;
-  mm.beginPath(); mm.moveTo(8, 0); mm.lineTo(-5, 5); mm.lineTo(-2, 0); mm.lineTo(-5, -5); mm.closePath(); mm.fill(); mm.stroke();
+  mm.fillStyle = '#fff'; mm.strokeStyle = '#000'; mm.lineWidth = 1.5;
+  mm.beginPath(); mm.moveTo(8, 0); mm.lineTo(-5, 5.5); mm.lineTo(-2, 0); mm.lineTo(-5, -5.5); mm.closePath(); mm.fill(); mm.stroke();
   mm.restore();
+}
+
+// Full-screen pause map. Returns nothing; use bigMapToWorld for clicks.
+const bm = el.bigmap.getContext('2d');
+let bigFit = { s: 1, ox: 0, oy: 0 };
+export function drawBigMap(me, blips, waypoint) {
+  const Wd = el.bigmap.width, Ht = el.bigmap.height;
+  const s = Math.min(Wd / map.width, Ht / map.height), ox = (Wd - map.width * s) / 2, oy = (Ht - map.height * s) / 2;
+  bigFit = { s, ox, oy };
+  bm.fillStyle = '#3d8fb0'; bm.fillRect(0, 0, Wd, Ht);
+  bm.drawImage(map, ox, oy, map.width * s, map.height * s);
+  const P = (x, z) => [ox + mx(x) * s, oy + mz(z) * s];
+  for (const b of blips) {
+    const [x, y] = P(b.x, b.z);
+    bm.fillStyle = b.color; bm.strokeStyle = '#000'; bm.lineWidth = 1.5;
+    bm.beginPath(); if (b.shape === 'square') bm.rect(x - b.size, y - b.size, b.size * 2, b.size * 2); else bm.arc(x, y, b.size, 0, 7); bm.fill(); bm.stroke();
+    if (b.label) { bm.fillStyle = '#fff'; bm.font = 'bold 11px system-ui'; bm.textAlign = 'center'; bm.textBaseline = 'middle'; bm.fillText(b.label, x, y + 0.5); }
+    if (b.name) { bm.fillStyle = '#fff'; bm.font = '600 12px Inter, system-ui'; bm.textAlign = 'left'; bm.fillText(b.name, x + 9, y + 1); }
+  }
+  if (waypoint) { const [x, y] = P(waypoint.x, waypoint.z); bm.fillStyle = '#b678ff'; bm.strokeStyle = '#000'; bm.beginPath(); bm.arc(x, y, 8, 0, 7); bm.fill(); bm.stroke(); }
+  const [px, py] = P(me.x, me.z);
+  bm.save(); bm.translate(px, py); bm.rotate(Math.atan2(Math.cos(me.h), Math.sin(me.h)));
+  bm.fillStyle = '#fff'; bm.strokeStyle = '#000'; bm.lineWidth = 2;
+  bm.beginPath(); bm.moveTo(11, 0); bm.lineTo(-7, 7); bm.lineTo(-3, 0); bm.lineTo(-7, -7); bm.closePath(); bm.fill(); bm.stroke();
+  bm.restore();
+}
+export function bigMapToWorld(ev) {
+  const r = el.bigmap.getBoundingClientRect();
+  const cxp = ((ev.clientX - r.left) / r.width) * el.bigmap.width, cyp = ((ev.clientY - r.top) / r.height) * el.bigmap.height;
+  return { x: (cxp - bigFit.ox) / bigFit.s / SCALE + minX, z: (cyp - bigFit.oy) / bigFit.s / SCALE + minZ };
 }

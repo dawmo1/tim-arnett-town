@@ -6,34 +6,46 @@
   <title>Tim Arnett Town</title>
   <meta name="description" content="Free multiplayer island sandbox. Steal cars, cause chaos, run from the cops.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bungee&family=Rubik:wght@400;600;800&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;600;800&display=swap">
   <link rel="stylesheet" href="style.css">
   <script type="importmap">
-    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+    { "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/addons/" } }
   </script>
 </head>
 <body>
   <canvas id="game"></canvas>
 
   <div id="hud" hidden>
-    <div id="topleft"><div id="roomInfo"></div><ul id="playerList"></ul></div>
+    <div id="helpbox" hidden></div>
+
     <div id="topright">
-      <div id="weaponBox"><div id="weaponIcon"></div><div id="weapon"></div></div>
+      <div id="cash">$0</div>
+      <div id="weaponBox"><div id="weaponIcon"></div><div><div id="weapon"></div><div id="ammo"></div></div></div>
       <div id="stars"></div>
-      <ul id="feed"></ul>
     </div>
-    <div id="crosshair"></div>
-    <div id="prompt" hidden></div>
+
+    <ul id="feed"></ul>
     <div id="chat">
       <ul id="chatLog"></ul>
-      <input id="chatInput" maxlength="120" placeholder="Say something, Enter to send, Esc to cancel" autocomplete="off" hidden>
+      <input id="chatInput" maxlength="120" placeholder="Say something · Enter to send · Esc to cancel" autocomplete="off" hidden>
     </div>
+
     <div id="bottomleft">
       <div id="clock"></div>
-      <canvas id="minimap" width="220" height="220"></canvas>
-      <div id="hpbar"><div id="hpfill"></div></div>
+      <canvas id="minimap" width="300" height="190"></canvas>
+      <div id="bars">
+        <div class="bar hp"><div id="hpfill"></div></div>
+        <div class="bar armor"><div id="armorfill"></div></div>
+      </div>
     </div>
-    <div id="speedo" hidden></div>
+
+    <div id="bottomright">
+      <div id="speedo" hidden></div>
+      <div id="area"><b id="areaName"></b><span id="streetName"></span></div>
+    </div>
+
+    <div id="crosshair"></div>
+    <div id="prompt" hidden></div>
     <div id="announce"></div>
     <div id="wheel" hidden>
       <div class="ring">
@@ -41,32 +53,49 @@
       </div>
     </div>
     <div id="hurt"></div>
-    <div id="dead" hidden><span>YOU DIED</span><small>Respawning at Arnett Clinic…</small></div>
-    <div id="clickToPlay">Click to play · H for controls</div>
-    <div id="help" hidden>
-      <h2>Controls</h2>
-      <dl>
-        <dt>WASD</dt><dd>Move / drive</dd>
-        <dt>Mouse</dt><dd>Look and aim</dd>
-        <dt>Click</dt><dd>Attack / shoot</dd>
-        <dt>Hold Tab or Q</dt><dd>Weapon wheel (or 1–7 / scroll)</dd>
-        <dt>Shift</dt><dd>Sprint</dd>
-        <dt>Space</dt><dd>Jump / handbrake</dd>
-        <dt>E</dt><dd>Get in or out of a vehicle (steals it)</dd>
-        <dt>T</dt><dd>Chat</dd>
-        <dt>H</dt><dd>Show / hide this</dd>
-      </dl>
-      <p>Crimes give you wanted stars. Stay out of police sight to lose them.</p>
+    <div id="dead" hidden><div class="band"><span>YOU DIED</span></div><small id="deadSub">Respawning at Arnett Clinic…</small></div>
+
+    <div id="pause" hidden>
+      <div class="pauseTop">
+        <h2>Tim Arnett Town</h2>
+        <nav id="pauseTabs" aria-label="Pause menu">
+          <button data-tab="map" class="on">Map</button>
+          <button data-tab="players">Players</button>
+          <button data-tab="controls">Controls</button>
+        </nav>
+        <div id="roomInfo"></div>
+      </div>
+      <div class="pauseBody">
+        <section data-panel="map">
+          <canvas id="bigmap" width="1000" height="560" aria-label="Island map. Click to set a waypoint."></canvas>
+          <p class="hint">Click the map to set a waypoint. Click it again to clear it.</p>
+        </section>
+        <section data-panel="players" hidden><ul id="playerList"></ul><p class="hint" id="shareHint"></p></section>
+        <section data-panel="controls" hidden>
+          <dl id="help">
+            <dt>WASD</dt><dd>Move / drive</dd>
+            <dt>Mouse</dt><dd>Look and aim</dd>
+            <dt>Left click</dt><dd>Attack / shoot</dd>
+            <dt>Hold Tab or Q</dt><dd>Weapon wheel (or 1–7 / scroll)</dd>
+            <dt>Shift</dt><dd>Sprint</dd>
+            <dt>Space</dt><dd>Jump / handbrake</dd>
+            <dt>E</dt><dd>Get in or out (yanks drivers out)</dd>
+            <dt>T</dt><dd>Chat</dd>
+            <dt>Esc</dt><dd>Pause and map</dd>
+          </dl>
+        </section>
+      </div>
+      <button id="resumeBtn">Resume</button>
     </div>
   </div>
 
   <div id="menu">
     <div class="card">
-      <h1><span>Tim Arnett</span> Town</h1>
+      <h1>Tim Arnett <span>Town</span></h1>
       <p class="tag">An island of chaos. Grab a car. Grab your friends. Run from the cops.</p>
       <label for="nameInput">Your name</label>
       <input id="nameInput" maxlength="16" autocomplete="off">
-      <label for="roomInput">Room code <small>(same code = same game)</small></label>
+      <label for="roomInput">Room code <small>same code = same game</small></label>
       <input id="roomInput" maxlength="6" autocomplete="off">
       <button id="playBtn">Play</button>
       <p id="netStatus">Checking multiplayer…</p>
