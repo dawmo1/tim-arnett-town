@@ -2,7 +2,10 @@ import * as THREE from 'three';
 import * as W from './world.js';
 import { makeCharacter, animateCharacter, randomLook, nameTag, mat } from './character.js';
 import { createAllVehicles, stepVehicle, collideVehicles, pushCharOut, circles, trafficPose, charVehicle, makeVehicleMesh, damageZone, applyDamageVisual, applyBump } from './vehicles.js';
-import { initWalkers, updateWalkers, walkers, panicNear, spawnFleeing } from './npc.js';
+import { initWalkers, updateWalkers, walkers, panicNear, spawnFleeing, scare, provoke, setNpcContext } from './npc.js';
+import { initDayNight, updateDayNight, sky as weather, clockText } from './daynight.js';
+import { initLife, updateLife, startle } from './life.js';
+import { glowMats } from './vehicles.js';
 import * as police from './police.js';
 import * as fx from './fx.js';
 import * as ui from './ui.js';
@@ -42,7 +45,8 @@ scene.fog = new THREE.Fog(0xa8def2, 140, 345);
   scene.add(sky);
 }
 const camera = new THREE.PerspectiveCamera(70, 1, 0.3, 360);
-scene.add(new THREE.HemisphereLight(0xffffff, 0x99bb99, 2.3));
+const hemi = new THREE.HemisphereLight(0xffffff, 0x99bb99, 2.3);
+scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xfff4e0, 2.6);
 sun.position.set(80, 140, 40);
 sun.castShadow = true;
@@ -53,7 +57,7 @@ scene.add(sun, sun.target);
 const SUN_OFF = new THREE.Vector3(60, 120, 30);
 function followSun(x, z) {
   scene.userData.sky.position.set(x, 0, z);
-  sun.position.set(x + SUN_OFF.x, SUN_OFF.y, z + SUN_OFF.z);
+  sun.position.set(x + weather.sunDir.x * 150, weather.sunDir.y * 150, z + weather.sunDir.z * 150);
   sun.target.position.set(x, 0, z);
 }
 function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
@@ -63,6 +67,11 @@ resize();
 W.buildWorld(scene);
 fx.initFx(scene);
 initWalkers(scene);
+initDayNight({ scene, sun, hemi, skyMat: scene.userData.sky.material });
+initLife(scene);
+// your own car gets a real headlight at night
+const headlight = new THREE.SpotLight(0xfff2c8, 0, 55, 0.55, 0.6, 1.2);
+scene.add(headlight, headlight.target);
 const vehicles = createAllVehicles(scene);
 ui.drawMapBase();
 ui.buildWheel(WEAPONS, (i) => { selectWeapon(i); closeWheel(false); });
@@ -294,7 +303,7 @@ function explode(x, y, z, by, bu, origin) {
   const dm = Math.hypot(me.x - x, me.z - z);
   if (!me.dead && dm < R) damageMe(140 * (1 - dm / R), by, bu);
   if (me.veh) { const dv = Math.hypot(me.veh.x - x, me.veh.z - z); if (dv < R) damageVehicle(me.veh, 150 * (1 - dv / R)); }
-  panicNear(x, z, 40);
+  scare(x, z, 45, 'explosion'); startle(x, z, 60);
   if (origin) {
     for (const w of walkers) { if (w.dead) continue; const d = Math.hypot(w.x - x, w.z - z); if (d < R) hurtWalker(w, 200, (w.x - x) / (d || 1), (w.z - z) / (d || 1)); }
     for (const v of vehicles) {
@@ -312,7 +321,7 @@ function hurtWalker(w, dmg, dx, dz, p) {
   w.hp -= dmg;
   const hp = p || { x: w.x, y: 1.2, z: w.z };
   fx.blood(hp.x, hp.y, hp.z, dx, dz, 10);
-  w.panic = 6;
+  if (w.hp > 0) provoke(w);
   if (w.hp <= 0) {
     w.dead = { x: r1(w.x), z: r1(w.z), h: r2(w.h), t: net.now() };
     fx.bloodPool(w.x, w.z, 1.4);
@@ -539,7 +548,7 @@ function fire(w) {
   fx.soundShot(w.snd);
   if (performance.now() - lastAttack > 1000) report('gunfire'); else lastAttack = performance.now();
   if (w.name === 'Shotgun' || w.name === 'Rifle') shake = Math.max(shake, 0.12);
-  panicNear(me.x, me.z, 30);
+  panicNear(me.x, me.z, 30); startle(me.x, me.z, 30);
 }
 function melee(w) {
   const fx_ = Math.sin(me.h), fz_ = Math.cos(me.h);
@@ -947,7 +956,7 @@ function updateRemotes(dt) {
       r.seq = s[9]; r.lastShot = performance.now();
       fx.tracer({ x: r.x + Math.sin(r.h) * 0.6, y: r.y + 1.35, z: r.z + Math.cos(r.h) * 0.6 }, { x: s[10], y: s[11], z: s[12] });
       fx.soundShot(WEAPONS[r.weapon]?.snd || 'pistol', distCam(r.x, r.z));
-      panicNear(r.x, r.z, 30);
+      panicNear(r.x, r.z, 30); startle(r.x, r.z, 30);
     }
     const vo = r.veh ? vehById.get(r.veh) : null;
     r.vehObj = vo;
@@ -999,6 +1008,11 @@ function policePlayers() {
   for (const r of remotes.values()) arr.push({ uid: r.uid, x: r.x, z: r.z, vx: r.vx, vz: r.vz, speed: Math.hypot(r.vx, r.vz), stars: r.stars, alive: !r.dead, inVeh: !!r.veh, search: r.search, lkx: r.lkx, lkz: r.lkz });
   return arr;
 }
+setNpcContext({
+  target: () => (playing && !me.dead ? { x: me.veh ? me.veh.x : me.x, z: me.veh ? me.veh.z : me.z, dead: me.dead, inVeh: !!me.veh } : null),
+  hitPlayer: (dmg, by) => damageMe(dmg, by, ''),
+  shot: (w, to) => { const from = { x: w.x + Math.sin(w.h) * 0.5, y: 1.4, z: w.z + Math.cos(w.h) * 0.5 }; fx.tracer(from, to); fx.muzzleFlash(from); fx.soundShot('pistol', distCam(w.x, w.z)); },
+});
 police.initPolice(scene, {
   now: () => net.now(),
   vehicles: () => vehicles,
@@ -1031,6 +1045,7 @@ function updateHud(dt, t) {
     ui.setHealth(me.hp);
     if (ui.setStars(wanted.stars, wanted.search)) { ui.announce('WANTED', '★'.repeat(wanted.stars), '#ff5e5b'); fx.soundWanted(); }
     ui.setSpeedo(me.veh);
+    ui.setClock(clockText(), weather.weather, weather.night > 0.5);
     const host = hostUid();
     const list = [{ name: me.name, me: true, host: host === net.uid, stars: wanted.stars }];
     for (const r of remotes.values()) list.push({ name: r.name, host: host === r.uid, stars: r.stars });
@@ -1059,6 +1074,33 @@ function updateHud(dt, t) {
   }
 }
 
+// Sky, weather, lights, wildlife and ambience. Runs in the menu too.
+function updateWorldLife(dt, nowMs, t) {
+  const thunder = updateDayNight(dt, nowMs, camera.position);
+  if (thunder) setTimeout(() => fx.soundThunder(0.6 + Math.random() * 0.4), thunder * 1000);
+  const n = weather.night;
+  glowMats.head.opacity = n * 0.9; glowMats.beam.opacity = n * 0.07; glowMats.tail.opacity = n * 0.8;
+  const lightsOn = n > 0.05 || weather.rain > 0.3;
+  for (const v of vehicles) { const g = v.mesh.userData.glow; if (g) g.visible = lightsOn && !v.exploded && v.hp > 0 && (v.mode === 'traffic' || !!v.driver); }
+  for (const u of police.cops.values()) if (u.kind < 2) { const g = u.v.mesh.userData.glow; if (g) g.visible = lightsOn && !police.isDown(u); }
+  if (me.veh && n > 0.15 && me.veh.hp > 0) {
+    const v = me.veh, fx_ = Math.sin(v.h), fz_ = Math.cos(v.h);
+    headlight.intensity = 60 * n;
+    headlight.position.set(v.x + fx_ * (v.T.len / 2), v.y + 1, v.z + fz_ * (v.T.len / 2));
+    headlight.target.position.set(v.x + fx_ * 25, v.y, v.z + fz_ * 25);
+  } else headlight.intensity = 0;
+  const threats = [];
+  if (playing && !me.dead) threats.push({ x: me.x, z: me.z, r: me.veh ? 4 : 3.2 });
+  for (const r of remotes.values()) threats.push({ x: r.x, z: r.z, r: 3.2 });
+  for (const v of vehicles) if (v.speed > 3) threats.push({ x: v.x, z: v.z, r: 3.5 });
+  updateLife(dt, threats, t);
+  if (Math.random() < 0.25) {
+    const sd = W.toSD(camera.position.x, camera.position.z);
+    const shore = Math.max(0, 1 - Math.max(0, W.hw(Math.min(W.L, Math.max(0, sd.s))) - Math.abs(sd.d)) / 40);
+    fx.setAmbient({ hum: (1 - shore * 0.6) * (0.6 + 0.4 * weather.day), rain: weather.rain, waves: shore, crickets: n * (1 - weather.rain), birds: weather.day * (1 - weather.rain) * (1 - weather.night) });
+  }
+}
+
 function update(dt, t) {
   if (wheelOpen && remotes.size === 0) dt *= 0.3; // slow motion while choosing a weapon (solo only)
   const nowMs = net.now(), tSec = nowMs / 1000;
@@ -1073,6 +1115,7 @@ function update(dt, t) {
   updateGrenades(dt);
   updateWantedLevel(dt);
   updateCamera(dt);
+  updateWorldLife(dt, nowMs, t);
   fx.updateFx(dt);
   sendT -= dt;
   if (sendT <= 0) {
@@ -1101,6 +1144,7 @@ function frame(now) {
     updateVehicles(dt, nowMs / 1000, nowMs);
     updateWalkers(dt, nowMs / 1000, nowMs, camera.position);
     menuCamera(now / 1000);
+    updateWorldLife(dt, nowMs, now / 1000);
   }
   renderer.render(scene, camera);
 }

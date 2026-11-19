@@ -3,6 +3,7 @@ import { mat } from './character.js';
 import * as W from './world.js';
 import { rng, clamp } from './util.js';
 import * as fx from './fx.js';
+import { sky } from './daynight.js';
 
 export const TYPES = [
   { name: 'Sedan', len: 4.4, wid: 1.9, hgt: 1.45, max: 32, acc: 13, turn: 1.9, grip: 7, mass: 1.2, hp: 100 },
@@ -12,7 +13,28 @@ export const TYPES = [
   { name: 'Motorbike', len: 2.1, wid: 0.8, hgt: 1.1, max: 44, acc: 20, turn: 2.6, grip: 9, mass: 0.45, hp: 50, bike: true },
   { name: 'Scooter', len: 1.8, wid: 0.7, hgt: 1.05, max: 22, acc: 12, turn: 2.8, grip: 9, mass: 0.3, hp: 40, bike: true },
   { name: 'Police car', len: 4.6, wid: 2.0, hgt: 1.5, max: 33, acc: 14, turn: 2.0, grip: 8, mass: 1.4, hp: 160, police: true },
+  { name: 'City bus', len: 10, wid: 2.6, hgt: 3.1, max: 22, acc: 6, turn: 1.1, grip: 6, mass: 4, hp: 260, bus: true },
 ];
+export const BUS = 7;
+// Shared glow materials: their opacity follows the night (set once per frame in main).
+export const glowMats = {
+  head: new THREE.MeshBasicMaterial({ color: 0xfff2c8, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }),
+  beam: new THREE.MeshBasicMaterial({ color: 0xfff2c8, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }),
+  tail: new THREE.MeshBasicMaterial({ color: 0xff2a2a, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }),
+};
+const glowPlane = new THREE.PlaneGeometry(0.7, 0.4);
+const beamGeo = new THREE.ConeGeometry(3, 16, 12, 1, true).rotateX(-Math.PI / 2).translate(0, 0, 8);
+function addGlow(g, T) {
+  const gl = new THREE.Group(); gl.visible = false; g.add(gl);
+  const fz = T.len / 2 + 0.05, y = T.bike ? 0.95 : 0.3 + T.hgt * 0.35;
+  const xs = T.bike ? [0] : [T.wid / 2 - 0.3, -T.wid / 2 + 0.3];
+  for (const x of xs) {
+    const h = new THREE.Mesh(glowPlane, glowMats.head); h.position.set(x, y, fz); gl.add(h);
+    const t = new THREE.Mesh(glowPlane, glowMats.tail); t.position.set(x, y, -fz); t.rotation.y = Math.PI; gl.add(t);
+  }
+  const beam = new THREE.Mesh(beamGeo, glowMats.beam); beam.position.set(0, y - 0.1, fz); gl.add(beam);
+  g.userData.glow = gl;
+}
 export const POLICE = 6;
 const CAR_COLORS = [0xe74c3c, 0x3498db, 0xf1c40f, 0x2ecc71, 0xecf0f1, 0x34495e, 0x9b59b6, 0xe67e22, 0x1abc9c, 0x161616, 0xff6fa8];
 
@@ -37,6 +59,14 @@ export function makeVehicleMesh(T, color) {
     bx(body, 0xffffcc, 0.18, 0.14, 0.05, 0, 0.95, L * 0.38);
     if (T.name === 'Scooter') bx(body, color, 0.4, 0.08, 0.7, 0, 0.42, 0.05);
     for (const z of [L / 2 - 0.35, -L / 2 + 0.35]) { const w = new THREE.Mesh(wheelGeo, mat(0x111111)); w.scale.set(0.5, 0.95, 0.95); w.position.set(0, 0.36, z); body.add(w); parts.wheels.push(w); }
+  } else if (T.bus) {
+    bx(body, color, Wd, T.hgt - 0.5, L, 0, 0.35 + (T.hgt - 0.5) / 2, 0);
+    bx(body, 0, Wd + 0.02, 0.9, L * 0.82, 0, 1.9, -0.3, glassMat);
+    bx(body, 0, Wd * 0.9, 1.1, 0.05, 0, 1.75, L / 2 + 0.01, glassMat);
+    bx(body, 0xffffff, Wd + 0.03, 0.25, L, 0, 1.25, 0);
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(Wd * 0.8, 0.35), new THREE.MeshBasicMaterial({ map: busSign() }));
+    sign.position.set(0, T.hgt - 0.35, L / 2 + 0.02); body.add(sign);
+    parts.segL = 1.5;
   } else if (T.truck) {
     const fg = new THREE.Group(); fg.position.z = L / 2; body.add(fg); parts.frontG = fg;
     parts.hood = bx(fg, color, Wd, 1.7, 1.9, 0, 1.25, -0.95);
@@ -86,19 +116,29 @@ export function makeVehicleMesh(T, color) {
   if (!T.bike) {
     for (const sx of [1, -1]) for (const sz of [1, -1]) {
       const w = new THREE.Group();
-      w.position.set(sx * (Wd / 2 - 0.08), 0.36, sz * (L / 2 - (T.truck ? 1.0 : 0.85)));
+      w.position.set(sx * (Wd / 2 - 0.08), 0.36, sz * (L / 2 - (T.truck ? 1.0 : T.bus ? 2.0 : 0.85)));
       const tire = new THREE.Mesh(wheelGeo, mat(0x111111)); tire.castShadow = true; w.add(tire);
       bx(w, 0xcfd8dc, 0.04, 0.34, 0.34, sx * 0.14, 0, 0);
       body.add(w); parts.wheels.push(w);
     }
     // driver head: shown for traffic, cops and players
-    const head = bx(body, 0xe0ac69, 0.3, 0.3, 0.3, 0.42, 0.3 + T.hgt * 0.72, T.truck ? L / 2 - 0.9 : -0.1);
+    const head = bx(body, 0xe0ac69, 0.3, 0.3, 0.3, 0.42, 0.3 + T.hgt * 0.72, T.truck ? L / 2 - 0.9 : T.bus ? L / 2 - 1.2 : -0.1);
     head.visible = false;
     g.userData.driverHead = head;
   }
+  addGlow(g, T);
   g.userData.body = body;
   g.userData.parts = parts;
   return g;
+}
+let _busSign = null;
+function busSign() {
+  if (_busSign) return _busSign;
+  const c = document.createElement('canvas'); c.width = 256; c.height = 40;
+  const x = c.getContext('2d'); x.fillStyle = '#111'; x.fillRect(0, 0, 256, 40);
+  x.fillStyle = '#ffb300'; x.font = 'bold 24px monospace'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText('12 ARNETT AVE', 128, 21);
+  _busSign = new THREE.CanvasTexture(c); _busSign.colorSpace = THREE.SRGBColorSpace;
+  return _busSign;
 }
 
 let burntMat = null;
@@ -263,12 +303,12 @@ export function stepVehicle(v, inp, dt) {
   if (grounded) {
     vf -= vf * ((inp.throttle || inp.brake) && alive ? 0.12 : 0.7) * dt;
     if (inp.handbrake) vf -= vf * 1.4 * dt;
-    vr *= Math.exp(-(inp.handbrake ? 1.6 : T.grip) * dt);
+    vr *= Math.exp(-(inp.handbrake ? 1.6 : T.grip * sky.grip) * dt);
   }
   if (vf > T.max) vf = T.max;
   const yaw = alive ? (inp.steer || 0) * T.turn * clamp(vf / 5, -1, 1) * (1 - 0.35 * Math.min(1, Math.abs(vf) / T.max)) * (inp.handbrake ? 1.35 : 1) : 0;
   // spin: tires pull the turn rate toward what the steering asks for; a crash can overpower that
-  const gripK = grounded ? (inp.handbrake ? 2.5 : T.grip * 1.4) : 0.2;
+  const gripK = grounded ? (inp.handbrake ? 2.5 : T.grip * 1.4 * sky.grip) : 0.2;
   v.w = (v.w || 0) + (yaw - (v.w || 0)) * Math.min(1, gripK * dt);
   v.h += v.w * dt;
   const nfx = Math.sin(v.h), nfz = Math.cos(v.h), nrx = -Math.cos(v.h), nrz = Math.sin(v.h);
@@ -396,8 +436,9 @@ export function createAllVehicles(scene) {
   let n = 0;
   LOOPS.forEach((lp) => {
     for (let k = 0; k < lp.count; k++) {
-      const ti = [0, 0, 0, 1, 3, 2][Math.floor(r() * 6)];
-      const v = makeVehicle('t' + n++, ti, CAR_COLORS[Math.floor(r() * CAR_COLORS.length)], { x: 0, z: 0, h: 0 });
+      let ti = [0, 0, 0, 1, 3, 2][Math.floor(r() * 6)];
+      if (lp.center === 0 && (k === 3 || k === 10)) ti = BUS;
+      const v = makeVehicle('t' + n++, ti, ti === BUS ? 0x1e88e5 : CAR_COLORS[Math.floor(r() * CAR_COLORS.length)], { x: 0, z: 0, h: 0 });
       v.mode = 'traffic'; v.loop = lp; v.slot = k;
       list.push(v);
     }

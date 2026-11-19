@@ -28,6 +28,8 @@ export const docks = [];
 export const islets = [];
 export const parkedSpots = [];
 export const places = {};
+// Materials and lists the day/night + weather system tweaks at runtime.
+export const env = { glowSpots: [] };
 export const ramps = [];
 
 // Height of the ground at a point (ramps raise it; everything else is flat at 0).
@@ -332,7 +334,8 @@ export function buildWorld(scene) {
         const i = f * 4 + k;
         if (f === 2 || f === 3) { U.setXY(i, 0.03, 0.03); continue; }
         const span = f < 2 ? dd : w;
-        U.setXY(i, U.getX(i) * Math.max(1, Math.round(span / 4)), U.getY(i) * Math.max(1, Math.round(b.h / 3.4)));
+        // the window texture holds 4x4 windows, so divide by 4 (lets each window be lit or dark at night)
+        U.setXY(i, (U.getX(i) * Math.max(1, Math.round(span / 4)) + b.cx * 0.37) / 4, (U.getY(i) * Math.max(1, Math.round(b.h / 3.4))) / 4);
       }
       m4.compose(new THREE.Vector3(b.cx, 0, b.cz), q.setFromAxisAngle(up, b.rot), new THREE.Vector3(1, 1, 1));
       g.applyMatrix4(m4);
@@ -348,7 +351,9 @@ export function buildWorld(scene) {
     geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
     geo.setAttribute('color', new THREE.Float32BufferAttribute(colr, 3));
     geo.setIndex(idx);
-    const bm = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ map: windowTexture(), vertexColors: true }));
+    const [dayTex, litTex] = windowTextures();
+    const bm = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ map: dayTex, vertexColors: true, emissiveMap: litTex, emissive: 0xffd27a, emissiveIntensity: 0 }));
+    env.buildings = bm.material;
     bm.castShadow = true; bm.receiveShadow = true;
     scene.add(bm);
     // roof rims + rooftop clutter
@@ -423,7 +428,8 @@ export function buildWorld(scene) {
   ub.forEach((u, i) => {
     o.position.set(u.p.x, 0, u.p.z); o.rotation.set(0, r() * 6, 0); o.scale.set(1, 1, 1); o.updateMatrix();
     umb.setMatrixAt(i, o.matrix); umb.setColorAt(i, col.setHex(u.c)); pol.setMatrixAt(i, o.matrix);
-    o.position.set(u.p.x + 1.4, 0.03, u.p.z + 0.6); o.updateMatrix(); tow.setMatrixAt(i, o.matrix); tow.setColorAt(i, col.setHex(BUILD_COLORS[i % BUILD_COLORS.length]));
+    o.position.set(u.p.x + 1.4, 0.03, u.p.z + 0.6); o.updateMatrix(); tow.setMatrixAt(i, o.matrix);
+    env.towels = env.towels || []; env.towels.push({ x: u.p.x + 1.4, z: u.p.z + 0.6, h: o.rotation.y }); tow.setColorAt(i, col.setHex(BUILD_COLORS[i % BUILD_COLORS.length]));
   });
   scene.add(umb, pol, tow);
 
@@ -433,7 +439,7 @@ export function buildWorld(scene) {
   gg.setAttribute('color', new THREE.Float32BufferAttribute(groundCol, 3));
   gg.setAttribute('normal', new THREE.Float32BufferAttribute(new Array(groundPos.length).fill(0).map((_, i) => (i % 3 === 1 ? 1 : 0)), 3));
   gg.setIndex(groundIdx);
-  { const gm = new THREE.Mesh(gg, new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide })); gm.receiveShadow = true; scene.add(gm); }
+  { const gm = new THREE.Mesh(gg, new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide })); gm.receiveShadow = true; scene.add(gm); env.ground = gm.material; }
   // island "skirt" so the edge doesn't float above the water
   const skirt = new THREE.Mesh(new THREE.BufferGeometry(), mat(0xd8c48a));
   {
@@ -449,6 +455,7 @@ export function buildWorld(scene) {
   scene.add(skirt);
   const water = new THREE.Mesh(new THREE.PlaneGeometry(6000, 6000), new THREE.MeshPhongMaterial({ color: 0x29b6d6, specular: 0xbfefff, shininess: 90 }));
   water.receiveShadow = true;
+  env.water = water.material;
   water.rotation.x = -Math.PI / 2; water.position.y = -0.15;
   scene.add(water);
   const shallow = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshLambertMaterial({ color: 0x7fe3ee, side: THREE.DoubleSide }));
@@ -545,7 +552,13 @@ export function buildWorld(scene) {
     for (let s = 30; s < L - 20; s += 38) for (const side of [-1, 1]) lights.push({ s: s + (side > 0 ? 19 : 0), side });
     const pole = new THREE.InstancedMesh(new THREE.BoxGeometry(0.18, 7, 0.18).translate(0, 3.5, 0), mat(0x546e7a), lights.length);
     const arm = new THREE.InstancedMesh(new THREE.BoxGeometry(2.2, 0.14, 0.14).translate(-1.1, 0, 0), mat(0x546e7a), lights.length);
-    const lamp = new THREE.InstancedMesh(new THREE.BoxGeometry(0.7, 0.18, 0.4), new THREE.MeshBasicMaterial({ color: 0xfff3c4 }), lights.length);
+    env.lampMat = new THREE.MeshBasicMaterial({ color: 0xfff3c4 });
+    const lamp = new THREE.InstancedMesh(new THREE.BoxGeometry(0.7, 0.18, 0.4), env.lampMat, lights.length);
+    // pools of light under each lamp (only visible at night)
+    env.poolMat = new THREE.MeshBasicMaterial({ color: 0xffd27a, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
+    const pool = new THREE.InstancedMesh(new THREE.CircleGeometry(4.5, 16).rotateX(-Math.PI / 2), env.poolMat, lights.length);
+    lights.forEach((l, i) => { const q = P(l.s, l.side * 7.5); o.position.set(q.x, 0.1, q.z); o.rotation.set(0, 0, 0); o.scale.set(1, 1, 1); o.updateMatrix(); pool.setMatrixAt(i, o.matrix); });
+    scene.add(pool);
     lights.forEach((l, i) => {
       const p = P(l.s, l.side * 10.2), t = theta(l.s);
       const face = -t + (l.side > 0 ? 0 : Math.PI);
@@ -575,7 +588,8 @@ export function buildWorld(scene) {
     const hide = new THREE.Matrix4().makeTranslation(0, -50, 0);
     furn.forEach((f, i) => {
       const p = P(f.s, f.side * 9.9); o.position.set(p.x, 0.06, p.z); o.rotation.set(0, -theta(f.s), 0); o.updateMatrix();
-      bench.setMatrixAt(i, f.kind === 0 ? o.matrix : hide); bin.setMatrixAt(i, f.kind === 1 ? o.matrix : hide); hyd.setMatrixAt(i, f.kind === 2 ? o.matrix : hide);
+      bench.setMatrixAt(i, f.kind === 0 ? o.matrix : hide);
+      if (f.kind === 0) { env.benches = env.benches || []; env.benches.push({ x: p.x, z: p.z, h: -theta(f.s) + (f.side > 0 ? -Math.PI / 2 : Math.PI / 2) }); } bin.setMatrixAt(i, f.kind === 1 ? o.matrix : hide); hyd.setMatrixAt(i, f.kind === 2 ? o.matrix : hide);
     });
     bench.castShadow = bin.castShadow = hyd.castShadow = true;
     scene.add(bench, bin, hyd);
@@ -586,6 +600,8 @@ export function buildWorld(scene) {
     const g = new THREE.Group(); g.position.set(p.x, 0, p.z);
     for (let k = 0; k < 6; k++) { const seg = new THREE.Mesh(new THREE.CylinderGeometry(2.2 - k * 0.2, 2.4 - k * 0.2, 3, 12), mat(k % 2 ? 0xd32f2f : 0xffffff)); seg.position.y = 1.5 + k * 3; seg.castShadow = true; g.add(seg); }
     const lan = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.3, 1.8, 10), new THREE.MeshBasicMaterial({ color: 0xfff59d })); lan.position.y = 19; g.add(lan);
+    const beam = new THREE.Mesh(new THREE.ConeGeometry(6, 60, 12, 1, true).rotateZ(Math.PI / 2).translate(30, 0, 0), new THREE.MeshBasicMaterial({ color: 0xfff7c0, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+    beam.position.y = 19; g.add(beam); env.beam = beam;
     const cap = new THREE.Mesh(new THREE.ConeGeometry(1.7, 1.6, 10), mat(0x263238)); cap.position.y = 20.7; g.add(cap);
     scene.add(g);
     addCollider(s, d, 4.6, 4.6, 21);
@@ -636,18 +652,32 @@ export function buildWorld(scene) {
 
 const DOCK_S = [272, 637, 905];
 
-function windowTexture() {
-  const c = document.createElement('canvas'); c.width = 128; c.height = 128;
-  const x = c.getContext('2d');
-  x.fillStyle = '#ffffff'; x.fillRect(0, 0, 128, 128);
-  x.fillStyle = '#e6e6e6'; x.fillRect(0, 118, 128, 10);           // floor line
-  x.fillStyle = '#5b7f9e'; x.fillRect(24, 26, 80, 70);              // glass
-  x.fillStyle = '#86a9c6'; x.fillRect(24, 26, 80, 22);              // sky reflection
-  x.fillStyle = '#ffffff'; x.fillRect(62, 26, 4, 70);               // mullion
-  x.fillStyle = '#d9d9d9'; x.fillRect(18, 96, 92, 8);               // sill
-  const t = new THREE.CanvasTexture(c);
-  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
-  return t;
+// 4x4 windows per texture. Day: glass. Night (emissive): a random mix of lit and dark windows.
+function windowTextures() {
+  const make = (lit) => {
+    const c = document.createElement('canvas'); c.width = c.height = 512;
+    const x = c.getContext('2d');
+    const r = rng(lit ? 7 : 3);
+    x.fillStyle = lit ? '#000' : '#ffffff'; x.fillRect(0, 0, 512, 512);
+    for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
+      const ox = i * 128, oy = j * 128;
+      if (!lit) {
+        x.fillStyle = '#e6e6e6'; x.fillRect(ox, oy + 118, 128, 10);
+        x.fillStyle = '#5b7f9e'; x.fillRect(ox + 24, oy + 26, 80, 70);
+        x.fillStyle = '#86a9c6'; x.fillRect(ox + 24, oy + 26, 80, 22);
+        x.fillStyle = '#ffffff'; x.fillRect(ox + 62, oy + 26, 4, 70);
+        x.fillStyle = '#d9d9d9'; x.fillRect(ox + 18, oy + 96, 92, 8);
+      } else if (r() < 0.45) {
+        x.fillStyle = ['#ffd27a', '#fff1c1', '#ffb85c', '#cfe3ff'][Math.floor(r() * 4)];
+        x.fillRect(ox + 24, oy + 26, 80, 70);
+        x.fillStyle = '#000'; x.fillRect(ox + 62, oy + 26, 4, 70);
+      }
+    }
+    const t = new THREE.CanvasTexture(c);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+    return t;
+  };
+  return [make(false), make(true)];
 }
 
 // Minimap outline (computed once)

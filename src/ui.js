@@ -6,7 +6,7 @@ export const el = {
   weapon: $('weapon'), weaponIcon: $('weaponIcon'), hpfill: $('hpfill'), prompt: $('prompt'), dead: $('dead'), click: $('clickToPlay'),
   roomInfo: $('roomInfo'), playerList: $('playerList'), help: $('help'), minimap: $('minimap'), hurt: $('hurt'),
   wheel: $('wheel'), wheelName: $('wheelName'), wheelStats: $('wheelStats'), announce: $('announce'), speedo: $('speedo'),
-  crosshair: $('crosshair'),
+  crosshair: $('crosshair'), clock: $('clock'),
 };
 
 // Simple weapon silhouettes (viewBox 0 0 48 24).
@@ -84,6 +84,8 @@ function nextAnnounce() {
   setTimeout(nextAnnounce, 2200);
 }
 
+const WX = { clear: 'Clear', cloudy: 'Cloudy', rain: 'Rain', storm: 'Storm' };
+export function setClock(time, wx, night) { el.clock.textContent = `${time} · ${WX[wx] || wx}${night ? ' · Night' : ''}`; }
 export function setSpeedo(v) {
   if (!v) { el.speedo.hidden = true; return; }
   el.speedo.hidden = false;

@@ -61,6 +61,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #9fdcf5; fon
 #chatLog li.old { opacity: 0; }
 #chatInput { pointer-events: auto; width: 100%; font: 15px var(--body); padding: 8px 10px; border-radius: 8px; border: 2px solid var(--sea); }
 #bottomleft { position: absolute; left: 14px; bottom: 14px; width: 220px; display: grid; gap: 6px; }
+#clock { font-weight: 800; font-size: 13px; letter-spacing: 1px; background: var(--hud); padding: 3px 8px; border-radius: 6px; justify-self: start; font-variant-numeric: tabular-nums; }
 #hpbar { height: 10px; background: rgba(0,0,0,.5); border-radius: 3px; overflow: hidden; border: 2px solid rgba(0,0,0,.6); }
 #hpfill { height: 100%; width: 100%; background: #43d17a; transition: width .15s; }
 #speedo { position: absolute; right: 18px; bottom: 18px; text-align: right; line-height: 1; }

@@ -241,6 +241,37 @@ export function soundSqueal(dist = 0) {
   if (now - lastSqueal < 140) return;
   lastSqueal = now; tone('sawtooth', 1150 + Math.random() * 120, 0.16, 0.035 * fall(dist));
 }
+export function soundThunder(power = 1) { burst(2.8, 260, 1.0 * power); setTimeout(() => burst(1.6, 180, 0.6 * power), 300); }
+
+// Looping ambience: city hum, rain, waves, crickets at night, birds by day. vols: {hum, rain, waves, crickets, birds} 0..1
+let amb = null;
+function loopNoise(type, freq, q = 1) {
+  const src = ac.createBufferSource(); src.buffer = noise; src.loop = true;
+  const f = ac.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q;
+  const g = ac.createGain(); g.gain.value = 0;
+  src.connect(f); f.connect(g); g.connect(ac.destination); src.start();
+  return g;
+}
+export function setAmbient(v) {
+  if (!ac) return;
+  if (!amb) {
+    amb = { hum: loopNoise('lowpass', 220), rain: loopNoise('highpass', 1800), waves: loopNoise('bandpass', 420, 0.6) };
+    // crickets: a high tone chopped on and off very fast
+    const o = ac.createOscillator(), am = ac.createOscillator(), amg = ac.createGain(), g = ac.createGain();
+    o.frequency.value = 4400; am.frequency.value = 28; amg.gain.value = 0.5;
+    const pulse = ac.createGain(); pulse.gain.value = 0.5;
+    am.connect(amg); amg.connect(pulse.gain); o.connect(pulse); pulse.connect(g); g.gain.value = 0; g.connect(ac.destination);
+    o.start(); am.start();
+    amb.crickets = g; amb.birdT = 0;
+  }
+  const t = ac.currentTime;
+  amb.hum.gain.setTargetAtTime(0.05 * v.hum, t, 0.5);
+  amb.rain.gain.setTargetAtTime(0.12 * v.rain, t, 0.5);
+  // waves swell and fade
+  amb.waves.gain.setTargetAtTime(0.09 * v.waves * (0.6 + 0.4 * Math.sin(t * 0.7)), t, 0.4);
+  amb.crickets.gain.setTargetAtTime(0.006 * v.crickets, t, 0.8);
+  if (v.birds > 0.2 && Math.random() < 0.02 * v.birds) { const f = 2400 + Math.random() * 1800; tone('sine', f, 0.08, 0.025 * v.birds); tone('sine', f * 1.2, 0.07, 0.02 * v.birds, 0.09); }
+}
 export function soundStunt() { [523, 659, 784, 1046].forEach((f, i) => tone('triangle', f, 0.18, 0.15, i * 0.08)); }
 export function soundWanted() { tone('sawtooth', 220, 0.25, 0.08); tone('sawtooth', 330, 0.25, 0.08, 0.12); }
 

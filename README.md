@@ -32,6 +32,8 @@ Getting into a car takes a moment: you walk to the door, open it and yank out wh
 
 Traffic stops for people in the road, unless you're wanted or just attacked someone.
 
+**Living world:** one day lasts 24 real minutes and the weather changes every 6 (clear, cloudy, rain, thunderstorms), the same for everyone in the room. At night windows light up, streetlights glow and cars run their headlights. Rain makes the roads slippery. Townspeople walk dogs, jog, sit on benches, sunbathe, chat and talk on the phone. When trouble starts they run, cower, call the cops, and some fight back with fists or a pistol. Pigeons scatter, gulls circle the beach and ducks paddle by the docks.
+
 Find the yellow-and-black stunt ramps on the beach, at the far tip, and at the end of the broken bridge. Yes, you can jump it.
 
 ## Turn on multiplayer (one-time, about 5 minutes)

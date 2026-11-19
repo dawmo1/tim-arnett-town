@@ -98,6 +98,19 @@ export function animateCharacter(c, dt, st) {
   c.body.rotation.set(0, 0, 0);
   c.body.position.y = 0;
   c.hipL.rotation.z = 0; c.hipR.rotation.z = 0; c.shL.rotation.z = 0; c.shR.rotation.z = 0;
+  c.shL.rotation.y = 0; c.shR.rotation.y = 0;
+  if (st.lie) { // sunbathing
+    c.body.rotation.set(-Math.PI / 2, 0, 0); c.body.position.y = 0.17;
+    c.shL.rotation.set(0, 0, -0.5); c.shR.rotation.set(0, 0, 0.5);
+    c.hipL.rotation.x = 0; c.hipR.rotation.x = 0;
+    return;
+  }
+  if (st.cower) { // crouched, arms over the head
+    c.body.position.y = -0.35; c.body.rotation.x = 0.35;
+    c.hipL.rotation.x = -1.3; c.hipR.rotation.x = -1.3;
+    c.shL.rotation.set(-2.7, 0, -0.3); c.shR.rotation.set(-2.7, 0, 0.3);
+    return;
+  }
   if (st.sit) {
     c.hipL.rotation.x = -1.4; c.hipR.rotation.x = -1.4;
     c.shL.rotation.x = -1.2; c.shR.rotation.x = -1.2;
@@ -122,6 +135,7 @@ export function animateCharacter(c, dt, st) {
   else if (st.aim) c.shR.rotation.x = -Math.PI / 2;
   else c.shR.rotation.x = st.swim ? -Math.PI / 2 + Math.sin(c.walk + Math.PI) * 1.2 : s * 0.8;
   if (st.phone) { c.shL.rotation.x = -2.6; c.shL.rotation.z = -0.5; }
+  if (st.chat) { c.talk = (c.talk || Math.random() * 10) + dt; c.shR.rotation.x = -0.6 - Math.max(0, Math.sin(c.talk * 2.3)) * 0.8; c.head.rotation.y = Math.sin(c.talk * 0.7) * 0.3; }
 }
 
 export function nameTag(text, color = '#ffffff') {
