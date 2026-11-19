@@ -6,8 +6,9 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import * as W from './world.js';
 import { makeCharacter, animateCharacter, placeCharacter, randomLook, nameTag, mat } from './character.js';
 import { createAllVehicles, makeParked, initFarCars, farCarsBegin, farCarAdd, farCarsEnd, stepVehicle, collideVehicles, pushCharOut, circles, charVehicle, makeVehicleMesh, damageZone, applyDamageVisual, applyBump } from './vehicles.js';
-import { initTraffic, updateTraffic as tickTraffic, bumpTraffic, scareTraffic, updateSignals, traffic } from './traffic.js';
-import { initWalkers, updateWalkers, walkers, panicNear, spawnFleeing, scare, provoke, setNpcContext, cartNear } from './npc.js';
+import { initTraffic, updateTraffic as tickTraffic, bumpTraffic, scareTraffic, updateSignals, traffic, patrolViewers } from './traffic.js';
+import { initWalkers, updateWalkers, walkers, panicNear, spawnFleeing, scare, provoke, setNpcContext, cartNear, revive } from './npc.js';
+import { initEmergency, updateEmergency, reportDown } from './emergency.js';
 import { initDayNight, updateDayNight, sky as weather, clockText, view as fogView } from './daynight.js';
 import { initLife, updateLife, startle } from './life.js';
 import { glowMats } from './vehicles.js';
@@ -583,6 +584,7 @@ function hurtWalker(w, dmg, dx, dz, p, force = 3) {
     setTimeout(() => { const p = w.ch.rag ? ragPos(w.ch) : w; fx.bloodPool(p.x, p.z, 1.4); }, 1300); // pool forms where the body comes to rest
     report('kill', w.x, w.z);
     if (Math.random() < 0.75) dropCash(w.x, w.z, 5 + Math.floor(Math.random() * 40));
+    reportDown(w);
     return true;
   }
   return false;
@@ -713,6 +715,7 @@ function yankDriver(v) {
   const d = doorSpot(v);
   if (v.mode === 'traffic' || v.npcDriver) { freeTraffic(v, true); v.npcDriver = false; spawnFleeing(d.x, d.z, v.h + Math.PI / 2, 1.2); }
   else if (v.driver && v.driver !== net.uid) { sendEvent('jack', { to: v.driver, id: v.id }); ui.announce('CARJACKED', nameOf(v.driver)); }
+  if (v.patrol || v.T.police) report('hitcop', v.x, v.z); // dragging a cop out of a squad car
   eco.jacked++; checkCountGoals();
   fx.soundHit();
   report('carjack', v.x, v.z);
@@ -726,6 +729,7 @@ function finishEnter(v) {
   me.ch.g.visible = !!v.T.bike;
   writeVeh(v, true);
   if (wasParked && !v.stolenOnce) { v.stolenOnce = true; report('steal', v.x, v.z); }
+  if (v.T.police) goalDone('copcar');
 }
 // Getting out: slow = step out through the door, fast = bail and tumble.
 function leaveVehicle() {
@@ -951,7 +955,10 @@ function updateTraffic(dt, tSec) {
   camera.getWorldDirection(tmpDir);
   const q = activeQuality, night = weather.night > 0.5;
   const count = Math.round((q === 'low' ? 14 : q === 'medium' ? 30 : 42) * (night ? 0.6 : 1));
-  tickTraffic(dt, { x: fxp, z: fzp }, { x: camera.position.x, z: camera.position.z, fx: tmpDir.x, fz: tmpDir.z }, obs, sirens, tSec, { radius: q === 'low' ? 200 : q === 'medium' ? 260 : 320, count, night });
+  const patrols = wanted.stars > 0 ? 0 : Math.round((q === 'low' ? 1 : q === 'medium' ? 2 : 3) * (night ? 1.5 : 1));
+  tickTraffic(dt, { x: fxp, z: fzp }, { x: camera.position.x, z: camera.position.z, fx: tmpDir.x, fz: tmpDir.z }, obs, sirens, tSec, { radius: q === 'low' ? 200 : q === 'medium' ? 260 : 320, count, night, patrols });
+  // patrol cars nearby join the chase once you're wanted
+  if (wanted.stars > 0 && isHost) for (const v of [...traffic]) if (v.patrol && v.mode === 'traffic' && Math.hypot(v.x - fxp, v.z - fzp) < 260) { const i = vehicles.indexOf(v); if (i >= 0) vehicles.splice(i, 1); vehById.delete(v.id); police.adoptCar(v, net.uid); }
   updateSignals(tSec);
 }
 
@@ -998,7 +1005,7 @@ function updateVehicles(dt, tSec, nowMs) {
     }
     if (v.burnAt && !v.exploded) {
       if (!v.fire) v.fire = fx.startFire(v.mesh);
-      if (nowMs - v.burnAt > 5000 && (v.burnBy === net.uid || (isHost && nowMs - v.burnAt > 9000))) explodeVehicle(v);
+      if (nowMs - v.burnAt > 12000 && (v.burnBy === net.uid || (isHost && nowMs - v.burnAt > 16000))) explodeVehicle(v);
     }
     if (v.exploded && !v.charred) { v.charred = true; fx.stopFire(v.fire); v.fire = null; charVehicle(v); }
     if (v.doorCloseAt && performance.now() > v.doorCloseAt) { v.doorOpen = 0; v.doorCloseAt = 0; }
@@ -1435,7 +1442,15 @@ initTraffic(scene, {
   remove: (v) => resetVehicle(v),
   honk: (v) => fx.soundHorn(distCam(v.x, v.z)),
 });
+initEmergency(scene, {
+  vehicles: () => vehicles,
+  add: (v) => { scene.add(v.mesh); vehicles.push(v); vehById.set(v.id, v); },
+  remove: (v) => resetVehicle(v),
+  revive: (w) => { if (revive(w)) ui.addFeed('Paramedics revived someone'); },
+  extinguish: (v) => { v.burnAt = 0; v.burnBy = ''; fx.stopFire(v.fire); v.fire = null; v.hp = Math.max(v.hp, -v.T.hp * 0.3); writeVeh(v, true); },
+});
 police.initPolice(scene, {
+  extraViewers: () => patrolViewers(),
   now: () => net.now(),
   vehicles: () => vehicles,
   damagePlayer: (uid, dmg, by) => { if (uid === net.uid) damageMe(dmg, by, 'police'); else sendEvent('hit', { to: uid, dmg: r1(dmg), by }); },
@@ -1522,7 +1537,7 @@ function updateWorldLife(dt, nowMs, t) {
   const n = weather.night;
   glowMats.head.opacity = n * 0.9; glowMats.beam.opacity = n * 0.07; glowMats.tail.opacity = n * 0.8;
   const lightsOn = n > 0.05 || weather.rain > 0.3;
-  for (const v of vehicles) { const g = v.mesh.userData.glow; if (g) g.visible = lightsOn && !v.exploded && v.hp > 0 && (v.mode === 'traffic' || !!v.driver); }
+  for (const v of vehicles) { const g = v.mesh.userData.glow; if (g) g.visible = lightsOn && !v.exploded && v.hp > 0 && (v.mode === 'traffic' || v.mode === 'service' || !!v.driver); }
   for (const u of police.cops.values()) if (u.kind < 2) { const g = u.v.mesh.userData.glow; if (g) g.visible = lightsOn && !police.isDown(u); }
   if (me.veh && n > 0.15 && me.veh.hp > 0) {
     const v = me.veh, fx_ = Math.sin(v.h), fz_ = Math.cos(v.h);
@@ -1561,6 +1576,7 @@ function update(dt, t) {
   updatePlayer(dt);
   updateRemotes(dt);
   updateWalkers(dt, tSec, nowMs, camView());
+  updateEmergency(dt, { x: me.veh ? me.veh.x : me.x, z: me.veh ? me.veh.z : me.z }, camView(), tSec);
   if (isHost) { police.hostUpdate(dt, policePlayers()); hostChores(dt, nowMs); }
   for (const v of vehicles) if (v.pending) flushBump(v);
   police.render(dt, isHost, t, camera.position, farCarDist());

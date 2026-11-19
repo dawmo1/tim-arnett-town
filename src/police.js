@@ -19,11 +19,11 @@ export const posOf = (u) => (u.kind < 2 ? u.v : u);
 export const isDown = (u) => (u.kind < 2 ? u.v.exploded || u.v.hp <= 0 : u.dead);
 
 // ---------- creation ----------
-function spawnCar(id, x, z, h, kind, target) {
-  const v = makeVehicle(id, POLICE, 0xffffff, { x, z, h });
-  v.mode = 'cop';
+function spawnCar(id, x, z, h, kind, target, existing = null) {
+  const v = existing || makeVehicle(id, POLICE, 0xffffff, { x, z, h });
+  v.mode = 'cop'; v.ag = null;
   v.mesh.userData.driverHead.visible = true;
-  scene.add(v.mesh);
+  if (!existing) scene.add(v.mesh);
   const u = { id, kind, v, target, life: kind ? 40 : 1e9, cd: 1 + Math.random(), stuckT: 0, revT: 0, seq: 0, shot: [0, 0, 0], noTarget: 0, ramCd: 0, fire: null, deployed: [], recall: false, waitT: 0, deployCd: 0 };
   cops.set(id, u);
   return u;
@@ -68,18 +68,12 @@ function remove(id) {
   else scene.remove(u.mesh);
   cops.delete(id);
 }
-// A spot in the right-hand lane of a road minD..maxD from (x, z), facing toward it.
-function roadSpot(x, z, minD, maxD) {
-  for (let i = 0; i < 40; i++) {
-    const a = Math.random() * Math.PI * 2, d = minD + Math.random() * (maxD - minD);
-    const q = W.nearestEdge(x + Math.cos(a) * d, z + Math.sin(a) * d, 50, (e) => e.cls !== 'service' && !e.bridge && e.cls !== 'motor');
-    if (!q) continue;
-    const dd = Math.hypot(q.x - x, q.z - z); if (dd < minD * 0.7 || dd > maxD * 1.3) continue;
-    let h = q.h; if (Math.sin(h) * (x - q.x) + Math.cos(h) * (z - q.z) < 0) h += Math.PI;
-    const lane = q.e.width / 4;
-    return { x: q.x - Math.cos(h) * lane, z: q.z + Math.sin(h) * lane, h };
-  }
-  return null;
+// A patrol car that saw the crime joins the chase.
+export function adoptCar(v, target) { const u = spawnCar('c' + nextId++, v.x, v.z, v.h, 0, target, v); u.aimT = 0; return u; }
+// Units roll out of the nearest station when it's close enough, otherwise from nearby streets.
+function stationSpot(x, z) {
+  const st = (W.places.police || []).filter((p) => Math.hypot(p.x - x, p.z - z) < 1100).sort((a, b) => Math.hypot(a.x - x, a.z - z) - Math.hypot(b.x - x, b.z - z))[0];
+  return st && Math.random() < 0.6 ? W.roadNear(st.x, st.z, x, z) : null;
 }
 function shoot(u, from, p, acc, dmg) {
   const hit = Math.random() < acc;
@@ -107,12 +101,14 @@ export function hostUpdate(dt, players) {
       }
       const cx = p.search ? p.lkx : p.x, cz = p.search ? p.lkz : p.z;
       if (have < want) {
-        const q = roadSpot(cx, cz, 140, 220);
+        const q = stationSpot(cx, cz) || W.roadSpot(cx, cz, 140, 220);
         if (q) { spawnCar('c' + nextId++, q.x, q.z, q.h, 0, p.uid); cops.get('c' + (nextId - 1)).aimT = 0; }
       }
       if (p.stars >= 5 && !heli) {
-        const a = Math.random() * Math.PI * 2, hx = cx + Math.cos(a) * 220, hz = cz + Math.sin(a) * 220;
-        spawnHeli('h' + nextId++, hx, W.groundHeight(hx, hz) + 45, hz, p.uid);
+        // off the station roof if it's near, otherwise flying in
+        const st = (W.places.police || []).find((s2) => Math.hypot(s2.x - cx, s2.z - cz) < 1600);
+        const a = Math.random() * Math.PI * 2, hx = st ? st.x : cx + Math.cos(a) * 220, hz = st ? st.z : cz + Math.sin(a) * 220;
+        spawnHeli('h' + nextId++, hx, W.groundHeight(hx, hz) + (st ? 25 : 45), hz, p.uid);
         ctx.announce?.(p.uid, 'POLICE HELICOPTER INBOUND');
       }
       if (p.stars >= 4) {
@@ -148,7 +144,7 @@ export function hostUpdate(dt, players) {
       // wrecked: engine dead. Only catches fire if you keep wrecking it.
       if (!v.burnAt && v.hp <= -v.T.hp * 0.4) v.burnAt = now;
       stepVehicle(v, { handbrake: true }, dt);
-      if (v.burnAt && now - v.burnAt > 5000) { v.exploded = true; ctx.explode(v.x, v.y, v.z, 'a police car'); }
+      if (v.burnAt && now - v.burnAt > 12000) { v.exploded = true; ctx.explode(v.x, v.y, v.z, 'a police car'); }
       continue;
     }
     if (u.kind === 1) { u.life -= dt; if (u.life <= 0) remove(u.id); continue; }
@@ -412,7 +408,7 @@ export function render(dt, isHost, t, cam = null, farDist = 1e9) {
 
 // Police eyes: cars and officers see in a cone, the helicopter sees all around.
 export function viewers() {
-  const out = [];
+  const out = ctx.extraViewers ? ctx.extraViewers() : [];
   for (const u of cops.values()) {
     if (isDown(u)) continue;
     const P = posOf(u);

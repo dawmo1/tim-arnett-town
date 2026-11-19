@@ -561,3 +561,11 @@ export function spawnFleeing(x, z, h, down = 0, angry = false) {
 }
 // a food cart near (x, z), for buying a snack
 export function cartNear(x, z, r) { for (const g of groups) if (g.cart && Math.hypot(g.cart.x - x, g.cart.z - z) < r) return g.cart; return null; }
+// Paramedics got here in time: back on their feet (and very keen to leave).
+export function revive(w) {
+  if (!walkers.includes(w)) return false;
+  w.dead = null; w.hp = 40;
+  release(w.ch); w.ch.getUp = 0.9;
+  if (w.grp) { w.mode = 'gone'; w.modeT = 25; } else calmDown(w);
+  return true;
+}

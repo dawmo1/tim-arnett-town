@@ -66,7 +66,7 @@ function colorFor(ti, r) {
 
 // ---------- spawning ----------
 const drivable = (e) => e.cls !== 'service' && e.cls !== 'motor' && e.len > 25;
-function trySpawn(fx, fz, R, cam, night) {
+function trySpawn(fx, fz, R, cam, night, patrol = false) {
   const ids = [...W.edgesNear(fx, fz, R)];
   for (let tries = 0; tries < 12; tries++) {
     const e = G.edges[ids[Math.floor(Math.random() * ids.length)]];
@@ -80,9 +80,9 @@ function trySpawn(fx, fz, R, cam, night) {
     // appear out of sight: behind the camera or far away
     if (cam && d < 220) { const dx = p.x - cam.x, dz = p.z - cam.z, l = Math.hypot(dx, dz) || 1; if ((dx * cam.fx + dz * cam.fz) / l > 0.35) continue; }
     if (ctx.vehicles().some((v) => Math.abs(v.x - p.x) < 14 && Math.abs(v.z - p.z) < 14)) continue;
-    const r = Math.random(), ti = chooseType(p.x, p.z, night, r);
-    const v = makeVehicle('t' + nextId++, ti, colorFor(ti, Math.random()), { x: p.x, z: p.z, h: p.h });
-    v.mode = 'traffic';
+    const r = Math.random(), ti = patrol ? V.POLICE : chooseType(p.x, p.z, night, r);
+    const v = makeVehicle('t' + nextId++, ti, patrol ? 0xffffff : colorFor(ti, Math.random()), { x: p.x, z: p.z, h: p.h });
+    v.mode = 'traffic'; v.patrol = patrol;
     v.ag = { e, dir, lane, s, off, offT: off, speed: e.speed * 0.6, phase: 'edge', temper: 0.85 + Math.random() * 0.25, next: null, blockT: 0, honkT: 0, drunk: night && Math.random() < 0.05 };
     ctx.add(v);
     traffic.push(v);
@@ -140,6 +140,8 @@ export function updateTraffic(dt, focus, cam, obs, sirens, tSec, opts) {
   if (spawnT <= 0) {
     spawnT = 0.25;
     if (traffic.length < want) trySpawn(focus.x, focus.z, R, cam, opts.night);
+    // police on patrol (they see crimes in front of them)
+    if ((opts.patrols || 0) > traffic.filter((v) => v.patrol).length) trySpawn(focus.x, focus.z, R, cam, opts.night, true);
     for (let i = traffic.length - 1; i >= 0; i--) {
       const v = traffic[i];
       if (v.mode !== 'traffic') { traffic.splice(i, 1); v.ag = null; continue; } // knocked loose: now a normal car
@@ -282,6 +284,13 @@ export function updateTraffic(dt, focus, cam, obs, sirens, tSec, opts) {
     v.y = W.groundHeight(x, z);
     alignToGround(v, dt);
   }
+}
+
+// Patrol cars' view cones, for the wanted system.
+export function patrolViewers() {
+  const out = [];
+  for (const v of traffic) if (v.patrol && v.mode === 'traffic') out.push({ x: v.x, y: v.y + 1.5, z: v.z, h: v.h, heli: false, range: 55, fov: 2.0 });
+  return out;
 }
 
 // ---------- traffic lights + stop signs you can see ----------

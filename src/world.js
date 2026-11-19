@@ -36,3 +36,26 @@ export function areaAt(x, z) {
   const e = nearestEdge(x, z, 16);
   return [hoodAt(x, z), e && e.e.name ? e.e.name : ''];
 }
+
+// A spot in the right-hand lane of a road minD..maxD from (x, z), facing toward it.
+export function roadSpot(x, z, minD, maxD) {
+  for (let i = 0; i < 40; i++) {
+    const a = Math.random() * Math.PI * 2, d = minD + Math.random() * (maxD - minD);
+    const q = nearestEdge(x + Math.cos(a) * d, z + Math.sin(a) * d, 50, (e) => e.cls !== 'service' && !e.bridge && e.cls !== 'motor');
+    if (!q) continue;
+    const dd = Math.hypot(q.x - x, q.z - z); if (dd < minD * 0.7 || dd > maxD * 1.3) continue;
+    return laneFacing(q, x, z);
+  }
+  return null;
+}
+// The road next to a building (a station, a hospital), in the lane heading toward (tx, tz).
+export function roadNear(px, pz, tx, tz) {
+  const q = nearestEdge(px, pz, 120, (e) => e.cls !== 'motor' && !e.bridge);
+  return q ? laneFacing(q, tx, tz) : null;
+}
+function laneFacing(q, tx, tz) {
+  let h = q.h; if (Math.sin(h) * (tx - q.x) + Math.cos(h) * (tz - q.z) < 0) h += Math.PI;
+  const lane = q.e.width / 4;
+  return { x: q.x - Math.cos(h) * lane, z: q.z + Math.sin(h) * lane, h };
+}
+
