@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import * as W from './world.js';
 import { makeCharacter, animateCharacter, randomLook, nameTag, mat } from './character.js';
-import { createAllVehicles, stepVehicle, collideVehicles, pushCharOut, circles, trafficPose, charVehicle, makeVehicleMesh } from './vehicles.js';
+import { createAllVehicles, stepVehicle, collideVehicles, pushCharOut, circles, trafficPose, charVehicle, makeVehicleMesh, damageZone, applyDamageVisual, applyBump } from './vehicles.js';
 import { initWalkers, updateWalkers, walkers, panicNear, spawnFleeing } from './npc.js';
 import * as police from './police.js';
 import * as fx from './fx.js';
@@ -190,13 +190,19 @@ net.handlers.vehicle = (id, rec) => {
   v.tgt = { x: rec.x, z: rec.z, h: rec.h, y: rec.y || 0 };
   v.hp = rec.hp; v.driver = rec.d || ''; v.burnAt = rec.b || 0; v.burnBy = rec.bb || '';
   if (rec.e) v.exploded = true;
+  if (Array.isArray(rec.dz)) { const [f, b, l, r] = rec.dz; if (f !== Math.round(v.dz.f) || b !== Math.round(v.dz.b) || l !== Math.round(v.dz.l) || r !== Math.round(v.dz.r)) { v.dz = { f, b, l, r }; applyDamageVisual(v); } }
 };
 net.handlers.vehicleGone = (id) => { const v = vehById.get(id); if (v) resetVehicle(v); };
 net.handlers.event = (e) => {
   switch (e.type) {
     case 'hit': if (e.to === net.uid) damageMe(+e.dmg || 0, String(e.by || 'someone'), e.from); break;
     case 'npc': { const w = walkers[e.id]; if (w && !w.dead) { w.dead = { x: e.x, z: e.z, h: e.h, t: e.t }; w.hp = 0; fx.bloodPool(e.x, e.z, 1.4); } break; }
-    case 'vehHit': if (me.veh && me.veh.id === e.id) damageVehicle(me.veh, +e.dmg || 0); break;
+    case 'vehHit': if (me.veh && me.veh.id === e.id) damageVehicle(me.veh, +e.dmg || 0, e.imp ? { cp: [e.px, e.pz], imp: e.imp } : null); break;
+    case 'bump': {
+      if (me.veh && me.veh.id === e.id) applyBump(me.veh, e);
+      else if (isHost) { const u = police.cops.get(e.id); if (u && u.kind < 2) applyBump(u.v, e); }
+      break;
+    }
     case 'copHit': if (isHost) police.damageCop(e.id, +e.dmg || 0); break;
     case 'boom': explode(e.x, e.y, e.z, String(e.by || 'an explosion'), e.bu, false); break;
     case 'nade': spawnNade({ x: e.x, y: e.y, z: e.z, vx: e.vx, vy: e.vy, vz: e.vz, t: 2.4, mine: false }); break;
@@ -216,7 +222,7 @@ function writeVeh(v, force) {
   if (!force && n - v.lastWrite < 100) return;
   v.lastWrite = n;
   v.touchedAt = net.now();
-  setVehicle(v.id, { x: r1(v.x), y: r2(v.y), z: r1(v.z), h: r2(v.h), hp: Math.round(v.hp), d: v.driver || '', b: v.burnAt || 0, bb: v.burnBy || '', e: v.exploded ? 1 : 0 });
+  setVehicle(v.id, { x: r1(v.x), y: r2(v.y), z: r1(v.z), h: r2(v.h), hp: Math.round(v.hp), d: v.driver || '', b: v.burnAt || 0, bb: v.burnBy || '', e: v.exploded ? 1 : 0, dz: [v.dz.f, v.dz.b, v.dz.l, v.dz.r].map(Math.round) });
 }
 function resetVehicle(v) {
   if (me.veh === v) return;
@@ -224,7 +230,7 @@ function resetVehicle(v) {
   scene.remove(v.mesh);
   v.mesh = makeVehicleMesh(v.T, v.color);
   scene.add(v.mesh);
-  Object.assign(v, { lag: 0, sf: 1, vy: 0, air: 0, hp: v.T.hp, driver: '', burnAt: 0, burnBy: '', exploded: false, charred: false, sinkT: 0, y: 0, vx: 0, vz: 0, tgt: null, localSim: false, mode: v.loop ? 'traffic' : 'parked', x: v.home.x, z: v.home.z, h: v.home.h });
+  Object.assign(v, { lag: 0, sf: 1, off: 0, offT: 0, w: 0, dz: { f: 0, b: 0, l: 0, r: 0 }, headFor: '', vy: 0, air: 0, hp: v.T.hp, driver: '', burnAt: 0, burnBy: '', exploded: false, charred: false, sinkT: 0, y: 0, vx: 0, vz: 0, tgt: null, localSim: false, mode: v.loop ? 'traffic' : 'parked', x: v.home.x, z: v.home.z, h: v.home.h });
 }
 function freeTraffic(v) {
   if (v.mode !== 'traffic') return;
@@ -232,14 +238,32 @@ function freeTraffic(v) {
   spawnFleeing(v.x + Math.cos(v.h) * 1.6, v.z - Math.sin(v.h) * 1.6, v.h + Math.PI / 2);
   writeVeh(v, true);
 }
-function damageVehicle(v, dmg) {
+function damageVehicle(v, dmg, hit) {
   if (v.exploded || dmg <= 0) return;
-  if (v.driver && v.driver !== net.uid) { sendEvent('vehHit', { id: v.id, dmg: r1(dmg) }); return; }
+  if (v.driver && v.driver !== net.uid) { sendEvent('vehHit', { id: v.id, dmg: r1(dmg), px: hit ? r1(hit.cp[0]) : 0, pz: hit ? r1(hit.cp[1]) : 0, imp: hit ? r1(hit.imp) : 0 }); return; }
   if (v.mode === 'traffic') freeTraffic(v);
   v.mode = 'free';
+  if (hit) damageZone(v, hit.cp[0], hit.cp[1], hit.imp);
   v.hp -= dmg;
   if (v.hp <= 0 && !v.burnAt) { v.hp = 0; v.burnAt = net.now(); v.burnBy = net.uid; }
   writeVeh(v, true);
+}
+function crashFx(v, hit) {
+  const [px, pz] = hit.cp, d = distCam(px, pz);
+  if (hit.imp > 4) { fx.sparks(px, v.y + 0.6, pz, Math.min(24, Math.round(hit.imp * 1.2)), hit.nx, hit.nz); fx.soundCrunch(hit.imp / 18, d); }
+  else if (hit.imp > 0.6) { fx.sparks(px, v.y + 0.5, pz, 2, hit.nx, hit.nz); fx.soundScrape(d); }
+  if (hit.imp > 15) fx.glass(px, v.y + 1, pz, 8);
+  if (v === me.veh && hit.imp > 8) shake = Math.max(shake, Math.min(1, hit.imp / 30));
+}
+// Hand out impulses that couldn't be applied here (other players' cars, host-run cops).
+function flushBump(o) {
+  const b = o.pending;
+  if (!b) return;
+  o.pending = null;
+  if (o === me.veh) { applyBump(o, b); return; }
+  if (o.mode === 'cop') { if (isHost) applyBump(o, b); else sendEvent('bump', { id: o.id, jx: r2(b.jx), jz: r2(b.jz), jw: r2(b.jw) }); return; }
+  if (o.driver && o.driver !== net.uid) sendEvent('bump', { id: o.id, jx: r2(b.jx), jz: r2(b.jz), jw: r2(b.jw) });
+  else { applyBump(o, b); o.localSim = true; }
 }
 function damageCopUnit(u, dmg) {
   const hp = u.kind < 2 ? u.v.hp : u.hp;
@@ -317,7 +341,8 @@ function die() {
 function respawn(first) {
   const sp = first ? W.places.spawns[Math.floor(Math.random() * W.places.spawns.length)] : W.places.spawn;
   me.x = sp.x + (Math.random() - 0.5) * 3; me.z = sp.z + (Math.random() - 0.5) * 3; me.h = sp.h; me.y = 0; me.vy = 0;
-  me.hp = 100; me.dead = false; me.stars = 0; me.unseen = 0; me.swim = false; deathSpin = 0;
+  me.hp = 100; me.dead = false; me.stars = 0; me.unseen = 0; me.swim = false; deathSpin = 0; me.rag = null;
+  me.ch.body.rotation.set(0, 0, 0); me.ch.body.position.y = 0;
   camYaw = sp.h;
   ui.el.dead.hidden = true;
   me.ch.g.rotation.set(0, me.h, 0);
@@ -340,13 +365,15 @@ function toggleVehicle() {
   if (!v) return;
   if (v.mode === 'traffic') { freeTraffic(v); addStars(1); ui.announce('CARJACKED'); }
   else if (v.driver && v.driver !== net.uid) { sendEvent('jack', { to: v.driver, id: v.id }); ui.announce('CARJACKED', nameOf(v.driver)); }
-  me.veh = v; v.driver = net.uid; v.mode = 'free'; v.localSim = false; v.tgt = null;
+  me.veh = v; v.driver = net.uid; v.mode = 'free'; v.localSim = false; v.tgt = null; v.doorT = 0.6;
+  me.ch.g.visible = !!v.T.bike;
   writeVeh(v, true);
 }
 function ejectMe() {
   const v = me.veh;
   if (!v) return;
   me.veh = null;
+  v.doorT = 0.6;
   const lx = Math.cos(v.h), lz = -Math.sin(v.h), off = v.T.wid / 2 + 0.7;
   const p = W.pushOutCircle(v.x + lx * off, v.z + lz * off, 0.4);
   me.x = p.x; me.z = p.z; me.y = Math.max(0, v.y); me.vy = 0; me.h = v.h;
@@ -476,26 +503,43 @@ function updateGrenades(dt) {
 }
 
 // ---------- per-frame updates ----------
+// Crash v (simulated here) into everything nearby. Returns the biggest hit this frame.
 function collideAround(v, sliding) {
-  let imp = 0;
+  let best = null;
   for (const o of vehicles) {
-    if (o === v || Math.abs(o.x - v.x) > 8 || Math.abs(o.z - v.z) > 8) continue;
-    const pushable = o.mode !== 'traffic' && !o.driver;
-    const i = collideVehicles(v, o, pushable);
-    if (i <= 0) continue;
-    imp = Math.max(imp, i);
-    if (sliding) continue;
-    if (o.mode === 'traffic') { if (i > 5) { freeTraffic(o); damageVehicle(o, (i - 5) * 3); } }
-    else if (pushable) { o.localSim = true; o.mode = 'free'; if (i > 7) damageVehicle(o, (i - 7) * 3); else writeVeh(o); }
-    else if (o.driver !== net.uid && i > 7) sendEvent('vehHit', { id: o.id, dmg: r1((i - 7) * 3) });
+    if (o === v || o.sinkT > 0 || Math.abs(o.x - v.x) > 8 || Math.abs(o.z - v.z) > 8) continue;
+    // a traffic car that gets hit becomes a real physics car
+    if (o.mode === 'traffic') {
+      const i0 = collideVehicles(v, o, false);
+      if (i0 <= 0) continue;
+      const pb = o.pending; o.pending = null;
+      if (i0 > 2.5) { freeTraffic(o); if (pb) applyBump(o, pb); }
+    } else {
+      const pushable = !o.driver || o.driver === net.uid;
+      if (collideVehicles(v, o, pushable) <= 0) continue;
+      if (pushable) { o.mode = 'free'; o.localSim = true; } else flushBump(o);
+    }
+    const hit = v.hit, i = hit.imp;
+    if (!best || i > best.imp) best = hit;
+    crashFx(v, hit);
+    if (i > 6) {
+      damageZone(v, hit.cp[0], hit.cp[1], i);
+      damageVehicle(o, (i - 6) * 3 * (v.T.mass / o.T.mass) ** 0.5, { cp: hit.cp, imp: i });
+    } else if (!o.driver) writeVeh(o);
   }
   for (const u of police.cops.values()) {
     if (u.kind > 1 || Math.abs(u.v.x - v.x) > 8 || Math.abs(u.v.z - v.z) > 8) continue;
     const i = collideVehicles(v, u.v, false);
-    imp = Math.max(imp, i);
+    if (i <= 0) continue;
+    flushBump(u.v);
+    const hit = v.hit;
+    if (!best || i > best.imp) best = hit;
+    crashFx(v, hit);
+    damageZone(u.v, hit.cp[0], hit.cp[1], i);
     if (!sliding && i > 7) damageCopUnit(u, (i - 7) * 3);
   }
-  return imp;
+  v.hit = best;
+  return best ? best.imp : 0;
 }
 
 // Traffic follows the shared clock, but each car can fall behind ("lag") when it stops for people.
@@ -509,16 +553,39 @@ function updateTraffic(dt, tSec) {
     obs.push(r.vehObj ? { x: r.vehObj.x, z: r.vehObj.z, r: 1.6, person: false } : { x: r.x, z: r.z, r: 0.5, person: true });
   }
   for (const u of police.cops.values()) if (u.kind < 2 && !u.v.exploded) obs.push({ x: u.v.x, z: u.v.z, r: 1.6, person: false });
+  // things to drive around (not people): stopped cars, wrecks, loose parts
+  const avoid = [];
+  for (const o of vehicles) if (o.mode !== 'traffic' && Math.hypot(o.vx || 0, o.vz || 0) < 1.5 && o.sinkT === 0) avoid.push({ x: o.x, z: o.z, r: o.T.wid / 2 + 0.4 });
+  for (const d of fx.debrisList) avoid.push({ x: d.m.position.x, z: d.m.position.z, r: 0.8 });
   const tr = vehicles.filter((v) => v.mode === 'traffic');
   for (const v of tr) {
-    v.lag = v.lag || 0; if (v.sf === undefined) v.sf = 1;
+    v.lag = v.lag || 0; if (v.sf === undefined) v.sf = 1; v.off = v.off || 0; v.offT = v.offT || 0;
     const lp = v.loop;
     v._u = (((lp.speed * (tSec - v.lag) + (v.slot * lp.len) / lp.count) % lp.len) + lp.len) % lp.len;
     v._p = trafficPose(v, tSec - v.lag);
+    v._p.x += Math.cos(v._p.h) * v.off; v._p.z -= Math.sin(v._p.h) * v.off;
   }
   for (const v of tr) {
     let block = false, person = false;
     const fx_ = Math.sin(v._p.h), fz_ = Math.cos(v._p.h);
+    // obstacle in our lane ahead? swing into the other lane if it's clear, otherwise wait
+    let obstacle = false;
+    for (const o of avoid) {
+      const dx = o.x - v._p.x, dz = o.z - v._p.z, a = dx * fx_ + dz * fz_, l = dx * fz_ - dz * fx_;
+      if (a > 2 && a < 24 && Math.abs(l + v.off) < 1.2 + o.r && Math.abs(l) < 1.2 + o.r + 3.6) { obstacle = true; break; }
+    }
+    if (obstacle && v.offT === 0) {
+      let clear = true;
+      for (const o of tr) {
+        if (o === v) continue;
+        const dx = o._p.x - v._p.x, dz = o._p.z - v._p.z, a = dx * fx_ + dz * fz_, l = dx * fz_ - dz * fx_;
+        if (a > -6 && a < 40 && l < -1.5 && l > -6.5) { clear = false; break; }
+      }
+      if (clear) { v.offT = v.loop.lane * 2; v.offHold = 3.5; } else block = true;
+    } else if (v.offT && !obstacle) { v.offHold -= dt; if (v.offHold <= 0) v.offT = 0; }
+    const before = v.off;
+    v.off += Math.sign(v.offT - v.off) * Math.min(Math.abs(v.offT - v.off), dt * 3);
+    v._offRate = (v.off - before) / dt;
     for (const o of obs) {
       const dx = o.x - v._p.x, dz = o.z - v._p.z, a = dx * fx_ + dz * fz_, l = Math.abs(dx * fz_ - dz * fx_);
       if (a > 1.5 && a < 13 && l < 1.5 + o.r) { block = true; person = o.person; break; }
@@ -535,7 +602,9 @@ function updateTraffic(dt, tSec) {
   }
   for (const v of tr) {
     const p = trafficPose(v, tSec - v.lag);
-    v.x = p.x; v.z = p.z; v.h = p.h; v.vx = p.vx * v.sf; v.vz = p.vz * v.sf; v.speed = Math.hypot(v.vx, v.vz);
+    v.x = p.x + Math.cos(p.h) * v.off; v.z = p.z - Math.sin(p.h) * v.off;
+    v.h = p.h + Math.atan2(v._offRate || 0, Math.max(3, v.loop.speed * v.sf));
+    v.vx = p.vx * v.sf; v.vz = p.vz * v.sf; v.speed = Math.hypot(v.vx, v.vz);
   }
 }
 
@@ -546,10 +615,23 @@ function updateVehicles(dt, tSec, nowMs) {
     if (v.mode === 'traffic') {
       if (head) head.visible = true;
     } else {
-      if (head) head.visible = false;
+      if (head) {
+        head.visible = !!v.driver && !v.exploded;
+        if (v.driver && v.headFor !== v.driver) {
+          v.headFor = v.driver;
+          const look = v.driver === net.uid ? me.look : net.players[v.driver]?.c;
+          if (Array.isArray(look)) head.material = mat(look[0]);
+        }
+      }
+      if (v.doorT > 0) {
+        v.doorT = Math.max(0, v.doorT - dt);
+        const dl = v.mesh.userData.parts.doorL;
+        if (dl) dl.rotation.y = -Math.sin(((0.6 - v.doorT) / 0.6) * Math.PI) * 1.1;
+      }
       if (v === me.veh) { /* driven in updatePlayer */ }
       else if (v.localSim) {
-        stepVehicle(v, {}, dt);
+        const wi = stepVehicle(v, {}, dt);
+        if (v.hit && wi > 6) { crashFx(v, v.hit); damageZone(v, v.hit.cp[0], v.hit.cp[1], wi); }
         collideAround(v, true);
         if (Math.hypot(v.vx, v.vz) < 0.3) { v.localSim = false; v.vx = v.vz = 0; writeVeh(v, true); }
         else writeVeh(v);
@@ -584,6 +666,8 @@ function updatePlayer(dt) {
     return;
   }
   me.cd -= dt; me.hitCd -= dt;
+  me.ch.g.visible = !me.veh || !!me.veh.T.bike;
+  if (me.rag) { ragdollUpdate(dt); me.vx = (me.x - px) / dt; me.vz = (me.z - pz) / dt; return; }
   if (me.swing > 0) me.swing = Math.max(0, me.swing - dt * 3);
   const fwd = (keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0) - (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0);
   const side = (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) - (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0);
@@ -593,6 +677,39 @@ function updatePlayer(dt) {
   const wantFire = locked && (w.auto ? mouseDown : clicked);
   clicked = false;
   if (wantFire && me.cd <= 0 && !me.dead && !me.swim && !(me.veh && w.melee)) fire(w);
+}
+
+// Thrown out of a car: tumble, bounce, lie there, get up.
+function launchMe(v, vx, vy, vz) {
+  me.veh = null;
+  v.doorT = 0;
+  if (v.driver === net.uid) { v.driver = ''; v.localSim = true; writeVeh(v, true); }
+  const f = { x: Math.sin(v.h), z: Math.cos(v.h) };
+  me.x = v.x + f.x * (v.T.len / 2 + 0.8); me.z = v.z + f.z * (v.T.len / 2 + 0.8); me.y = v.y + 1.3;
+  me.rag = { t: 2.6, vx, vy, vz, spin: 8 + Math.random() * 5, landed: false };
+  fx.glass(me.x, me.y, me.z, 20);
+  ui.announce('THROUGH THE WINDSHIELD', '', '#ff5e5b');
+  damageMe(Math.min(70, Math.hypot(vx, vz) * 1.4), 'a windshield', '');
+}
+function ragdollUpdate(dt) {
+  const r = me.rag;
+  r.t -= dt;
+  r.vy -= 20 * dt;
+  me.x += r.vx * dt; me.y += r.vy * dt; me.z += r.vz * dt;
+  const p = W.pushOutCircle(me.x, me.z, 0.4);
+  if (p.hit) { me.x = p.x; me.z = p.z; r.vx *= -0.3; r.vz *= -0.3; damageMe(8, 'a wall', ''); }
+  const land = W.isLand(me.x, me.z), gy = land ? W.groundHeight(me.x, me.z) : -0.95;
+  if (me.y <= gy) {
+    if (r.vy < -5) { fx.blood(me.x, gy + 0.3, me.z, r.vx * 0.1, r.vz * 0.1, 6); fx.soundHit(); }
+    me.y = gy; r.vy = Math.abs(r.vy) > 3 ? -r.vy * 0.3 : 0; r.vx *= 0.55; r.vz *= 0.55; r.spin *= 0.5; r.landed = true;
+    if (!land) { me.swim = true; r.t = Math.min(r.t, 0.1); }
+  }
+  me.ch.g.position.set(me.x, me.y, me.z);
+  me.ch.g.rotation.y = Math.atan2(r.vx, r.vz) || me.ch.g.rotation.y;
+  if (r.landed && Math.hypot(r.vx, r.vz) < 2) animateCharacter(me.ch, dt, { dead: true });
+  else { me.ch.body.rotation.x += r.spin * dt; me.ch.body.position.y = 0.6; }
+  if (me.dead) return;
+  if (r.t <= 0) { me.rag = null; me.ch.body.rotation.set(0, 0, 0); me.ch.body.position.y = 0; me.vy = 0; me.h = me.ch.g.rotation.y; }
 }
 
 function footUpdate(dt, fwd, side) {
@@ -648,8 +765,25 @@ function footUpdate(dt, fwd, side) {
 
 function driveUpdate(dt, fwd, side) {
   const v = me.veh;
+  const pre = { vx: v.vx, vz: v.vz, speed: v.speed };
   const imp = stepVehicle(v, { throttle: fwd > 0 ? 1 : 0, brake: fwd < 0 ? 1 : 0, steer: -side, handbrake: keys.has('Space') }, dt);
-  let total = Math.max(imp, collideAround(v, false));
+  const wallHit = v.hit;
+  if (wallHit) { crashFx(v, wallHit); if (imp > 6) damageZone(v, wallHit.cp[0], wallHit.cp[1], imp); }
+  const vImp = collideAround(v, false);
+  const vHit = v.hit;
+  let total = Math.max(imp, vImp);
+  if (v.slip > 6 && v.air === 0 && Math.abs(v.speed) > 6) fx.soundSqueal();
+  // through the windshield: big frontal hit with no time to brake
+  const mainHit = imp >= vImp ? wallHit : vHit;
+  if (mainHit && !me.dead) {
+    const dv = Math.hypot(v.vx - pre.vx, v.vz - pre.vz);
+    const frontal = mainHit.nx * Math.sin(v.h) + mainHit.nz * Math.cos(v.h) < -0.55;
+    if (frontal && (v.T.bike ? pre.speed > 14 && dv > 8 : pre.speed > 28 && dv > 18)) {
+      damageVehicle(v, (total - 7) * 3, mainHit);
+      launchMe(v, pre.vx * 0.7, 5, pre.vz * 0.7);
+      return;
+    }
+  }
   if (v.landed > 14) total = Math.max(total, v.landed * 0.8);
   // stunt jumps
   if (v.lastAir > 0.9 && v.air === 0) {
@@ -695,7 +829,7 @@ function driveUpdate(dt, fwd, side) {
   }
   me.x = v.x; me.z = v.z; me.y = Math.max(-0.95, v.y); me.h = v.h; me.vx = v.vx; me.vz = v.vz; me.moveSpeed = 0;
   writeVeh(v);
-  me.ch.g.visible = v.T.bike;
+  me.ch.g.visible = !!v.T.bike;
   if (v.T.bike) {
     me.ch.g.position.set(v.x - Math.sin(v.h) * 0.25, v.y + 0.2, v.z - Math.cos(v.h) * 0.25);
     me.ch.g.rotation.set(0, v.h, 0);
@@ -731,7 +865,7 @@ function updateRemotes(dt) {
     r.vehObj = vo;
     const wk = WEAPONS[r.weapon]?.kind || 'none';
     if (vo) {
-      r.ch.g.visible = vo.T.bike;
+      r.ch.g.visible = !!vo.T.bike;
       if (vo.T.bike) { r.ch.g.position.set(vo.x - Math.sin(vo.h) * 0.25, vo.y + 0.2, vo.z - Math.cos(vo.h) * 0.25); r.ch.g.rotation.set(0, vo.h, 0); animateCharacter(r.ch, dt, { sit: true, weapon: wk }); }
     } else {
       r.ch.g.visible = true;
@@ -853,6 +987,7 @@ function update(dt, t) {
   updateRemotes(dt);
   updateWalkers(dt, tSec, nowMs, camera.position);
   if (isHost) { police.hostUpdate(dt, policePlayers()); hostChores(dt, nowMs); }
+  for (const v of vehicles) if (v.pending) flushBump(v);
   police.render(dt, isHost, t);
   updateGrenades(dt);
   updateWanted(dt);
