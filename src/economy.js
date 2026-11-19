@@ -1,13 +1,11 @@
-// Money, things to buy, stores to rob, hidden Tim gnomes and the goals list. Local to each player
+// Money, things to buy, stores to rob and the crime-spree goals. Local to each player
 // (nothing is saved between sessions).
 import * as THREE from 'three';
 import * as W from './world.js';
-import { rng } from './util.js';
-import { mat } from './character.js';
 
-export const eco = { cash: 200, robbed: 0, gnomes: 0, stunts: 0, done: new Set() };
+export const eco = { cash: 200, robbed: 0, jacked: 0, copCars: 0, done: new Set() };
 let scene, hooks = { announce() {}, sound() {}, feed() {} };
-export function initEconomy(s, h) { scene = s; hooks = { ...hooks, ...h }; placeGnomes(); markStores(); }
+export function initEconomy(s, h) { scene = s; hooks = { ...hooks, ...h }; markStores(); }
 
 export function addCash(n, why) {
   eco.cash = Math.max(0, Math.round(eco.cash + n));
@@ -17,16 +15,15 @@ export function spend(n) { if (eco.cash < n) return false; eco.cash -= n; return
 
 // ---------- goals ----------
 export const GOALS = [
-  { id: 'bridge', text: 'Jump the broken bridge', reward: 500 },
-  { id: 'stunts', text: 'Land 5 stunt jumps', reward: 300, max: 5, get: () => eco.stunts },
-  { id: 'rob', text: 'Rob 3 stores', reward: 600, max: 3, get: () => eco.robbed },
-  { id: 'gnomes', text: 'Find all 15 hidden Tim gnomes', reward: 2000, max: 15, get: () => eco.gnomes },
-  { id: 'lose3', text: 'Lose a 3-star wanted level', reward: 400 },
-  { id: 'heli', text: 'Take down the police helicopter', reward: 1000 },
-  { id: 'armor', text: 'Buy body armor', reward: 100 },
-  { id: 'fly', text: 'Fly the helicopter over the Tim statue', reward: 400 },
-  { id: 'boat', text: 'Take a boat around Lighthouse Point', reward: 300 },
+  { id: 'rob', text: 'Rob 5 stores', reward: 1200, max: 5, get: () => eco.robbed },
+  { id: 'casino', text: 'Rob the riverboat casino', reward: 3000 },
+  { id: 'lose4', text: 'Escape a 4-star chase', reward: 800 },
+  { id: 'lose5', text: 'Escape a 5-star chase', reward: 2000 },
   { id: 'survive5', text: 'Survive 60 seconds at 5 stars', reward: 1500 },
+  { id: 'heli', text: 'Take down a police helicopter', reward: 1000 },
+  { id: 'copcar', text: 'Steal a police car', reward: 500 },
+  { id: 'cops5', text: 'Wreck 5 police cars', reward: 900, max: 5, get: () => eco.copCars },
+  { id: 'jack10', text: 'Carjack 10 cars', reward: 700, max: 10, get: () => eco.jacked },
 ];
 export function goalDone(id) {
   if (eco.done.has(id)) return;
@@ -39,51 +36,34 @@ export function goalDone(id) {
 }
 export function checkCountGoals() { for (const g of GOALS) if (g.max && g.get() >= g.max) goalDone(g.id); }
 
-// ---------- hidden Tim gnomes ----------
-const gnomes = [];
-function gnomeMesh() {
-  const g = new THREE.Group();
-  const gold = new THREE.MeshStandardMaterial({ color: 0xffc94a, emissive: 0x6b4a00, metalness: 0.6, roughness: 0.35 });
-  const add = (geo, y, m = gold) => { const x = new THREE.Mesh(geo, m); x.position.y = y; x.castShadow = true; g.add(x); return x; };
-  add(new THREE.CylinderGeometry(0.22, 0.28, 0.45, 8), 0.22);
-  add(new THREE.SphereGeometry(0.17, 10, 8), 0.58);
-  add(new THREE.ConeGeometry(0.2, 0.42, 8), 0.88, new THREE.MeshStandardMaterial({ color: 0xe5484d, emissive: 0x400000 }));
-  add(new THREE.BoxGeometry(0.26, 0.12, 0.06), 0.5, mat(0xf2f2f2)); // the beard
-  const ring = new THREE.Mesh(new THREE.RingGeometry(0.5, 0.65, 24).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xffd54f, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false }));
-  ring.position.y = 0.05; g.add(ring);
-  return g;
-}
-function placeGnomes() {
-  const r = rng(31337), spots = [];
-  const P = W.P;
-  // tucked-away places: dock ends, islets, the bridge stub, the lighthouse, the park, beach corners, alleys
-  for (const k of W.docks) spots.push(P(k.s, k.d0 + 2));
-  for (const i of W.islets.filter((x) => x.r > 9).slice(0, 3)) spots.push({ x: i.x + 2, z: i.z });
-  spots.push(P(-190, 10), P(1068, -10), P(1095, 0));
-  if (W.places.park) spots.push(P(W.places.park.s - 30, 36));
-  for (let k = 0; k < 3; k++) spots.push(P(180 + k * 300 + r() * 60, 80));
-  for (let k = 0; k < 3; k++) { const c = W.CROSS[2 + k * 3]; spots.push(P(c + 6.5, -60 - r() * 15)); }
-  spots.push(P(40, 20), P(990, -24));
-  for (const p of spots.slice(0, 15)) {
-    const m = gnomeMesh();
-    const y = W.isLand(p.x, p.z) ? W.groundHeight(p.x, p.z) : 0.05;
-    m.position.set(p.x, y, p.z);
-    scene.add(m);
-    gnomes.push({ m, x: p.x, z: p.z, got: false });
-  }
-}
-export function gnomeList() { return gnomes; }
-
 // ---------- stores ----------
 // kind: 'rob' (aim a gun at the door to empty the till), 'guns', 'meds', 'body'
 export const stores = [];
-const ROB = ['TIM-MART', 'TACO TIM', 'KEY LIME CAFE', 'SUNSET VIDEO', 'LUCKY 7 LAUNDRY', 'ARNETT GAS', 'PELICAN PIZZA', 'CONCH BURGER'];
+// Made-up names on real Davenport gas stations and corner stores.
+const ROB_NAMES = ['Tim-Mart', 'Arnett Gas', 'Big River Liquor', 'Hilltop Pantry', 'QuikTim', 'River Bend Fuel', 'Corner Tim', 'Bluff Mart', 'Lucky Arnett', 'Mississippi Mini Mart', 'Quad Stop', 'Eagle Point Liquor', 'Kimberly Quick Stop', 'Brady Street Market', 'Village Pantry', 'Northside Gas'];
+// a sidewalk spot in front of a point of interest: {x, z} to stand on, door toward the building
+function frontOf(px, pz) {
+  const q = W.nearestEdge(px, pz, 80, (e) => e.cls !== 'service' && !e.bridge);
+  if (!q) return null;
+  const dx = px - q.x, dz = pz - q.z, l = Math.hypot(dx, dz) || 1, off = q.e.width / 2 + 1.6;
+  const x = q.x + (dx / l) * off, z = q.z + (dz / l) * off;
+  return { x, z, doorX: x + (dx / l) * 2.2, doorZ: z + (dz / l) * 2.2, face: Math.atan2(dx, dz) };
+}
 function markStores() {
-  for (const s of W.env.shops || []) {
-    const kind = s.name === 'ARNETT ARMS' ? 'guns' : s.name === 'ARNETT AUTO' ? 'body' : ROB.includes(s.name) ? 'rob' : null;
-    if (kind) stores.push({ ...s, kind, cooldown: 0, progress: 0 });
+  const poi = W.D.index.poi;
+  const spaced = (list, minD) => { const out = []; for (const p of list) if (!out.some((o) => Math.hypot(o.x - p.x, o.z - p.z) < minD)) out.push(p); return out; };
+  const rob = spaced(poi.filter((p) => ['fuel', 'convenience', 'alcohol'].includes(p.kind)), 220);
+  rob.slice(0, 15).forEach((p, i) => { const f = frontOf(p.x, p.z); if (f) stores.push({ name: ROB_NAMES[i % ROB_NAMES.length], kind: 'rob', ...f, cooldown: 0, progress: 0 }); });
+  // Arnett Arms downtown + by NorthPark, Arnett Auto on Brady St
+  for (const [x, z, name, kind] of [[60, -330, 'Arnett Arms', 'guns'], [300, -3990, 'Arnett Arms', 'guns'], [-30, -1450, 'Arnett Auto', 'body']]) { const f = frontOf(x, z); if (f) stores.push({ name, kind, ...f, cooldown: 0, progress: 0 }); }
+  for (const h of W.D.index.hospitals) { const f = frontOf(h.x, h.z); if (f) stores.push({ name: 'Hospital pharmacy', kind: 'meds', ...f }); }
+  // a soft glowing ring on the sidewalk so you can find the door
+  const ringGeo = new THREE.RingGeometry(0.7, 0.9, 28).rotateX(-Math.PI / 2);
+  const COL = { rob: 0x8fe38a, guns: 0xe5484d, body: 0x4aa3ff, meds: 0xffffff };
+  for (const s of stores) {
+    const m = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: COL[s.kind], transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false }));
+    m.position.set(s.x, W.groundHeight(s.x, s.z) + 0.12, s.z); scene.add(m); s.ring = m;
   }
-  if (W.places.clinic) { const c = W.places.clinic, p = W.P(c.s, c.d + c.depth / 2 + 2.2); stores.push({ name: 'ARNETT CLINIC', kind: 'meds', x: p.x, z: p.z }); }
 }
 export function storeNear(x, z, r = 3.2) {
   let best = null, bd = r;
@@ -97,25 +77,14 @@ const cashGeo = new THREE.BoxGeometry(0.35, 0.12, 0.2);
 const cashMat = new THREE.MeshStandardMaterial({ color: 0x59c96a, emissive: 0x1d5a25, roughness: 0.5 });
 export function dropCash(x, z, amount) {
   const m = new THREE.Mesh(cashGeo, cashMat);
-  m.position.set(x + (Math.random() - 0.5), 0.15, z + (Math.random() - 0.5));
+  const px = x + (Math.random() - 0.5), pz = z + (Math.random() - 0.5);
+  m.position.set(px, W.groundHeight(px, pz) + 0.1, pz);
   scene.add(m);
   pickups.push({ m, amount, t: 60 });
 }
 
-// Per frame: spin gnomes, collect pickups, and return what was collected.
+// Per frame: collect cash pickups, tick store cooldowns.
 export function updateEconomy(dt, me, time) {
-  for (const g of gnomes) {
-    if (g.got) continue;
-    g.m.rotation.y += dt * 1.5;
-    g.m.position.y += Math.sin(time * 3 + g.x) * 0.002;
-    if (!me.dead && !me.veh && Math.hypot(me.x - g.x, me.z - g.z) < 1.4) {
-      g.got = true; scene.remove(g.m); eco.gnomes++;
-      addCash(100);
-      hooks.announce('TIM GNOME FOUND', `${eco.gnomes} of ${gnomes.length} · +$100`, '#ffc94a');
-      hooks.sound('gnome');
-      checkCountGoals();
-    }
-  }
   for (let i = pickups.length - 1; i >= 0; i--) {
     const p = pickups[i];
     p.t -= dt; p.m.rotation.y += dt * 3;

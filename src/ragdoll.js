@@ -3,7 +3,7 @@
 // so the character's existing groups can simply follow the bodies.
 import * as THREE from 'three';
 import RAPIER from '../vendor/rapier.js';
-import * as W from './world.js';
+import { tiles, TILE, tileKey } from './city/data.js';
 
 let world = null, ready = false;
 const active = [];
@@ -15,25 +15,35 @@ const groups = (member, filter) => (member << 16) | filter;
 export async function initPhysics() {
   await RAPIER.init();
   world = new RAPIER.World({ x: 0, y: -14, z: 0 });
-  const fixed = (desc, x, y, z, q) => {
-    const body = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(x, y, z).setRotation(q || { x: 0, y: 0, z: 0, w: 1 }));
-    world.createCollider(desc.setCollisionGroups(groups(GROUP_WORLD, 0xffff)).setFriction(0.9), body);
-  };
-  fixed(RAPIER.ColliderDesc.cuboid(4000, 0.5, 4000), 0, -0.5, 0); // ground (and water surface)
-  const q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
-  for (const b of W.colliders) {
-    q.setFromAxisAngle(up, b.rot);
-    fixed(RAPIER.ColliderDesc.cuboid(b.hu, b.h / 2, b.hv), b.cx, b.h / 2, b.cz, q);
-  }
-  for (const r of W.ramps) {
-    const L = r.len / 2, Wd = r.wid / 2, hd = Math.atan2(r.fx, r.fz);
-    const pts = new Float32Array([-Wd, 0, -L, Wd, 0, -L, -Wd, 0, L, Wd, 0, L, -Wd, r.h, L, Wd, r.h, L]);
-    const d = RAPIER.ColliderDesc.convexHull(pts);
-    if (d) fixed(d, r.x, 0.02, r.z, q.setFromAxisAngle(up, hd));
-  }
   ready = true;
 }
 export const physicsReady = () => ready;
+
+// The ground and walls only exist for the 3x3 tiles around the player (that's where people fall over).
+const statics = new Map(); // tile key -> rigid body
+export function syncPhysics(px, pz) {
+  if (!ready) return;
+  const cx = Math.floor(px / TILE), cz = Math.floor(pz / TILE), want = new Set();
+  for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+    const key = tileKey(cx + dx, cz + dz), t = tiles.get(key);
+    if (!t || !t.boxes) continue;
+    want.add(key);
+    if (statics.has(key)) continue;
+    const body = world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
+    const v = new Float32Array(26 * 26 * 3), idx = new Uint32Array(25 * 25 * 6);
+    for (let j = 0; j < 26; j++) for (let i = 0; i < 26; i++) { const k = j * 26 + i; v[k * 3] = t.ox + i * 8; v[k * 3 + 1] = t.h[k] / 100; v[k * 3 + 2] = t.oz + j * 8; }
+    let n = 0;
+    for (let j = 0; j < 25; j++) for (let i = 0; i < 25; i++) { const a = j * 26 + i; idx.set([a, a + 26, a + 27, a, a + 27, a + 1], n); n += 6; }
+    world.createCollider(RAPIER.ColliderDesc.trimesh(v, idx).setCollisionGroups(groups(GROUP_WORLD, 0xffff)).setFriction(0.9), body);
+    const q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
+    for (const b of t.boxes) {
+      q.setFromAxisAngle(up, b.rot);
+      world.createCollider(RAPIER.ColliderDesc.cuboid(b.hu, b.h / 2, b.hv).setTranslation(b.cx, b.y0 + b.h / 2, b.cz).setRotation(q).setCollisionGroups(groups(GROUP_WORLD, 0xffff)).setFriction(0.9), body);
+    }
+    statics.set(key, body);
+  }
+  for (const [key, body] of statics) if (!want.has(key)) { world.removeRigidBody(body); statics.delete(key); }
+}
 
 // hinge limits (radians, rotation about the body's side-to-side axis; negative = forward)
 const LIMITS = { head: [-0.7, 0.5], shL: [-2.9, 0.9], shR: [-2.9, 0.9], hipL: [-1.7, 0.45], hipR: [-1.7, 0.45] };

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Tim Arnett Town</title>
-  <meta name="description" content="Free multiplayer island sandbox. Steal cars, cause chaos, run from the cops.">
+  <meta name="description" content="Free multiplayer open-world sandbox set in Davenport, Iowa. Steal cars, cause chaos, run from the cops.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;600;800&display=swap">
   <link rel="stylesheet" href="style.css">
@@ -53,7 +53,7 @@
       </div>
     </div>
     <div id="hurt"></div>
-    <div id="dead" hidden><div class="band"><span>YOU DIED</span></div><small id="deadSub">Respawning at Arnett Clinic…</small></div>
+    <div id="dead" hidden><div class="band"><span>YOU DIED</span></div><small id="deadSub">Waking up at the nearest hospital…</small></div>
 
     <div id="shop" hidden>
       <div class="shopCard">
@@ -77,7 +77,7 @@
       </div>
       <div class="pauseBody">
         <section data-panel="map">
-          <canvas id="bigmap" width="1000" height="560" aria-label="Island map. Click to set a waypoint."></canvas>
+          <canvas id="bigmap" width="1000" height="560" aria-label="Map of Davenport. Click to set a waypoint."></canvas>
           <p class="hint">Click the map to set a waypoint. Click it again to clear it.</p>
         </section>
         <section data-panel="goals" hidden><ul id="goalList"></ul><p class="hint">Rewards are paid in cash. Nothing is saved between sessions.</p></section>
@@ -123,7 +123,7 @@
   <div id="menu">
     <div class="card">
       <h1>Tim Arnett <span>Town</span></h1>
-      <p class="tag">An island of chaos. Grab a car. Grab your friends. Run from the cops.</p>
+      <p class="tag">Davenport, Iowa, at full size. Grab a car. Grab your friends. Run from the cops.</p>
       <label for="nameInput">Your name</label>
       <input id="nameInput" maxlength="16" autocomplete="off">
       <label for="roomInput">Room code <small>same code = same game</small></label>

@@ -1,46 +1,13 @@
-// Navigation: a walkable-area mesh built from the island (buildings cut out), plus a "crowd" that
+// Navigation: a walkable-area mesh (buildings cut out), plus a "crowd" that
 // steers people around walls and each other. Used whenever an NPC leaves its normal route
 // (fleeing, fighting, cops on foot, yanked drivers).
-import { init, Crowd, NavMeshQuery, generateTiledNavMesh } from '../vendor/recast.js';
-import * as W from './world.js';
 
-let crowd = null, query = null, ready = false;
+let crowd = null, query = null; const ready = false;
 export const navReady = () => ready;
 
-function boxTris(pos, idx, b) {
-  const base = pos.length / 3;
-  for (const [a, c] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) for (const y of [0, b.h]) {
-    pos.push(b.cx + b.ux * b.hu * a + b.vx * b.hv * c, y, b.cz + b.uz * b.hu * a + b.vz * b.hv * c);
-  }
-  // corners 0..3 bottom/top pairs: (i*2) bottom, (i*2+1) top
-  for (let i = 0; i < 4; i++) {
-    const j = (i + 1) % 4, b0 = base + i * 2, b1 = base + j * 2;
-    idx.push(b0, b1, b1 + 1, b0, b1 + 1, b0 + 1);
-  }
-  idx.push(base + 1, base + 3, base + 5, base + 1, base + 5, base + 7);
-}
-
-export async function initNav() {
-  await init();
-  const t0 = performance.now();
-  const pos = [...W.navSource.pos], idx = [...W.navSource.idx];
-  // the visible ground is drawn double-sided with downward-facing triangles; Recast needs them facing up
-  for (let t = 0; t < idx.length; t += 3) { const k = idx[t + 1]; idx[t + 1] = idx[t + 2]; idx[t + 2] = k; }
-  for (const b of W.colliders) if (b.h > 0.6) boxTris(pos, idx, b);
-  // built in 48 m tiles: a single piece would be too big for the island (and later for the city)
-  const { success, navMesh, error } = generateTiledNavMesh(pos, idx, {
-    tileSize: 80,
-    cs: 0.6, ch: 0.2, walkableSlopeAngle: 40, walkableHeight: 9, walkableClimb: 3, walkableRadius: 1,
-    maxEdgeLen: 20, maxSimplificationError: 1.3, minRegionArea: 8, mergeRegionArea: 20,
-    maxVertsPerPoly: 6, detailSampleDist: 6, detailSampleMaxError: 1,
-  });
-  if (!success) { console.warn('navmesh failed', error); return false; }
-  query = new NavMeshQuery(navMesh);
-  crowd = new Crowd(navMesh, { maxAgents: 90, maxAgentRadius: 0.6 });
-  ready = true;
-  console.info(`navmesh ready in ${Math.round(performance.now() - t0)} ms`);
-  return true;
-}
+// The island's baked navmesh is gone; city pedestrians walk the sidewalk network instead.
+// Until a city navmesh exists every caller falls back to steering straight with wall push-out.
+export async function initNav() { return false; }
 
 export function addAgent(x, z, speed = 5) {
   if (!ready) return null;

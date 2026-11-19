@@ -8,11 +8,6 @@ import { makeCharacter, randomLook, animateCharacter, placeCharacter, mat } from
 import { ragdoll, release, ragPos } from './ragdoll.js';
 import * as nav from './nav.js';
 
-const LINES = [
-  { d: 8.6, s0: 15, s1: 1085 }, { d: -8.6, s0: 15, s1: 1085 },
-  { d: 41.2, s0: 140, s1: 960 }, { d: -41.2, s0: 140, s1: 960 },
-  { d: 66, s0: 160, s1: 940 }, { d: 74, s0: 160, s1: 940 },
-];
 export const RESPAWN_MS = 45000;
 export const walkers = [];
 export const fleeing = [];
@@ -39,42 +34,6 @@ function makeDog(color) {
 
 export function initWalkers(s) {
   scene = s;
-  const r = rng(777);
-  const add = (w) => {
-    w.ch = makeCharacter(randomLook(r));
-    scene.add(w.ch.g);
-    w.hp = 40; w.dead = null; w.extra = 0; w.panic = 0; w.mode = w.fixed ? 'fixed' : 'path';
-    w.temper = r() < 0.2 ? 'brawler' : r() < 0.1 ? 'gunman' : 'normal'; // some people fight back
-    w.id = walkers.length; walkers.push(w);
-    return w;
-  };
-  // people on routes (some jog, some walk the dog)
-  for (let i = 0; i < 40; i++) {
-    const line = LINES[Math.floor(r() * LINES.length)];
-    const len = 50 + r() * 120;
-    const kind = r();
-    const w = add({ d: line.d + (r() - 0.5) * 1.2, sLo: line.s0 + r() * (line.s1 - line.s0 - len), len, speed: 1.1 + r() * 0.7, off: r() * 1000, act: 'walk' });
-    if (kind < 0.15) { w.act = 'jog'; w.speed = 3.2 + r(); }
-    else if (kind < 0.27) { w.act = 'dog'; w.dog = makeDog([0x8d6e63, 0xf5f5f5, 0x212121, 0xd7a35a][Math.floor(r() * 4)]); scene.add(w.dog.g); }
-  }
-  // people hanging around
-  const benches = (W.env.benches || []).filter(() => r() < 0.6).slice(0, 12);
-  for (const b of benches) add({ fixed: { x: b.x, z: b.z, h: b.h, pose: 'sit' }, act: 'sit' });
-  const towels = (W.env.towels || []).filter(() => r() < 0.3).slice(0, 10);
-  for (const t of towels) add({ fixed: { x: t.x, z: t.z, h: t.h, pose: 'lie' }, act: 'sunbathe' });
-  for (let g = 0; g < 6; g++) {
-    const s = 160 + r() * 780, side = r() < 0.5 ? 1 : -1, c = W.P(s, side * 9.2);
-    const n = 2 + Math.floor(r() * 2);
-    for (let k = 0; k < n; k++) {
-      const a = (k / n) * Math.PI * 2;
-      const x = c.x + Math.cos(a) * 0.9, z = c.z + Math.sin(a) * 0.9;
-      add({ fixed: { x, z, h: Math.atan2(c.x - x, c.z - z), pose: 'chat' }, act: 'chat' });
-    }
-  }
-  for (let k = 0; k < 5; k++) {
-    const s = 160 + r() * 780, p = W.P(s, (r() < 0.5 ? 1 : -1) * 9.6);
-    add({ fixed: { x: p.x, z: p.z, h: r() * 6.28, pose: 'phone' }, act: 'phone' });
-  }
 }
 
 export function walkerPose(w, tSec) {
@@ -82,8 +41,7 @@ export function walkerPose(w, tSec) {
   const u = (((w.off + tSec * w.speed + w.extra) % (2 * w.len)) + 2 * w.len) % (2 * w.len);
   const fwd = u < w.len;
   const s = w.sLo + (fwd ? u : 2 * w.len - u);
-  const p = W.P(s, w.d);
-  return { x: p.x, z: p.z, h: fwd ? -W.theta(s) : -W.theta(s) + Math.PI };
+  return { x: w.x, z: w.z, h: w.h, s, fwd };
 }
 
 export function isAlive(w, nowMs) { return !w.dead || nowMs - w.dead.t > RESPAWN_MS; }
@@ -246,7 +204,8 @@ export function updateWalkers(dt, tSec, nowMs, cam) {
     w.ch.g.visible = !far;
     if (w.dog) w.dog.g.visible = !far && !w.dead;
     if (far) continue;
-    placeCharacter(w.ch, w.x, w.fixed && !w.dead && w.mode === 'fixed' ? (w.fixed.pose === 'sit' ? -0.35 : 0) : 0, w.z, w.h);
+    w.y = W.groundHeight(w.x, w.z);
+    placeCharacter(w.ch, w.x, w.y + (w.fixed && !w.dead && w.mode === 'fixed' ? (w.fixed.pose === 'sit' ? -0.35 : 0) : 0), w.z, w.h);
     animateCharacter(w.ch, dt, { speed, dead: !!w.dead, phone: !!w.call || pose.phone, look: w.mode === 'path' || w.mode === 'fixed' ? w.look || 0 : 0, ...pose });
     if (w.dog && !w.dead) {
       const d = w.dog, side = 0.8;
@@ -254,6 +213,7 @@ export function updateWalkers(dt, tSec, nowMs, cam) {
       const dx = tx - d.g.position.x, dz = tz - d.g.position.z, dd = Math.hypot(dx, dz);
       if (dd > 6) d.g.position.set(tx, 0, tz);
       else { d.g.position.x += dx * Math.min(1, dt * 6); d.g.position.z += dz * Math.min(1, dt * 6); }
+      d.g.position.y = W.groundHeight(d.g.position.x, d.g.position.z);
       if (dd > 0.05) d.g.rotation.y = Math.atan2(dx, dz);
       d.t += dt * (2 + speed * 3);
       d.legs.forEach((l, i) => { l.rotation.x = Math.sin(d.t + (i % 2 ? Math.PI : 0) + (i > 1 ? Math.PI : 0)) * Math.min(0.8, speed * 0.2); });
@@ -276,7 +236,7 @@ export function updateWalkers(dt, tSec, nowMs, cam) {
         else { spd = 0; if (f.cd <= 0 && !t.inVeh) { f.cd = 1; f.swing = 1; ctx.hitPlayer(5 + Math.random() * 4, 'an angry driver', { hostile: 'melee', h: f.h }); } }
         if (d > 40) f.angry = false;
       }
-      placeCharacter(f.ch, f.x, 0, f.z, f.h);
+      placeCharacter(f.ch, f.x, W.groundHeight(f.x, f.z), f.z, f.h);
       animateCharacter(f.ch, dt, { speed: spd, swing: f.swing });
       if (f.t <= 4) { f.angry = false; f.t = 8; }
       continue;
@@ -291,7 +251,7 @@ export function updateWalkers(dt, tSec, nowMs, cam) {
       if (Math.hypot(p.x - f.x, p.z - f.z) < 6 * dt * 0.4) f.h += 1.3;
       f.x = p.x; f.z = p.z;
     }
-    placeCharacter(f.ch, f.x, 0, f.z, f.h);
+    placeCharacter(f.ch, f.x, W.groundHeight(f.x, f.z), f.z, f.h);
     animateCharacter(f.ch, dt, { speed: spd > 0.3 ? spd + 1 : 0 });
     if (f.t <= 0) { if (f.agent) nav.removeAgent(f.agent); scene.remove(f.ch.g); fleeing.splice(i, 1); }
   }
@@ -329,10 +289,10 @@ function hostileStep(w, dt, t) {
   if (w.hostile === 'melee' && d < 1.6 && !t.inVeh) {
     w.cd = 0.9; w.swing = 1;
     ctx.hitPlayer(6 + Math.random() * 5, 'an angry local', w);
-  } else if (w.hostile === 'gun' && d < 35 && W.lineOfSight(w.x, 1.4, w.z, t.x, 1.2, t.z)) {
+  } else if (w.hostile === 'gun' && d < 35 && W.lineOfSight(w.x, (w.y || 0) + 1.4, w.z, t.x, (t.y || 0) + 1.2, t.z)) {
     w.cd = 1.3 + Math.random() * 0.8;
-    const hit = Math.random() < (t.inVeh ? 0.12 : 0.25);
-    ctx.shot(w, hit ? { x: t.x, y: 1.2, z: t.z } : { x: t.x + (Math.random() - 0.5) * 4, y: 1.2, z: t.z + (Math.random() - 0.5) * 4 });
+    const hit = Math.random() < (t.inVeh ? 0.12 : 0.25), ty = (t.y || 0) + 1.2;
+    ctx.shot(w, hit ? { x: t.x, y: ty, z: t.z } : { x: t.x + (Math.random() - 0.5) * 4, y: ty, z: t.z + (Math.random() - 0.5) * 4 });
     if (hit) ctx.hitPlayer(7 + Math.random() * 4, 'an armed local', w);
   }
 }
@@ -340,7 +300,7 @@ function hostileStep(w, dt, t) {
 export function spawnFleeing(x, z, h, down = 0, angry = false) {
   const ch = makeCharacter(randomLook());
   scene.add(ch.g);
-  ch.g.position.set(x, 0, z); ch.g.rotation.y = h;
+  ch.g.position.set(x, W.groundHeight(x, z), z); ch.g.rotation.y = h;
   const f = { ch, x, z, h, t: (angry ? 16 : 8) + down, agent: null, angry };
   if (angry) { fleeing.push(f); return; }
   const run = () => { f.agent = nav.addAgent(f.x, f.z, 6.5); if (f.agent) nav.fleeTarget(f.agent, f.x, f.z, f.x - Math.sin(f.h), f.z - Math.cos(f.h), 40); };

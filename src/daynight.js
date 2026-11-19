@@ -43,6 +43,8 @@ function refreshEnvLight() {
 }
 
 // refs: { scene, sun, hemi, skyMat, renderer }
+// fog distances follow the graphics setting (set from main)
+export const view = { near: 260, far: 1100 };
 export function initDayNight(refs) {
   R = refs;
   if (R.renderer) initEnvLight();
@@ -105,7 +107,7 @@ export function updateDayNight(dt, nowMs, cam) {
   R.skyMat.uniforms.bottom.value.copy(bot);
   R.scene.fog.color.copy(bot);
   R.scene.background.copy(bot);
-  R.scene.fog.near = 140 - 80 * sky.rain; R.scene.fog.far = 345 - 140 * sky.rain;
+  R.scene.fog.near = view.near * (1 - 0.6 * sky.rain); R.scene.fog.far = view.far * (1 - 0.55 * sky.rain);
 
   // lights
   // the same light is the sun by day and the moon by night (cool, soft, still casting shadows)
@@ -125,7 +127,9 @@ export function updateDayNight(dt, nowMs, cam) {
   if (env.lampMat) env.lampMat.color.setScalar(0.75 + n * 0.25).multiply(C(0xfff3c4));
   if (env.poolMat) env.poolMat.opacity = n * 0.32;
   if (env.beam) { env.beam.material.opacity = n * 0.16; env.beam.rotation.y += dt * 0.9; }
-  if (env.water) env.water.color.copy(C(0x29b6d6).lerp(C(0x0b2a3c), n * 0.85).lerp(C(0x4b6b78), sky.cloud * 0.4));
+  if (env.water) env.water.color.copy(C(0x4d7378).lerp(C(0x0b2230), n * 0.85).lerp(C(0x56676a), sky.cloud * 0.4));
+  if (env.farBox) env.farBox.emissiveIntensity = n * 0.35;
+  if (env.roads) env.roads.color.setScalar(1 - 0.35 * sky.wet);
   if (env.ground) env.ground.color.setScalar(1 - 0.28 * sky.wet);
 
   stars.material.opacity = Math.max(0, n - sky.cloud) * 0.9;

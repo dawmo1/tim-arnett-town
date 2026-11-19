@@ -175,7 +175,7 @@ export function makeVehicle(id, ti, color, home) {
   const T = TYPES[ti];
   return {
     id, ti, T, color, mesh: makeVehicleMesh(T, color),
-    x: home.x, z: home.z, h: home.h, y: 0, vx: 0, vz: 0, w: 0, speed: 0,
+    x: home.x, z: home.z, h: home.h, y: W.groundHeight(home.x, home.z), vx: 0, vz: 0, w: 0, speed: 0,
     hp: T.hp, driver: '', mode: 'parked', burnAt: 0, burnBy: '', exploded: false, sinkT: 0,
     home, tgt: null, lastWrite: 0, localSim: false, loop: null, slot: 0, charred: false, tilt: 0,
     dz: { f: 0, b: 0, l: 0, r: 0 }, hit: null,
@@ -253,6 +253,7 @@ export function boxOf(v) {
   return { x: v.x, z: v.z, ax: fx, az: fz, ha: v.T.len / 2, bx: -fz, bz: fx, hb: v.T.wid / 2 };
 }
 const boxOfWall = (b) => ({ x: b.cx, z: b.cz, ax: b.vx, az: b.vz, ha: b.hv, bx: b.ux, bz: b.uz, hb: b.hu });
+const wallList = [];
 // Returns {depth, nx, nz} with the normal pointing from B to A, or null.
 function sat(A, B) {
   const dx = A.x - B.x, dz = A.z - B.z;
@@ -315,8 +316,8 @@ function resolve(a, b, c, cp, bStatic) {
 function hitWalls(v) {
   const T = v.T, A = boxOf(v), reach = T.len / 2 + 1;
   let impact = 0;
-  for (const b of W.colliders) {
-    if (b.h < 0.5 || v.y > b.h || Math.abs(b.cx - v.x) > b.br + reach || Math.abs(b.cz - v.z) > b.br + reach) continue;
+  for (const b of W.boxesNear(v.x, v.z, reach + 1, wallList)) {
+    if (v.y > b.y0 + b.h || v.y + T.hgt < b.y0 || Math.abs(b.cx - v.x) > b.br + reach || Math.abs(b.cz - v.z) > b.br + reach) continue;
     A.x = v.x; A.z = v.z;
     const B = boxOfWall(b), c = sat(A, B);
     if (!c) continue;
@@ -345,7 +346,7 @@ function stepBoat(v, inp, dt) {
   v.hit = null;
   let impact = 0;
   const bowX = v.x + nfx * T.len / 2, bowZ = v.z + nfz * T.len / 2;
-  if (W.isLand(bowX, bowZ) || W.isLand(v.x, v.z)) { impact = Math.abs(vf); v.hit = { imp: impact, cp: [bowX, bowZ], nx: -nfx, nz: -nfz, wall: true }; v.x = ox; v.z = oz; v.vx *= -0.25; v.vz *= -0.25; }
+  if (W.isLand(bowX, bowZ) || W.isLand(v.x, v.z) || W.offMap(bowX, bowZ)) { impact = Math.abs(vf); v.hit = { imp: impact, cp: [bowX, bowZ], nx: -nfx, nz: -nfz, wall: true }; v.x = ox; v.z = oz; v.vx *= -0.25; v.vz *= -0.25; }
   v.speed = vf; v.slip = Math.abs(vr); v.sinkT = 0; v.air = 0;
   v.y = -0.35 + Math.sin(performance.now() / 420 + v.x * 0.3) * 0.07 + Math.min(0.25, Math.abs(vf) * 0.008);
   v.pitch = -Math.min(0.16, Math.max(0, vf) * 0.006);
@@ -374,7 +375,7 @@ function stepHeli(v, inp, dt) {
   v.x += v.vx * dt; v.z += v.vz * dt; v.y += v.vy * dt;
   v.landed = 0;
   if (v.y < ground) { v.landed = -v.vy; v.y = ground; v.vy = Math.max(0, v.vy); }
-  v.y = Math.min(v.y, 140);
+  v.y = Math.min(v.y, ground + 160);
   v.speed = vf; v.slip = 0; v.sinkT = 0; v.air = flying ? 1 : 0;
   v.pitch = alive ? -((inp.throttle ? 1 : 0) - (inp.brake ? 1 : 0)) * 0.18 : v.pitch || 0;
   v.tilt = -v.w * 0.25;
@@ -421,7 +422,7 @@ export function stepVehicle(v, inp, dt) {
   v.hit = null;
   // ramps: hitting the tall end is a wall
   let gh = W.groundHeight(v.x, v.z);
-  if (gh - v.y > 0.7) {
+  if (gh - v.y > 0.7 || W.offMap(v.x + nfx * T.len / 2, v.z + nfz * T.len / 2)) {
     impact = Math.hypot(v.vx, v.vz);
     v.hit = { imp: impact, cp: [v.x + nfx * T.len / 2, v.z + nfz * T.len / 2], nx: -nfx, nz: -nfz, wall: true };
     v.x = ox; v.z = oz; v.vx *= -0.3; v.vz *= -0.3;
@@ -435,7 +436,8 @@ export function stepVehicle(v, inp, dt) {
   } else {
     v.sinkT = 0;
     const floor = W.isLand(v.x, v.z) ? gh : -5;
-    if (v.y > floor + 0.05) {
+    // stick to the road over small dips (hills); real drops still send you flying
+    if (v.y > floor + (v.air > 0 ? 0.05 : 0.35) || (v.vy || 0) > 1.5) {
       v.air = (v.air || 0) + dt;
       v.vy = (v.vy || 0) - 22 * dt;
       v.y += v.vy * dt;
@@ -446,6 +448,16 @@ export function stepVehicle(v, inp, dt) {
       v.y = floor;
       v.lastAir = v.air || 0; v.air = 0;
     }
+  }
+  // lean with the slope of the ground under the wheels
+  if (!T.bike && !(v.air > 0)) {
+    const hl = T.len * 0.4, hwd = T.wid * 0.45;
+    const hf = W.groundHeight(v.x + nfx * hl, v.z + nfz * hl), hb = W.groundHeight(v.x - nfx * hl, v.z - nfz * hl);
+    const lx = Math.cos(v.h), lz = -Math.sin(v.h);
+    const hL = W.groundHeight(v.x + lx * hwd, v.z + lz * hwd), hR = W.groundHeight(v.x - lx * hwd, v.z - lz * hwd);
+    const k = Math.min(1, dt * 10);
+    v.gp = (v.gp || 0) + (clamp(Math.atan2(hb - hf, hl * 2), -0.5, 0.5) - (v.gp || 0)) * k;
+    v.gr = (v.gr || 0) + (clamp(Math.atan2(hL - hR, hwd * 2), -0.4, 0.4) - (v.gr || 0)) * k;
   }
   return impact;
 }
@@ -488,57 +500,17 @@ export function pushCharOut(x, z, r, v) {
   return { x: x + (B.ax * pa + B.bx * pb) * k, z: z + (B.az * pa + B.bz * pb) * k };
 }
 
-// ---------- traffic loops (same on every computer, driven by the shared clock) ----------
-export const LOOPS = [
-  { s0: 25, s1: 1072, center: 0, lane: 3.5, speed: 12, count: 14 },
-  { s0: 150, s1: 950, center: 48, lane: 2.5, speed: 9, count: 6 },
-];
-for (const lp of LOOPS) lp.len = 2 * (lp.s1 - lp.s0) + 2 * Math.PI * lp.lane;
-export function loopPoint(lp, u) {
-  u = ((u % lp.len) + lp.len) % lp.len;
-  const S = lp.s1 - lp.s0, Tn = Math.PI * lp.lane;
-  if (u < S) return W.P(lp.s0 + u, lp.center + lp.lane);
-  u -= S;
-  if (u < Tn) { const a = u / lp.lane; return W.P(lp.s1 + Math.sin(a) * lp.lane, lp.center + Math.cos(a) * lp.lane); }
-  u -= Tn;
-  if (u < S) return W.P(lp.s1 - u, lp.center - lp.lane);
-  u -= S;
-  const a = u / lp.lane;
-  return W.P(lp.s0 - Math.sin(a) * lp.lane, lp.center - Math.cos(a) * lp.lane);
-}
-export function trafficPose(v, tSec) {
-  const lp = v.loop;
-  const u = lp.speed * tSec + (v.slot * lp.len) / lp.count;
-  const a = loopPoint(lp, u), b = loopPoint(lp, u + 0.6);
-  return { x: a.x, z: a.z, h: Math.atan2(b.x - a.x, b.z - a.z), vx: ((b.x - a.x) / 0.6) * lp.speed, vz: ((b.z - a.z) / 0.6) * lp.speed };
-}
+// Pose of a traffic car (filled in by the traffic system).
+export function trafficPose(v) { return { x: v.x, z: v.z, h: v.h, vx: v.vx || 0, vz: v.vz || 0 }; }
 
-export function createAllVehicles(scene) {
-  const r = rng(4242);
-  const list = [];
-  const parkedTypes = [0, 0, 0, 0, 1, 1, 1, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5];
-  W.parkedSpots.forEach((sp, i) => {
-    const ti = parkedTypes[Math.floor(r() * parkedTypes.length)];
-    const v = makeVehicle('p' + i, ti, CAR_COLORS[Math.floor(r() * CAR_COLORS.length)], sp);
-    list.push(v);
-  });
-  // rideable boats at the end of each dock, and a helicopter on the beach helipad
-  let extra = W.parkedSpots.length;
-  for (const k of W.docks) {
-    const p = W.P(k.s - 7, k.d0 + 6);
-    list.push(makeVehicle('p' + extra++, BOAT, [0xffffff, 0xe5484d, 0x1e88e5][extra % 3], { x: p.x, z: p.z, h: -W.theta(k.s) - Math.PI / 2 }));
-  }
-  if (W.places.helipad) list.push(makeVehicle('p' + extra++, HELI, 0x263238, W.places.helipad));
-  let n = 0;
-  LOOPS.forEach((lp) => {
-    for (let k = 0; k < lp.count; k++) {
-      let ti = [0, 0, 0, 1, 3, 2][Math.floor(r() * 6)];
-      if (lp.center === 0 && (k === 3 || k === 10)) ti = BUS;
-      const v = makeVehicle('t' + n++, ti, ti === BUS ? 0x1e88e5 : CAR_COLORS[Math.floor(r() * CAR_COLORS.length)], { x: 0, z: 0, h: 0 });
-      v.mode = 'traffic'; v.loop = lp; v.slot = k;
-      list.push(v);
-    }
-  });
+// Parked cars at the given spots: [{x, z, h}]. More get added as you explore (see main.js).
+const PARKED_TYPES = [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 3, 4, 5];
+export function makeParked(id, sp, r = Math.random) {
+  const ti = sp.ti ?? PARKED_TYPES[Math.floor(r() * PARKED_TYPES.length)];
+  return makeVehicle(id, ti, CAR_COLORS[Math.floor(r() * CAR_COLORS.length)], sp);
+}
+export function createAllVehicles(scene, spots = []) {
+  const list = spots.map((sp, i) => makeParked('p' + i, sp));
   for (const v of list) scene.add(v.mesh);
   return list;
 }

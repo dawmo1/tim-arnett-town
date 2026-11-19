@@ -2,7 +2,7 @@
 import { audio } from './fx.js';
 
 const STATIONS = [
-  { name: 'Tim FM', sub: 'Island pop', bpm: 116, wave: 'square', bassWave: 'triangle', prog: [[0, 4, 7], [9, 0, 4], [5, 9, 0], [7, 11, 2]], root: 60, hat: 0.5, density: 0.7 },
+  { name: 'Tim FM', sub: 'River pop', bpm: 116, wave: 'square', bassWave: 'triangle', prog: [[0, 4, 7], [9, 0, 4], [5, 9, 0], [7, 11, 2]], root: 60, hat: 0.5, density: 0.7 },
   { name: 'Bayside Lo-Fi', sub: 'Chill beats', bpm: 78, wave: 'triangle', bassWave: 'sine', prog: [[2, 5, 9], [7, 11, 2], [0, 4, 7], [9, 0, 4]], root: 57, hat: 0.3, density: 0.45, swing: 0.12 },
   { name: 'Gator Country', sub: 'Boot-stompin\' hits', bpm: 104, wave: 'sawtooth', bassWave: 'triangle', prog: [[0, 4, 7], [5, 9, 0], [7, 11, 2], [0, 4, 7]], root: 55, hat: 0.4, density: 0.6 },
 ];

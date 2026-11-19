@@ -26,7 +26,7 @@ function civilianCall(x, z, lvl, nowMs) {
   for (const w of walkers) {
     if (w.dead || w.call) continue;
     const d = Math.hypot(w.x - x, w.z - z);
-    if (d < bd && W.lineOfSight(w.x, 1.6, w.z, x, 1.2, z)) { bd = d; best = w; }
+    if (d < bd && W.lineOfSight(w.x, (w.y || 0) + 1.6, w.z, x, W.groundHeight(x, z) + 1.2, z)) { bd = d; best = w; }
   }
   if (!best) return;
   best.call = { t: 4 + Math.random() * 2, lvl, x, z };

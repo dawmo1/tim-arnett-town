@@ -31,7 +31,7 @@ function spawnCar(id, x, z, h, kind, target) {
 function spawnOfficer(id, x, z, h, target, car) {
   const ch = makeCharacter(OFFICER_LOOKS[Math.floor(Math.random() * OFFICER_LOOKS.length)], { hat: 'cop' });
   scene.add(ch.g);
-  const u = { id, kind: 2, ch, x, z, y: 0, h, hp: 60, target, car, cd: 0.8 + Math.random(), seq: 0, shot: [0, 0, 0], dead: false, deadAt: 0, spd: 0, idle: 0 };
+  const u = { id, kind: 2, ch, x, z, y: W.groundHeight(x, z), h, hp: 60, target, car, cd: 0.8 + Math.random(), seq: 0, shot: [0, 0, 0], dead: false, deadAt: 0, spd: 0, idle: 0 };
   cops.set(id, u);
   return u;
 }
@@ -68,16 +68,23 @@ function remove(id) {
   else scene.remove(u.mesh);
   cops.delete(id);
 }
-function roadD(s, d) {
-  const opts = s > 140 && s < 960 ? [0, 48, -48] : [0];
-  let best = 0;
-  for (const o of opts) if (Math.abs(d - o) < Math.abs(d - best)) best = o;
-  return best;
+// A spot in the right-hand lane of a road minD..maxD from (x, z), facing toward it.
+function roadSpot(x, z, minD, maxD) {
+  for (let i = 0; i < 40; i++) {
+    const a = Math.random() * Math.PI * 2, d = minD + Math.random() * (maxD - minD);
+    const q = W.nearestEdge(x + Math.cos(a) * d, z + Math.sin(a) * d, 50, (e) => e.cls !== 'service' && !e.bridge && e.cls !== 'motor');
+    if (!q) continue;
+    const dd = Math.hypot(q.x - x, q.z - z); if (dd < minD * 0.7 || dd > maxD * 1.3) continue;
+    let h = q.h; if (Math.sin(h) * (x - q.x) + Math.cos(h) * (z - q.z) < 0) h += Math.PI;
+    const lane = q.e.width / 4;
+    return { x: q.x - Math.cos(h) * lane, z: q.z + Math.sin(h) * lane, h };
+  }
+  return null;
 }
 function shoot(u, from, p, acc, dmg) {
   const hit = Math.random() < acc;
   u.seq++;
-  u.shot = [p.x + (hit ? 0 : (Math.random() - 0.5) * 5), (p.inVeh ? 1 : 1.2), p.z + (hit ? 0 : (Math.random() - 0.5) * 5)];
+  u.shot = [p.x + (hit ? 0 : (Math.random() - 0.5) * 5), (p.y || 0) + (p.inVeh ? 1 : 1.2), p.z + (hit ? 0 : (Math.random() - 0.5) * 5)];
   ctx.copShot(from, u.shot);
   if (hit) ctx.damagePlayer(p.uid, dmg, 'the police');
 }
@@ -98,28 +105,23 @@ export function hostUpdate(dt, players) {
         if (u.kind === 0 && !isDown(u)) have++;
         if (u.kind === 3 && !u.dead) heli = true;
       }
-      const sd = p.search ? W.toSD(p.lkx, p.lkz) : W.toSD(p.x, p.z);
+      const cx = p.search ? p.lkx : p.x, cz = p.search ? p.lkz : p.z;
       if (have < want) {
-        let dir = Math.random() < 0.5 ? -1 : 1;
-        if (sd.s + dir * 180 < 15 || sd.s + dir * 180 > W.L - 15) dir = -dir;
-        const s = clamp(sd.s + dir * 180, 15, W.L - 15);
-        const q = W.P(s, Math.random() < 0.5 ? 3.5 : -3.5);
-        spawnCar('c' + nextId++, q.x, q.z, Math.atan2(p.x - q.x, p.z - q.z), 0, p.uid);
-        cops.get('c' + (nextId - 1)).aimT = 0;
+        const q = roadSpot(cx, cz, 140, 220);
+        if (q) { spawnCar('c' + nextId++, q.x, q.z, q.h, 0, p.uid); cops.get('c' + (nextId - 1)).aimT = 0; }
       }
       if (p.stars >= 5 && !heli) {
-        const q = W.P(clamp(sd.s + 220, 0, W.L), 0);
-        spawnHeli('h' + nextId++, q.x, 45, q.z, p.uid);
+        const a = Math.random() * Math.PI * 2, hx = cx + Math.cos(a) * 220, hz = cz + Math.sin(a) * 220;
+        spawnHeli('h' + nextId++, hx, W.groundHeight(hx, hz) + 45, hz, p.uid);
         ctx.announce?.(p.uid, 'POLICE HELICOPTER INBOUND');
       }
       if (p.stars >= 4) {
         rbTimer[p.uid] = (rbTimer[p.uid] ?? 3) - 1;
         if (rbTimer[p.uid] <= 0) {
           rbTimer[p.uid] = 25;
-          const ahead = W.toSD(p.x + p.vx, p.z + p.vz).s - sd.s;
-          const dir = Math.abs(ahead) > 0.5 ? Math.sign(ahead) : 1;
-          const s = clamp(sd.s + dir * 110, 20, W.L - 20);
-          for (const dd of [-3, 3]) { const q = W.P(s, dd); spawnCar('r' + nextId++, q.x, q.z, -W.theta(s) + Math.PI / 2, 1, p.uid); }
+          const sp = Math.hypot(p.vx, p.vz) || 1, ax = p.x + (p.vx / sp) * 110, az = p.z + (p.vz / sp) * 110;
+          const q = W.nearestEdge(ax, az, 60, (e) => e.cls !== 'service' && !e.bridge);
+          if (q) for (const dd of [-1, 1]) { const o = dd * q.e.width / 4; spawnCar('r' + nextId++, q.x - Math.cos(q.h) * o, q.z + Math.sin(q.h) * o, q.h + Math.PI / 2, 1, p.uid); }
         }
       }
     }
@@ -146,7 +148,7 @@ export function hostUpdate(dt, players) {
       // wrecked: engine dead. Only catches fire if you keep wrecking it.
       if (!v.burnAt && v.hp <= -v.T.hp * 0.4) v.burnAt = now;
       stepVehicle(v, { handbrake: true }, dt);
-      if (v.burnAt && now - v.burnAt > 5000) { v.exploded = true; ctx.explode(v.x, 0, v.z, 'a police car'); }
+      if (v.burnAt && now - v.burnAt > 5000) { v.exploded = true; ctx.explode(v.x, v.y, v.z, 'a police car'); }
       continue;
     }
     if (u.kind === 1) { u.life -= dt; if (u.life <= 0) remove(u.id); continue; }
@@ -181,15 +183,16 @@ export function hostUpdate(dt, players) {
       u.recall = false; u.waitT = 0;
       continue;
     }
-    const ms = W.toSD(v.x, v.z), ts = W.toSD(p.x, p.z);
+    // far away: follow the streets (GPS route); close and in sight: drive straight at them
     let gx = p.x, gz = p.z;
-    if (Math.abs(ts.s - ms.s) > 35 && dist > 40) {
-      const s2 = ms.s + Math.sign(ts.s - ms.s) * 30;
-      const g = W.P(s2, roadD(s2, ms.d) + (Math.sign(ts.s - ms.s) > 0 ? 3.5 : -3.5));
-      gx = g.x; gz = g.z;
+    u.pathT = (u.pathT || 0) - dt;
+    if (u.pathT <= 0) { u.pathT = 2.5; u.path = dist > 45 ? W.route(v.x, v.z, p.x, p.z) : null; u.pi = 0; }
+    if (u.path && dist > 30) {
+      while (u.pi < u.path.length - 1 && Math.hypot(u.path[u.pi][0] - v.x, u.path[u.pi][1] - v.z) < 11) u.pi++;
+      gx = u.path[u.pi][0]; gz = u.path[u.pi][1];
     }
     const ad = angDiff(v.h, Math.atan2(gx - v.x, gz - v.z));
-    let inp = { throttle: 1, brake: 0, steer: clamp(ad * 2, -1, 1), handbrake: Math.abs(ad) > 1.2 && v.speed > 12 };
+    let inp = { throttle: Math.abs(ad) > 0.7 && v.speed > 13 ? 0 : 1, brake: Math.abs(ad) > 0.9 && v.speed > 15 ? 0.6 : 0, steer: clamp(ad * 2, -1, 1), handbrake: Math.abs(ad) > 1.3 && v.speed > 12 };
     if (dist < (p.sweeping ? 6 : 14) && !p.inVeh) inp = { throttle: 0, brake: v.speed > 0.5 ? 1 : 0, steer: inp.steer };
     if (u.revT > 0) { u.revT -= dt; inp = { throttle: 0, brake: 1, steer: -inp.steer }; }
     else if (inp.throttle > 0 && Math.abs(v.speed) < 1.5) { u.stuckT += dt; if (u.stuckT > 1.5) { u.revT = 1.3; u.stuckT = 0; } }
@@ -208,14 +211,14 @@ export function hostUpdate(dt, players) {
     // shoot from the side window only (no shooting through the windshield)
     u.cd -= dt;
     const side = Math.abs(angDiff(v.h, Math.atan2(dx, dz)));
-    const canShoot = !p.sweeping && dist < 30 && (side > 0.9 || Math.abs(v.speed) < 3) && W.lineOfSight(v.x, 1.4, v.z, p.x, 1.2, p.z);
+    const canShoot = !p.sweeping && dist < 30 && (side > 0.9 || Math.abs(v.speed) < 3) && W.lineOfSight(v.x, v.y + 1.4, v.z, p.x, (p.y || 0) + 1.2, p.z);
     u.aimT = canShoot ? (u.aimT || 0) + dt : 0; // they need a moment to line up a shot
     if (u.cd <= 0 && canShoot && u.aimT > 1.2) {
       u.cd = 1.8 - p.stars * 0.12;
       let acc = 0.1 + p.stars * 0.03;
       if (p.speed > 10) acc *= 0.5;
       if (Math.abs(v.speed) > 5) acc *= 0.6;
-      shoot(u, { x: v.x, y: 1.5, z: v.z }, p, acc, 6 + Math.random() * 3);
+      shoot(u, { x: v.x, y: v.y + 1.5, z: v.z }, p, acc, 6 + Math.random() * 3);
     }
   }
 
@@ -269,22 +272,24 @@ function officerStep(u, dt, now, p) {
     }
     u.spd = Math.abs(move);
   }
+  u.y = W.groundHeight(u.x, u.z);
   u.cd -= dt;
-  const canShoot = !goCar && p && !p.sweeping && dist < 32 && W.lineOfSight(u.x, 1.4, u.z, p.x, 1.2, p.z);
+  const canShoot = !goCar && p && !p.sweeping && dist < 32 && W.lineOfSight(u.x, u.y + 1.4, u.z, p.x, (p.y || 0) + 1.2, p.z);
   u.aimT = canShoot ? (u.aimT || 0) + dt : 0;
   if (canShoot && u.cd <= 0 && u.aimT > 0.9) {
     u.cd = 1.2 + Math.random() * 0.8;
     let acc = 0.15 + p.stars * 0.035;
     if (p.inVeh) acc *= 0.6;
     if (p.speed > 6) acc *= 0.6;
-    shoot(u, { x: u.x, y: 1.4, z: u.z }, p, acc, 7 + Math.random() * 3);
+    shoot(u, { x: u.x, y: u.y + 1.4, z: u.z }, p, acc, 7 + Math.random() * 3);
   }
 }
 
 function heliStep(u, dt, now, p) {
   if (u.dead) {
     u.vy -= 15 * dt; u.y += u.vy * dt; u.h += dt * 4;
-    if (u.y <= 0.5 && !u.exploded) { u.exploded = true; u.y = 0.5; ctx.explode(u.x, 0.5, u.z, 'a police helicopter'); }
+    const gy = W.groundHeight(u.x, u.z) + 0.5;
+    if (u.y <= gy && !u.exploded) { u.exploded = true; u.y = gy; ctx.explode(u.x, gy, u.z, 'a police helicopter'); }
     if (u.exploded) { u.life -= dt; if (u.life <= 0) remove(u.id); }
     return;
   }
@@ -295,12 +300,12 @@ function heliStep(u, dt, now, p) {
   }
   u.noTarget = 0;
   const t = now / 1000;
-  const gx = p.x + Math.cos(t * 0.35) * 24, gz = p.z + Math.sin(t * 0.35) * 24, gy = 26;
+  const gx = p.x + Math.cos(t * 0.35) * 24, gz = p.z + Math.sin(t * 0.35) * 24, gy = Math.max(W.groundHeight(gx, gz), p.y || 0) + 28;
   const k = Math.min(1, dt * 0.8);
   u.x += (gx - u.x) * k; u.z += (gz - u.z) * k; u.y += (gy - u.y) * k;
   u.h += angDiff(u.h, Math.atan2(p.x - u.x, p.z - u.z)) * Math.min(1, dt * 2);
   u.cd -= dt;
-  const canShoot = !p.sweeping && W.lineOfSight(u.x, u.y - 1.5, u.z, p.x, 1.2, p.z);
+  const canShoot = !p.sweeping && W.lineOfSight(u.x, u.y - 1.5, u.z, p.x, (p.y || 0) + 1.2, p.z);
   u.aimT = canShoot ? (u.aimT || 0) + dt : 0;
   if (u.cd <= 0 && canShoot && u.aimT > 1.5) {
     u.cd = 1.1;
@@ -334,7 +339,7 @@ export function applyRemote(obj) {
     if (a[4] !== u.seq) {
       u.seq = a[4]; u.shot = [a[5], a[6], a[7]];
       const P = kind < 2 ? u.v : u;
-      ctx.copShot({ x: P.x, y: kind === 3 ? (u.y || 20) - 1.2 : 1.45, z: P.z }, u.shot);
+      ctx.copShot({ x: P.x, y: kind === 3 ? (u.y || 20) - 1.2 : (P.y || 0) + 1.45, z: P.z }, u.shot);
     }
   }
 }
@@ -382,7 +387,7 @@ export function render(dt, isHost, t) {
     if (u.kind === 2) {
       if (u.dead && !u.ragged) { u.ragged = true; const k = u.hitDir || { x: 0, z: 0 }; ragdoll(u.ch, { x: k.x * 4, y: 2, z: k.z * 4 }, { dead: true }); }
       if (u.ch.rag) { const rp = ragPos(u.ch); if (!isHost) { u.x = rp.x; u.z = rp.z; } continue; }
-      placeCharacter(u.ch, u.x, 0, u.z, u.h);
+      placeCharacter(u.ch, u.x, u.y ?? W.groundHeight(u.x, u.z), u.z, u.h);
       animateCharacter(u.ch, dt, { speed: u.spd || 0, aim: !u.dead, dead: u.dead, weapon: 'gun' });
     } else {
       u.mesh.position.set(u.x, u.y, u.z);
@@ -403,7 +408,7 @@ export function viewers() {
     if (isDown(u)) continue;
     const P = posOf(u);
     if (u.kind === 3) out.push({ x: P.x, y: u.y - 1.5, z: P.z, h: u.h, heli: true, range: 60, fov: Math.PI * 2 });
-    else out.push({ x: P.x, y: 1.5, z: P.z, h: P.h, heli: false, range: u.kind === 2 ? 50 : 65, fov: 2.0 });
+    else out.push({ x: P.x, y: (P.y || 0) + 1.5, z: P.z, h: P.h, heli: false, range: u.kind === 2 ? 50 : 65, fov: 2.0 });
   }
   return out;
 }

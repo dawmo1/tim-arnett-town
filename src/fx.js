@@ -90,7 +90,7 @@ export function bloodPool(x, z, size = 1.2) { addDecal(x, z, 0.1, size); }
 function addDecal(x, z, start, target) {
   if (!isLand(x, z)) return;
   const m = new THREE.Mesh(decalGeo, decalMat);
-  m.position.set(x, 0.09 + Math.random() * 0.01, z); m.scale.setScalar(start);
+  m.position.set(x, groundHeight(x, z) + 0.01 + Math.random() * 0.01, z); m.scale.setScalar(start);
   scene.add(m);
   decals.push({ m, target, life: 60 });
   if (decals.length > 80) { const d = decals.shift(); scene.remove(d.m); }
@@ -137,9 +137,10 @@ export function updateFx(dt) {
     else {
       p.vy -= 18 * dt;
       p.m.position.x += p.vx * dt; p.m.position.y += p.vy * dt; p.m.position.z += p.vz * dt;
-      if (p.m.position.y < 0.05) {
+      if (p.gy === undefined) p.gy = groundHeight(p.m.position.x, p.m.position.z);
+      if (p.m.position.y < p.gy + 0.05) {
         if (p.kind === 'blood' && Math.random() < 0.5) addDecal(p.m.position.x, p.m.position.z, 0.15 + Math.random() * 0.25, 0);
-        if (p.kind === 'glass') { p.m.position.y = 0.06; p.vx = p.vy = p.vz = 0; }
+        if (p.kind === 'glass') { p.m.position.y = p.gy + 0.06; p.vx = p.vy = p.vz = 0; }
         else p.life = 0;
       }
     }
