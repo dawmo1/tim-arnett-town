@@ -20,6 +20,11 @@ export const ICONS = {
   Shotgun: '<path d="M2 8h34v4H24l-3 3H10l-6 5H1l3-7H2zM36 8h10v3H36z"/>',
   Rifle: '<path d="M2 9h36v5H28v8h-4v-8h-6l-6 6H6l4-6H2zM14 5h12v3H14zM38 10h8v2h-8z"/>',
   Grenade: '<circle cx="24" cy="14" r="8"/><path d="M21 4h6v4h-6zM27 5l7-2v3l-7 1z"/>',
+  Knife: '<path d="M4 14 L30 9 L44 12 L30 15z"/><path d="M4 12h9v6H4z"/>',
+  Crowbar: '<path d="M6 19 L38 7 Q44 5 44 10 L42 11 Q41 8 38 10 L8 21z"/>',
+  Sniper: '<path d="M2 11h40v3H30v7h-4v-7h-6l-5 5H8l4-5H2zM16 6h12v4H16zM42 11h4v2h-4z"/>',
+  Molotov: '<path d="M20 8h8v4l3 4v8H17v-8l3-4z"/><path d="M22 2h4v6h-4z" fill="#ff9800"/>',
+  RPG: '<path d="M2 11h34v4H2zM36 9l10 4-10 4zM12 15h4v6h-4z"/>',
 };
 
 export function setHealth(hp) {

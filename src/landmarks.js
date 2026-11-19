@@ -197,6 +197,7 @@ function buildCasino(x0) {
   addBoxes('casino', [makeBox(x, z, hz, -hx, 9, 35, WATER_Y - 3, 6)].map((b) => b));
   const gw = group(x, WATER_Y + 1.2, w.z + 12, 0); box(gw, 0x8d6e63, 3, 0.3, 26, 0, 0, 0); box(gw, 0x5d4037, 0.1, 1, 26, 1.4, 0.6, 0); box(gw, 0x5d4037, 0.1, 1, 26, -1.4, 0.6, 0);
   casino.x = x; casino.z = z; casino.door = { x: w.x, z: w.z - 3 };
+  ctx.onCasino?.(casino.door, Math.PI);
   return true;
 }
 

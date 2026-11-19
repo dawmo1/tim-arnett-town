@@ -61,6 +61,11 @@ export async function joinRoom(code, name, look) {
   M.onChildAdded(M.query(M.child(roomRef, 'chat'), M.limitToLast(15)), (s) => net.handlers.chat(s.val()));
 }
 
+// A new outfit from the clothing store.
+export function setLook(look) {
+  if (net.players[net.uid]) net.players[net.uid].c = look;
+  if (net.online && roomRef) M.set(M.child(roomRef, 'players/' + net.uid + '/c'), look);
+}
 export function sendState(arr) {
   if (net.online) M.set(M.child(roomRef, `players/${net.uid}/s`), arr);
   else if (net.players[net.uid]) net.players[net.uid].s = arr;

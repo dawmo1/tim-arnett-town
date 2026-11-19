@@ -50,6 +50,7 @@ export function crime(type, x, y, z) {
     case 'kill': if (seen) raise(3, x, z, true); else civilianCall(x, z, 2); break;
     case 'hitcop': raise(3, x, z, true); break;
     case 'robbery': raise(2, x, z, seen); break; // the clerk's alarm calls it in
+    case 'casino': raise(3, x, z, seen); break; // casino security calls everyone
     case 'killcop': {
       wanted.copKills++;
       let lvl = 4;
@@ -66,7 +67,6 @@ export function updateWanted(dt, me) {
   for (let i = wanted.callers.length - 1; i >= 0; i--) {
     const w = wanted.callers[i];
     if (!w.call || w.dead) { w.call = null; wanted.callers.splice(i, 1); continue; }
-    w.extra -= dt * w.speed; // stand still while on the phone
     w.call.t -= dt;
     if (w.call.t <= 0) {
       const c = w.call; w.call = null; wanted.callers.splice(i, 1);
@@ -76,7 +76,7 @@ export function updateWanted(dt, me) {
   if (wanted.stars <= 0 || me.dead) return null;
   if (copSees(me.x, me.y + 1.2, me.z)) { wanted.search = false; wanted.searchT = 0; wanted.lk = { x: me.x, z: me.z }; return null; }
   if (!wanted.search) { wanted.search = true; wanted.searchT = 0; }
-  wanted.searchT += dt;
+  if (!me.pinned) wanted.searchT += dt * (me.hiding ? 2.5 : 1); // inside a shop or a parking ramp they lose you much faster
   if (wanted.searchT > 8 + wanted.stars * 4) { resetWanted(); return 'lost'; }
   return null;
 }

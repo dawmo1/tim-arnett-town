@@ -10,6 +10,7 @@ import { initTraffic, updateTraffic as tickTraffic, bumpTraffic, scareTraffic, u
 import { initWalkers, updateWalkers, walkers, panicNear, spawnFleeing, scare, provoke, setNpcContext, cartNear, revive } from './npc.js';
 import { initEmergency, updateEmergency, reportDown } from './emergency.js';
 import { initLandmarks, updateLandmarks, doors, closedCrossings, trainCars, bargeList } from './landmarks.js';
+import * as interior from './interiors.js';
 import { initDayNight, updateDayNight, sky as weather, clockText, view as fogView } from './daynight.js';
 import { initLife, updateLife, startle } from './life.js';
 import { glowMats } from './vehicles.js';
@@ -19,7 +20,7 @@ import { knock, flinch } from './npc.js';
 import * as police from './police.js';
 import * as fx from './fx.js';
 import * as ui from './ui.js';
-import { net, connect, joinRoom, sendState, setVehicle, removeVehicle, setCops, sendEvent, sendChat, hostUid } from './net.js';
+import { net, connect, joinRoom, sendState, setVehicle, removeVehicle, setCops, sendEvent, sendChat, hostUid, setLook as netSetLook } from './net.js';
 import { clamp, angDiff, rayOBB, raySphere } from './util.js';
 import { wanted, crime, updateWanted as tickWanted, resetWanted, cones, initWanted } from './wanted.js';
 import { eco, initEconomy, addCash, spend, goalDone, checkCountGoals, GOALS, storeNear, dropCash, updateEconomy, stores } from './economy.js';
@@ -34,6 +35,11 @@ const WEAPONS = [
   { name: 'Shotgun', dmg: 11, pellets: 8, rate: 1.1, spread: 0.09, range: 40, kind: 'gun', snd: 'shotgun', price: 650, mag: 6, ammoPack: 30, ammoPrice: 70 },
   { name: 'Rifle', dmg: 34, rate: 5, spread: 0.006, range: 200, kind: 'gun', auto: true, snd: 'rifle', price: 1200, mag: 20, ammoPack: 80, ammoPrice: 120 },
   { name: 'Grenade', grenade: true, rate: 0.8, kind: 'none', price: 200, mag: 1, ammoPack: 5, ammoPrice: 200 },
+  { name: 'Knife', melee: true, dmg: 34, range: 1.7, rate: 3, kind: 'none', price: 40, force: 3 },
+  { name: 'Crowbar', melee: true, dmg: 30, range: 2.3, rate: 1.8, kind: 'bat', price: 50, force: 6.5 },
+  { name: 'Sniper', dmg: 95, rate: 0.7, spread: 0.0015, range: 400, kind: 'gun', snd: 'rifle', price: 1800, mag: 5, ammoPack: 20, ammoPrice: 150, scope: true },
+  { name: 'Molotov', grenade: true, molotov: true, rate: 0.8, kind: 'none', price: 150, mag: 1, ammoPack: 4, ammoPrice: 150 },
+  { name: 'RPG', rocket: true, rate: 0.5, kind: 'gun', price: 3000, mag: 1, ammoPack: 4, ammoPrice: 500 },
 ];
 const r1 = (n) => Math.round(n * 10) / 10, r2 = (n) => Math.round(n * 100) / 100;
 
@@ -202,7 +208,8 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyE') { const d = doorNear(); if (d) useDoor(d); else if (!useStore()) toggleVehicle(); }
   if (e.code === 'KeyR') startReload();
   if (e.code === 'KeyN' && me.veh && !me.veh.T.bike) { const st = nextStation(); ui.flashPrompt(st.sub ? `📻 ${st.name} · ${st.sub}` : st.name); }
-  if (/^Digit[1-7]$/.test(e.code)) selectWeapon(+e.code.slice(5) - 1);
+  if (/^Digit[0-9]$/.test(e.code)) { const n = +e.code.slice(5); selectWeapon(n === 0 ? 9 : n - 1); }
+  if (e.code === 'KeyP') openPhone();
 });
 addEventListener('keyup', (e) => { keys.delete(e.code); if ((e.code === 'Tab' || e.code === 'KeyQ') && wheelOpen) closeWheel(true); });
 addEventListener('blur', () => { keys.clear(); mouseDown = false; });
@@ -220,7 +227,7 @@ addEventListener('mousemove', (e) => {
     if (Math.hypot(wheelX, wheelY) > 25) { wheelSel = ui.wheelIndex(wheelX, wheelY, WEAPONS.length); ui.wheelHighlight(wheelSel, WEAPONS[wheelSel]); }
     return;
   }
-  const sens = (aiming ? 0.0013 : 0.0025) * settings.sens;
+  const sens = (aiming ? (WEAPONS[me.weapon].scope ? 0.0005 : 0.0013) : 0.0025) * settings.sens;
   camYaw -= e.movementX * sens;
   camPitch = clamp(camPitch + e.movementY * sens * (settings.invertY ? -1 : 1), -0.5, 1.2);
   lastMouse = performance.now();
@@ -430,7 +437,7 @@ net.handlers.event = (e) => {
     }
     case 'copHit': if (isHost) police.damageCop(e.id, +e.dmg || 0); break;
     case 'boom': explode(e.x, e.y, e.z, String(e.by || 'an explosion'), e.bu, false); break;
-    case 'nade': spawnNade({ x: e.x, y: e.y, z: e.z, vx: e.vx, vy: e.vy, vz: e.vz, t: 2.4, mine: false }); break;
+    case 'nade': spawnNade({ x: e.x, y: e.y, z: e.z, vx: e.vx, vy: e.vy, vz: e.vz, t: e.k === 'molotov' ? 6 : e.k === 'rocket' ? 4 : 2.4, mine: false, kind: e.k || 'nade' }); break;
     case 'kill': ui.addFeed(String(e.text || '').slice(0, 80)); if (e.ku === net.uid) report('kill'); break;
     case 'jack': if (e.to === net.uid && me.veh && me.veh.id === e.id) { me.veh.driver = e.from; ejectMe(); ui.addFeed('Someone stole your ride!'); } break;
   }
@@ -505,6 +512,7 @@ function damageVehicle(v, dmg, hit) {
   if (v.mode === 'traffic') freeTraffic(v);
   v.mode = 'free';
   if (hit) damageZone(v, hit.cp[0], hit.cp[1], hit.imp);
+  dmg *= v.T.armor || 1;
   v.hp = Math.max(-v.T.hp, v.hp - dmg);
   // at 0 the engine dies; it only catches fire if you keep wrecking it
   if (v.hp <= -v.T.hp * 0.4 && !v.burnAt) { v.burnAt = net.now(); v.burnBy = net.uid; }
@@ -636,6 +644,7 @@ async function beginRespawn() {
   respawning = false;
 }
 function respawn(first, sp) {
+  interior.leave(); me.outside = null;
   me.x = sp.x; me.z = sp.z; me.h = sp.h; me.y = W.groundHeight(sp.x, sp.z); me.vy = 0;
   if (!first && eco.cash > 0) { const bill = Math.min(eco.cash, Math.max(50, Math.round(eco.cash * 0.1))); eco.cash -= bill; ui.addFeed(`Hospital bill: -$${bill}`); }
   me.hp = 100; me.dead = false; resetWanted(); me.enter = null; me.exitT = 0; me.reloadT = 0; me.swim = false; deathSpin = 0; me.rag = null;
@@ -815,7 +824,7 @@ function applyHit(hit, w, d) {
   else if (hit.kind === 'player') {
     sendEvent('hit', { to: hit.ref.uid, dmg: r1(w.dmg * (hit.head ? 2 : 1)), by: me.name });
     fx.blood(hit.p.x, hit.p.y, hit.p.z, d.x, d.z); fx.soundHit(); ui.hitMarker(false);
-  } else if (hit.kind === 'veh') damageVehicle(hit.ref, w.dmg * 0.45);
+  } else if (hit.kind === 'veh') damageVehicle(hit.ref, w.dmg * 0.45 * (hit.ref.T.bulletproof ? 0.4 : 1));
   else if (hit.kind === 'cop') damageCopUnit(hit.ref, w.dmg * (hit.ref.kind === 2 ? (hit.head ? 2.5 : 1) : 0.6));
 }
 function handPos() {
@@ -829,7 +838,8 @@ function fire(w) {
   if (me.reloadT > 0) return;
   if (a.mag <= 0) { if (a.res > 0) startReload(); else { fx.soundClick(); ui.flashPrompt('Out of ammo. Buy more at Arnett Arms.'); } return; }
   a.mag--;
-  if (w.grenade) { if (a.mag <= 0 && a.res > 0) { a.mag = 1; a.res--; } throwGrenade(); refreshWeaponHud(); return; }
+  if (w.grenade) { if (a.mag <= 0 && a.res > 0) { a.mag = 1; a.res--; } throwGrenade(w.molotov ? 'molotov' : 'nade'); refreshWeaponHud(); return; }
+  if (w.rocket) { if (a.mag <= 0 && a.res > 0) startReload(); fireRocket(); refreshWeaponHud(); return; }
   me.aimT = 0.8;
   if (!me.veh) me.h = camYaw;
   const { o, d } = aimRay();
@@ -855,29 +865,78 @@ function melee(w) {
   const fx_ = Math.sin(me.h), fz_ = Math.cos(me.h);
   const inFront = (x, z) => { const dx = x - me.x, dz = z - me.z, d = Math.hypot(dx, dz); return d < w.range && (dx * fx_ + dz * fz_) / (d || 1) > 0.35; };
   lastAttack = performance.now();
-  for (const wk of walkers) if (!wk.dead && inFront(wk.x, wk.z)) { const k = hurtWalker(wk, w.dmg, fx_, fz_, null, w.name === 'Bat' ? 7.5 : Math.random() < 0.25 ? 6 : 3); if (!k) report('assault', wk.x, wk.z); ui.hitMarker(k); fx.soundHit(); return; }
+  for (const wk of walkers) if (!wk.dead && inFront(wk.x, wk.z)) { const k = hurtWalker(wk, w.dmg, fx_, fz_, null, w.name === 'Bat' ? 7.5 : w.force || (Math.random() < 0.25 ? 6 : 3)); if (!k) report('assault', wk.x, wk.z); ui.hitMarker(k); fx.soundHit(); return; }
   for (const u of police.cops.values()) if (u.kind === 2 && !u.dead && inFront(u.x, u.z)) { damageCopUnit(u, w.dmg); fx.soundHit(); return; }
   for (const r of remotes.values()) if (!r.dead && !r.veh && inFront(r.x, r.z)) {
     sendEvent('hit', { to: r.uid, dmg: w.dmg, by: me.name }); report('assault', r.x, r.z); fx.blood(r.x, r.y + 1.3, r.z, fx_, fz_); fx.soundHit(); return;
   }
 }
 const nadeGeo = new THREE.SphereGeometry(0.15, 6, 5);
-function spawnNade(g) { g.m = new THREE.Mesh(nadeGeo, mat(0x2e7d32)); scene.add(g.m); grenades.push(g); }
-function throwGrenade() {
+const rocketGeo = new THREE.CylinderGeometry(0.09, 0.09, 0.8, 8).rotateX(Math.PI / 2), bottleGeo = new THREE.CylinderGeometry(0.07, 0.09, 0.3, 8);
+// g.kind: 'nade' (bounces, 2.4 s fuse) | 'molotov' (smashes and burns) | 'rocket' (flies straight, blows on contact)
+function spawnNade(g) {
+  g.kind = g.kind || 'nade';
+  g.m = new THREE.Mesh(g.kind === 'rocket' ? rocketGeo : g.kind === 'molotov' ? bottleGeo : nadeGeo, mat(g.kind === 'rocket' ? 0x556b2f : g.kind === 'molotov' ? 0x6d8b3a : 0x2e7d32));
+  scene.add(g.m); grenades.push(g);
+}
+function throwGrenade(kind = 'nade') {
   me.swing = 1;
   camera.getWorldDirection(tmpDir);
   const p = handPos();
-  const g = { x: p.x, y: p.y + 0.3, z: p.z, vx: tmpDir.x * 17, vy: tmpDir.y * 17 + 4, vz: tmpDir.z * 17, t: 2.4, mine: true };
+  const g = { x: p.x, y: p.y + 0.3, z: p.z, vx: tmpDir.x * 17, vy: tmpDir.y * 17 + 4, vz: tmpDir.z * 17, t: kind === 'molotov' ? 6 : 2.4, mine: true, kind };
   spawnNade(g);
-  sendEvent('nade', { x: r1(g.x), y: r1(g.y), z: r1(g.z), vx: r1(g.vx), vy: r1(g.vy), vz: r1(g.vz) });
+  sendEvent('nade', { x: r1(g.x), y: r1(g.y), z: r1(g.z), vx: r1(g.vx), vy: r1(g.vy), vz: r1(g.vz), k: kind });
+}
+function fireRocket() {
+  me.aimT = 0.8; if (!me.veh) me.h = camYaw;
+  const { d } = aimRay(), p = handPos();
+  const g = { x: p.x + d.x, y: p.y + d.y, z: p.z + d.z, vx: d.x * 55, vy: d.y * 55, vz: d.z * 55, t: 4, mine: true, kind: 'rocket' };
+  spawnNade(g);
+  sendEvent('nade', { x: r1(g.x), y: r1(g.y), z: r1(g.z), vx: r1(g.vx), vy: r1(g.vy), vz: r1(g.vz), k: 'rocket' });
+  fx.soundShot('shotgun'); shake = Math.max(shake, 0.25);
+  report('gunfire'); panicNear(me.x, me.z, 40); scareTraffic(me.x, me.z, 80);
+}
+// burning patches left by Molotovs
+const fires = [];
+function molotovFire(x, y, z, mine) {
+  const holder = new THREE.Group(); holder.position.set(x, y, z); scene.add(holder);
+  fires.push({ x, y, z, t: 7, mine, fire: fx.startFire(holder), holder });
+  fx.soundBoom(distCam(x, z) * 2.5);
+  scare(x, z, 25, 'attack');
+  if (mine) report('assault', x, z);
+}
+function updateFires(dt) {
+  for (let i = fires.length - 1; i >= 0; i--) {
+    const f = fires[i]; f.t -= dt;
+    if (Math.random() < dt * 3) fx.smokePuff(f.x + (Math.random() - 0.5) * 3, f.y + 0.3, f.z + (Math.random() - 0.5) * 3);
+    const burns = (x, z) => Math.hypot(x - f.x, z - f.z) < 3.2;
+    if (!me.dead && !me.veh && burns(me.x, me.z)) damageMe(22 * dt, f.mine ? 'a Molotov' : 'a fire', '');
+    if (f.mine) {
+      for (const w of walkers) if (!w.dead && burns(w.x, w.z)) { w.burnT = (w.burnT || 0) + dt; if (w.burnT > 0.5) { w.burnT = 0; hurtWalker(w, 12, 0, 0, null, 1); } }
+      for (const v of vehicles) if (!v.exploded && !v.burnAt && burns(v.x, v.z) && v !== me.veh) { v.hp = Math.min(v.hp, -v.T.hp * 0.5); v.burnAt = net.now(); v.burnBy = net.uid; v.mode = 'free'; writeVeh(v, true); }
+    }
+    if (f.t <= 0) { fx.stopFire(f.fire); scene.remove(f.holder); fires.splice(i, 1); }
+  }
 }
 function updateGrenades(dt) {
+  updateFires(dt);
   for (let i = grenades.length - 1; i >= 0; i--) {
     const g = grenades[i];
+    if (g.kind === 'rocket') { // straight line until it hits something
+      const sp = Math.hypot(g.vx, g.vy, g.vz), dx = g.vx / sp, dy = g.vy / sp, dz = g.vz / sp, step = sp * dt;
+      const hit = raycast({ x: g.x, y: g.y, z: g.z }, { x: dx, y: dy, z: dz }, step);
+      g.t -= dt;
+      if (hit.t < step || g.t <= 0) { scene.remove(g.m); grenades.splice(i, 1); if (g.mine) boom(hit.p.x, hit.p.y, hit.p.z, me.name, net.uid); else fx.explosion(hit.p.x, hit.p.y, hit.p.z); continue; }
+      g.x += dx * step; g.y += dy * step; g.z += dz * step;
+      g.m.position.set(g.x, g.y, g.z); g.m.lookAt(g.x + dx, g.y + dy, g.z + dz);
+      if (Math.random() < 0.7) fx.smokePuff(g.x, g.y, g.z, true, 0.4);
+      continue;
+    }
     g.vy -= 18 * dt; g.x += g.vx * dt; g.y += g.vy * dt; g.z += g.vz * dt;
     const land = W.isLand(g.x, g.z), gy = land ? W.groundHeight(g.x, g.z) + 0.07 : W.WATER_Y - 0.15;
     if (g.y < gy) {
       g.y = gy;
+      if (g.kind === 'molotov') { scene.remove(g.m); grenades.splice(i, 1); fx.glass(g.x, g.y, g.z, 10); if (land) molotovFire(g.x, gy, g.z, g.mine); continue; }
       if (land) { g.vy = -g.vy * 0.35; g.vx *= 0.6; g.vz *= 0.6; } else { g.vx *= 0.2; g.vz *= 0.2; g.vy = 0; }
     }
     const p = W.pushOutCircle(g.x, g.z, 0.15);
@@ -1151,7 +1210,7 @@ function footUpdate(dt, fwd, side) {
   const ox = me.x, oz = me.z;
   me.x += mx * speed * dt; me.z += mz * speed * dt;
   // walls of earth: steep steps block you (but you can climb out of the river onto the bank)
-  if (W.offMap(me.x, me.z) || (W.isLand(me.x, me.z) && W.surfaceHeight(me.x, me.z, me.y) - me.y > (me.swim ? 1.9 : 0.7))) { me.x = ox; me.z = oz; }
+  if (!interior.room && (W.offMap(me.x, me.z) || (W.isLand(me.x, me.z) && W.surfaceHeight(me.x, me.z, me.y) - me.y > (me.swim ? 1.9 : 0.7)))) { me.x = ox; me.z = oz; }
   const p = W.pushOutCircle(me.x, me.z, 0.4, me.y);
   me.x = p.x; me.z = p.z;
   const pushers = [...vehicles];
@@ -1165,12 +1224,12 @@ function footUpdate(dt, fwd, side) {
     const vs = Math.hypot(v.vx || 0, v.vz || 0);
     if (moved && vs > 6 && me.hitCd <= 0 && (v.mode === 'traffic')) { damageMe(vs * 2.5, 'traffic', '', { x: v.vx * 0.8, y: 3.5, z: v.vz * 0.8 }); me.hitCd = 1; }
   }
-  const land = W.isLand(me.x, me.z);
+  const land = !!interior.room || W.isLand(me.x, me.z);
   me.vy -= 20 * dt;
   me.y += me.vy * dt;
   if (land) {
     me.swim = false;
-    const gh = W.surfaceHeight(me.x, me.z, me.y); // roofs count when you're on them
+    const gh = interior.room ? interior.room.y : W.surfaceHeight(me.x, me.z, me.y); // roofs count when you're on them
     if (me.y <= gh + 0.05 && me.vy <= 0) { me.y = gh; me.vy = 0; me.grounded = true; } else me.grounded = false;
     if (me.grounded && keys.has('Space')) { me.vy = 6.5; me.grounded = false; }
   } else {
@@ -1267,6 +1326,9 @@ function updateRemotes(dt) {
       remotes.set(uid, r);
       ui.addFeed(`${r.name} joined`);
     }
+    const lk = JSON.stringify(p.c || null);
+    if (r.lookKey === undefined) r.lookKey = lk;
+    else if (r.lookKey !== lk && Array.isArray(p.c) && !r.ch.rag) { r.lookKey = lk; const pos = r.ch.g.position.clone(); scene.remove(r.ch.g); r.ch = makeCharacter(p.c); r.ch.g.add(r.tag); r.ch.g.position.copy(pos); scene.add(r.ch.g); }
     const k = Math.min(1, dt * 10), ox = r.x, oz = r.z;
     r.x += (s[0] - r.x) * k; r.y += (s[1] - r.y) * k; r.z += (s[2] - r.z) * k; r.h += angDiff(r.h, s[3]) * k;
     r.vx = (r.x - ox) / dt; r.vz = (r.z - oz) / dt;
@@ -1306,25 +1368,31 @@ function updateWantedLevel(dt) {
   if (wanted.stars === 0) peakStars = 0;
   updateRobbery(dt);
 }
-// Robbing a store: stand at the door and hold your aim on it. The clerk hits the alarm after a few seconds.
+// Robbing: inside, point a gun at the clerk (or the casino cashier) and keep it there.
+// Corner stores: the clerk hits the silent alarm partway through. The casino calls it in at once.
 function updateRobbery(dt) {
   robberyPrompt = '';
-  const st = !me.veh && !me.dead ? storeNear(me.x, me.z, 4) : null;
-  const w = WEAPONS[me.weapon];
-  for (const s of storesRobbing) if (s !== st) { s.progress = Math.max(0, s.progress - dt * 0.5); if (s.progress === 0) storesRobbing.delete(s); }
-  if (!st || st.kind !== 'rob' || st.cooldown > 0) return;
-  const facing = Math.abs(angDiff(camYaw, Math.atan2(st.doorX - me.x, st.doorZ - me.z))) < 0.7;
-  if (!(aiming && w.kind === 'gun' && facing)) { if (st.progress > 0) robberyPrompt = `Keep aiming at the clerk to rob ${st.name}`; return; }
-  storesRobbing.add(st);
-  st.progress += dt / 8;
-  if (st.progress > 0.35 && !st.alarm) { st.alarm = true; crime('robbery', me.x, me.y, me.z); ui.help('The clerk hit the silent alarm. Grab the cash and get out!', 4); }
-  const bars = Math.round(st.progress * 10);
+  const R = interior.room;
+  if (!R || !R.clerk || (R.kind !== 'rob' && R.kind !== 'casino')) return;
+  const st = R.store, w = WEAPONS[me.weapon], c = R.clerk;
+  if (st.cooldown > 0) { R.held = false; if (aiming) robberyPrompt = R.kind === 'casino' ? 'The cage is empty. Come back later.' : 'The till is empty. Come back later.'; return; }
+  const facing = Math.abs(angDiff(camYaw, Math.atan2(c.x - me.x, c.z - me.z))) < 0.35 && Math.hypot(c.x - me.x, c.z - me.z) < 16;
+  R.held = aiming && w.kind === 'gun' && facing;
+  if (!R.held) { st.progress = Math.max(0, (st.progress || 0) - dt * 0.15); if (st.progress > 0) robberyPrompt = `Keep aiming at the ${R.kind === 'casino' ? 'cashier' : 'clerk'}`; return; }
+  st.progress = (st.progress || 0) + dt / (R.kind === 'casino' ? 14 : 8);
+  if (!st.alarm && (R.kind === 'casino' || st.progress > 0.35)) {
+    st.alarm = true; st.alarmed = true;
+    crime(R.kind === 'casino' ? 'casino' : 'robbery', st.x, me.outside ? me.outside.y : me.y, st.z);
+    ui.help(R.kind === 'casino' ? 'Casino security called it in. The whole department is coming.' : 'The clerk hit the silent alarm. Grab the cash and get out!', 4);
+  }
+  const bars = Math.round(Math.min(1, st.progress) * 10);
   robberyPrompt = `Robbing ${st.name}  ${'▮'.repeat(bars)}${'▯'.repeat(10 - bars)}`;
   if (st.progress >= 1) {
-    const take = 150 + Math.floor(Math.random() * 300);
-    st.progress = 0; st.cooldown = 300; st.alarm = false; storesRobbing.delete(st);
-    addCash(take); eco.robbed++; checkCountGoals();
-    ui.announce('STORE ROBBED', `${st.name} · +$${take}`, '#8fe38a');
+    const take = R.kind === 'casino' ? 2500 + Math.floor(Math.random() * 2000) : 150 + Math.floor(Math.random() * 300);
+    st.progress = 0; st.cooldown = R.kind === 'casino' ? 900 : 300; st.alarm = false; R.held = false;
+    addCash(take);
+    if (R.kind === 'casino') goalDone('casino'); else { eco.robbed++; checkCountGoals(); }
+    ui.announce(R.kind === 'casino' ? 'CASINO ROBBED' : 'STORE ROBBED', `${st.name} · +$${take}`, '#8fe38a');
     fx.soundCash();
   }
 }
@@ -1332,13 +1400,38 @@ const storesRobbing = new Set();
 
 // Shops you walk (or drive) into with E. Returns true if a shop opened.
 function storeAt(x, z, r) { const c = !me.veh && cartNear(x, z, 3.5); return c ? { kind: 'food', name: 'Hot dog cart', x: c.x, z: c.z } : storeNear(x, z, r); }
+function enterRoom(st) {
+  fadeEl.style.opacity = '1';
+  setTimeout(() => {
+    me.outside = { x: st.x, z: st.z, y: W.groundHeight(st.x, st.z), h: st.face + Math.PI };
+    const p = interior.enter(st, me.outside.y);
+    me.x = p.x; me.y = p.y; me.z = p.z; me.vy = 0; me.h = 0; camYaw = 0;
+    fadeEl.style.opacity = '0';
+  }, 350);
+}
+function leaveRoom() {
+  fadeEl.style.opacity = '1';
+  setTimeout(() => {
+    if (interior.room) interior.room.store.alarmed = false;
+    interior.leave();
+    const o = me.outside || { x: me.x, z: me.z, y: W.groundHeight(me.x, me.z), h: 0 };
+    me.x = o.x + Math.sin(o.h) * 1.2; me.z = o.z + Math.cos(o.h) * 1.2; me.y = o.y; me.vy = 0; me.h = o.h; camYaw = o.h; me.outside = null;
+    fadeEl.style.opacity = '0';
+  }, 350);
+}
 function useStore() {
   if (me.dead || me.enter) return false;
+  if (interior.room) {
+    if (interior.nearExit(me.x, me.z)) { leaveRoom(); return true; }
+    if (interior.nearCounter(me.x, me.z) && interior.room.kind === 'guns') { openShop('Arnett Arms', gunShopItems()); return true; }
+    if (interior.nearCounter(me.x, me.z) && interior.room.kind === 'clothes') { openShop(interior.room.store.name, clothingItems()); return true; }
+    return true;
+  }
   const st = storeAt(me.veh ? me.veh.x : me.x, me.veh ? me.veh.z : me.z, me.veh ? 7 : 3.2);
   if (!st) return false;
   if (st.kind === 'body' && me.veh && !me.veh.T.boat && !me.veh.T.heli) { bodyShop(me.veh); return true; }
   if (me.veh) return false;
-  if (st.kind === 'guns') { openShop('Arnett Arms', gunShopItems()); return true; }
+  if (st.kind === 'guns' || st.kind === 'rob' || st.kind === 'clothes' || st.kind === 'casino') { enterRoom(st); return true; }
   if (st.kind === 'food') { if (me.hp >= 100) { ui.flashPrompt("You're not hungry"); return true; } if (!spend(8)) { ui.flashPrompt('A hot dog is $8'); return true; } me.hp = Math.min(100, me.hp + 30); fx.soundCash(); ui.flashPrompt('Hot dog: +30 health'); return true; }
   if (st.kind === 'meds') { openShop('Hospital Pharmacy', [{ label: 'Patch me up', sub: 'Full health', price: 60, ok: () => me.hp < 100, buy: () => { me.hp = 100; } }]); return true; }
   return false;
@@ -1353,15 +1446,65 @@ function gunShopItems() {
   items.push({ label: 'Body armor', sub: 'Soaks up most incoming damage', price: 250, ok: () => me.armor < 100, buy: () => { me.armor = 100; } });
   return items;
 }
-function bodyShop(v) {
-  if (!spend(150)) { ui.flashPrompt('Repairs cost $150.'); return; }
-  const colors = [0xe74c3c, 0x3498db, 0xf1c40f, 0x2ecc71, 0xecf0f1, 0x34495e, 0x9b59b6, 0xe67e22, 0x1abc9c, 0x161616, 0xff6fa8];
-  v.color = colors[Math.floor(Math.random() * colors.length)];
-  scene.remove(v.mesh); v.mesh = makeVehicleMesh(v.T, v.color); scene.add(v.mesh);
-  v.hp = v.T.hp; v.dz = { f: 0, b: 0, l: 0, r: 0 }; v.burnAt = 0; v.headFor = '';
-  writeVeh(v, true);
-  ui.announce('RESPRAYED', 'Good as new');
-  fx.soundCash();
+// Arnett Auto: repairs, paint and wheels, performance, armor. Upgrades belong to that car.
+function modT(v) { if (!v.T.own) v.T = { ...v.T, own: true }; return v.T; }
+function rebuildCar(v) { scene.remove(v.mesh); v.mesh = makeVehicleMesh(v.T, v.color); scene.add(v.mesh); applyDamageVisual(v); if (v.rims) paintRims(v); v.headFor = ''; }
+function paintRims(v) { for (const w of v.mesh.userData.parts.wheels) w.children.forEach((c, i) => { if (i === 1) c.material = mat(v.rims); }); }
+function bodyShop(v) { openShop('Arnett Auto', autoItems(v)); }
+function autoItems(v) {
+  const done = (k) => v.mods && v.mods[k];
+  const mod = (k, f) => () => { v.mods = v.mods || {}; v.mods[k] = true; f(modT(v)); ui.announce('UPGRADED', v.T.name); };
+  const paint = (name, c) => ({ label: `Paint: ${name}`, sub: 'Fresh coat, same car', price: 100, buy: () => { v.color = c; rebuildCar(v); writeVeh(v, true); } });
+  return [
+    { label: 'Repair', sub: 'Fix the body, engine and glass (the cops still know your face)', price: 150, ok: () => v.hp < v.T.hp || v.dz.f + v.dz.b + v.dz.l + v.dz.r > 0, buy: () => { v.hp = v.T.hp; v.dz = { f: 0, b: 0, l: 0, r: 0 }; v.burnAt = 0; rebuildCar(v); writeVeh(v, true); } },
+    paint('Arnett Red', 0xc62828), paint('River Blue', 0x1565c0), paint('Midnight Black', 0x111214), paint('Pearl White', 0xf2f2f0), paint('Cornfield Gold', 0xe0a526), paint('Bluff Green', 0x2e7d32),
+    { label: 'Wheels: chrome', sub: 'Shiny rims', price: 120, buy: () => { v.rims = 0xeceff1; paintRims(v); } },
+    { label: 'Wheels: gold', sub: 'Flashy rims', price: 180, buy: () => { v.rims = 0xd4af37; paintRims(v); } },
+    { label: 'Engine tune', sub: '+20% top speed and acceleration', price: 600, ok: () => !done('engine'), buy: mod('engine', (T) => { T.max *= 1.2; T.acc *= 1.2; }) },
+    { label: 'Race brakes', sub: 'Stop much shorter', price: 300, ok: () => !done('brakes'), buy: mod('brakes', (T) => { T.brakeMul = 1.5; }) },
+    { label: 'Sport tires', sub: 'More grip in corners', price: 400, ok: () => !done('grip'), buy: mod('grip', (T) => { T.grip *= 1.3; T.turn *= 1.08; }) },
+    { label: 'Bigger nitro tank', sub: 'Boost lasts twice as long', price: 350, ok: () => !done('nitro'), buy: mod('nitro', (T) => { T.nitroMul = 2; }) },
+    { label: 'Armor plating', sub: 'Takes half the damage', price: 800, ok: () => !done('armor'), buy: mod('armor', (T) => { T.armor = 0.5; T.hp *= 1.5; v.hp = T.hp; }) },
+    { label: 'Bulletproof tires', sub: 'Gunfire barely scratches it', price: 500, ok: () => !done('bp'), buy: mod('bp', (T) => { T.bulletproof = true; }) },
+  ];
+}
+// ---- clothing store
+const SHIRT_COLS = [['Red', 0xe74c3c], ['Blue', 0x3498db], ['Black', 0x222222], ['White', 0xffffff], ['Green', 0x2ecc71], ['Purple', 0x9b59b6], ['Orange', 0xff7f50], ['Hawkeye Gold', 0xf1c40f]];
+const PANTS_COLS = [['Jeans', 0x1f3a93], ['Black', 0x111111], ['Khaki', 0xd2b48c], ['Grey', 0x7f8c8d], ['Brown', 0x8b5a2b]];
+function setLook(look) {
+  me.look = look;
+  const g = me.ch.g, pos = g.position.clone(), rot = g.rotation.y;
+  scene.remove(g); me.ch = makeCharacter(look); scene.add(me.ch.g); me.ch.g.position.copy(pos); me.ch.g.rotation.y = rot;
+  netSetLook(look);
+}
+function clothingItems() {
+  const L = () => me.look.slice(), st = () => me.look[4] | 0;
+  const items = [];
+  for (const [n, c] of SHIRT_COLS) items.push({ label: `Shirt: ${n}`, price: 40, buy: () => { const l = L(); l[1] = c; setLook(l); } });
+  for (const [n, c] of PANTS_COLS) items.push({ label: `Pants: ${n}`, price: 40, buy: () => { const l = L(); l[2] = c; setLook(l); } });
+  items.push({ label: 'Shorts', sub: 'For the hot days', price: 30, buy: () => { const l = L(); l[4] = st() | 4; setLook(l); } });
+  items.push({ label: 'Long pants', price: 30, buy: () => { const l = L(); l[4] = st() & ~4; setLook(l); } });
+  items.push({ label: 'Baseball cap', price: 25, buy: () => { const l = L(); l[4] = (st() & ~3) | 1; setLook(l); } });
+  items.push({ label: 'Beanie', price: 25, buy: () => { const l = L(); l[4] = (st() & ~3) | 2; setLook(l); } });
+  items.push({ label: 'No hat', price: 0, buy: () => { const l = L(); l[4] = st() & ~3; setLook(l); } });
+  items.push({ label: 'Sunglasses', price: 20, buy: () => { const l = L(); l[4] = st() & ~(3 << 3); setLook(l); } });
+  items.push({ label: 'No sunglasses', price: 0, buy: () => { const l = L(); l[4] = (st() & ~(3 << 3)) | (1 << 3); setLook(l); } });
+  return items;
+}
+// ---- phone: call a mechanic to drop a car off near you
+function openPhone() {
+  if (!playing || me.dead || interior.room) return;
+  const car = (label, ti, price) => ({ label, sub: 'Delivered to the nearest street', price, buy: () => deliverCar(ti, label) });
+  openShop('Phone: Arnett Auto mechanic', [car('Sedan', V.SEDAN, 100), car('Hatchback', V.HATCH, 90), car('SUV', V.SUV, 150), car('Pickup', V.PICKUP, 150), car('Motorbike', V.BIKE, 120), car('Sports car', V.SPORTS, 300), car('Muscle car', V.MUSCLE, 400), car('Monster truck', V.MONSTER, 900)]);
+}
+let deliverN = 0;
+function deliverCar(ti, label) {
+  const sp = W.roadSpot(me.x, me.z, 25, 60) || { x: me.x + 6, z: me.z, h: 0 };
+  const v = makeVehicle(`a${net.uid || 'me'}_d${deliverN++}`, ti, [0xc62828, 0x1565c0, 0x111214, 0xf2f2f0, 0xe0a526][Math.floor(Math.random() * 5)], sp);
+  v.stolenOnce = true; v.keep = true; scene.add(v.mesh); vehicles.push(v); vehById.set(v.id, v);
+  waypoint = { x: sp.x, z: sp.z }; gpsRoute = null; routeT = 0;
+  ui.addFeed(`Your ${label} is parked nearby (follow the GPS)`);
+  setTimeout(() => { v.keep = false; }, 120000);
 }
 let shopOpen = false;
 function openShop(title, items) {
@@ -1390,7 +1533,7 @@ let deathSpin = 0;
 function updateCamera(dt) {
   const spd = me.veh ? Math.abs(me.veh.speed) : 0;
   const aimZoom = aiming && !me.dead && WEAPONS[me.weapon].kind === 'gun';
-  const fov = aimZoom ? 48 : 70 + clamp(spd - 15, 0, 30) * 0.45 + (me.veh && me.veh.boosting ? 8 : 0);
+  const fov = aimZoom ? (WEAPONS[me.weapon].scope ? 16 : 48) : 70 + clamp(spd - 15, 0, 30) * 0.45 + (me.veh && me.veh.boosting ? 8 : 0);
   // soft lock-on keeps the crosshair on your target while you hold aim
   if (aimZoom && me.lockOn) {
     const lp = lockPos(me.lockOn);
@@ -1405,7 +1548,10 @@ function updateCamera(dt) {
   if (me.dead) { deathSpin += dt; camYaw += dt * 0.5; camPitch += (0.6 - camPitch) * Math.min(1, dt * 2); }
   const tx = me.veh ? me.veh.x : me.x, tz = me.veh ? me.veh.z : me.z;
   const ty = me.veh ? me.veh.y + 1.7 : me.swim ? W.WATER_Y - 0.15 : me.y + 1.6;
-  if (me.veh && performance.now() - lastMouse > 1200 && Math.abs(me.veh.speed) > 3) {
+  // hold C to look behind you while driving
+  if (me.veh && keys.has('KeyC')) camYaw = me.veh.h + Math.PI + (me.lookBack ? 0 : 0) , me.lookBack = true;
+  else if (me.lookBack) { me.lookBack = false; if (me.veh) camYaw = me.veh.h; }
+  if (me.veh && !me.lookBack && performance.now() - lastMouse > 1200 && Math.abs(me.veh.speed) > 3) {
     camYaw += angDiff(camYaw, me.veh.speed > 0 ? me.veh.h : me.veh.h + Math.PI) * Math.min(1, dt * 2.5);
   }
   const dist = me.veh ? (me.veh.T.heli ? 16 : 5 + me.veh.T.len + spd * 0.04) : me.dead ? 6 + deathSpin * 1.5 : aimZoom ? 2.9 : 4.2;
@@ -1414,7 +1560,8 @@ function updateCamera(dt) {
   const back = W.rayBuildings(ax, ty, az, -dx, -dy, -dz, dist);
   const d = Math.max(0.8, Math.min(dist, back - 0.3));
   const camX = ax - dx * d, camZ = az - dz * d;
-  camera.position.set(camX, Math.max(W.isLand(camX, camZ) ? W.groundHeight(camX, camZ) + 0.35 : W.WATER_Y + 0.2, ty - dy * d), camZ);
+  const floorY = interior.room ? interior.room.y + 0.35 : W.isLand(camX, camZ) ? W.groundHeight(camX, camZ) + 0.35 : W.WATER_Y + 0.2;
+  camera.position.set(camX, Math.max(floorY, ty - dy * d), camZ);
   camera.lookAt(ax + dx * 20, ty + dy * 20, az + dz * 20);
   followSun(tx, ty, tz);
   if (shake > 0) {
@@ -1436,7 +1583,7 @@ function updateThreat(dt) {
   threatT = 0.15;
   const w = WEAPONS[me.weapon];
   if (!playing || me.dead || me.veh || paused) { threatState = null; return; }
-  const armed = w.kind === 'gun' || w.kind === 'bat';
+  const armed = w.kind === 'gun' || w.kind === 'bat' || w.name === 'Knife';
   let aimAt = null;
   if (aiming && w.kind === 'gun') {
     if (me.lockOn && me.lockOn.ref && walkers.includes(me.lockOn.ref)) aimAt = me.lockOn.ref;
@@ -1482,7 +1629,9 @@ initEmergency(scene, {
   revive: (w) => { if (revive(w)) ui.addFeed('Paramedics revived someone'); },
   extinguish: (v) => { v.burnAt = 0; v.burnBy = ''; fx.stopFire(v.fire); v.fire = null; v.hp = Math.max(v.hp, -v.T.hp * 0.3); writeVeh(v, true); },
 });
+interior.initInteriors(scene);
 initLandmarks(scene, {
+  onCasino: (door, face) => stores.push({ name: 'The Arnett Belle', kind: 'casino', x: door.x, z: door.z, face, cooldown: 0, progress: 0 }),
   addHeli: (x, y, z) => { const v = makeVehicle('heli-roof', V.HELI, 0x263238, { x, z, h: 0 }); v.y = y; v.keep = true; scene.add(v.mesh); vehicles.push(v); vehById.set(v.id, v); },
   addBoat: (x, z, h) => { const v = makeVehicle('boat' + vehicles.length + '_' + Math.round(x), V.BOAT, [0xffffff, 0xe5484d, 0x1e88e5][Math.floor(Math.random() * 3)], { x, z, h }); v.y = W.WATER_Y - 0.35; v.keep = true; scene.add(v.mesh); vehicles.push(v); vehById.set(v.id, v); },
   horn: (x, z) => fx.soundHorn(distCam(x, z) * 0.6),
@@ -1539,11 +1688,11 @@ function updateHud(dt, t) {
   let prompt = robberyPrompt;
   if (!me.dead && !prompt) {
     const st = storeAt(me.veh ? me.veh.x : me.x, me.veh ? me.veh.z : me.z, me.veh ? 7 : 3.2);
-    if (st && st.kind === 'food') prompt = 'E: Buy a hot dog ($8, +30 health)';
-    else if (st && st.kind === 'guns' && !me.veh) prompt = 'E: Shop at Arnett Arms';
+    if (interior.room) prompt = interior.nearExit(me.x, me.z) ? 'E: Leave' : interior.nearCounter(me.x, me.z) && interior.room.kind === 'guns' ? 'E: Buy weapons' : interior.nearCounter(me.x, me.z) && interior.room.kind === 'clothes' ? 'E: Try on clothes' : interior.room.clerk && (interior.room.kind === 'rob' || interior.room.kind === 'casino') && !robberyPrompt ? `Aim a gun at the ${interior.room.kind === 'casino' ? 'cashier' : 'clerk'} (right click) to rob ${interior.room.store.name}` : '';
+    else if (st && st.kind === 'food') prompt = 'E: Buy a hot dog ($8, +30 health)';
+    else if (st && (st.kind === 'guns' || st.kind === 'clothes' || st.kind === 'rob' || st.kind === 'casino') && !me.veh) prompt = `E: Go into ${st.name}`;
     else if (st && st.kind === 'meds' && !me.veh) prompt = 'E: Pharmacy (heal $60)';
-    else if (st && st.kind === 'body' && me.veh && !me.veh.T.boat && !me.veh.T.heli) prompt = 'E: Repair & respray ($150)';
-    else if (st && st.kind === 'rob' && !me.veh && st.cooldown <= 0) prompt = `Aim a gun at the door (right click) to rob ${st.name}`;
+    else if (st && st.kind === 'body' && me.veh && !me.veh.T.boat && !me.veh.T.heli) prompt = 'E: Arnett Auto (repairs & upgrades)';
   }
   if (!me.dead && !prompt) { const d = doorNear(); if (d) prompt = `E: ${d.label}`; }
   if (!me.dead && !prompt) {
@@ -1617,6 +1766,10 @@ function update(dt, t) {
   updateWalkers(dt, tSec, nowMs, camView());
   updateEmergency(dt, { x: me.veh ? me.veh.x : me.x, z: me.veh ? me.veh.z : me.z }, camView(), tSec);
   updateLandmarks(dt, tSec, { x: me.veh ? me.veh.x : me.x, z: me.veh ? me.veh.z : me.z }, weather.night);
+  interior.updateRoom(dt, me, threatState);
+  // hiding: inside a shop or a parking ramp they lose you faster, unless they know you're in there (you just robbed it)
+  me.pinned = !!(interior.room && interior.room.store.alarmed);
+  me.hiding = !me.pinned && (!!interior.room || (!me.veh && W.buildingKindAt(me.x, me.z) === 1) || (me.veh && W.buildingKindAt(me.veh.x, me.veh.z) === 1));
   trainAndBargeHits(dt);
   if (isHost) { police.hostUpdate(dt, policePlayers()); hostChores(dt, nowMs); }
   for (const v of vehicles) if (v.pending) flushBump(v);

@@ -18,7 +18,8 @@ export function setDetailRadius(r) { R = r; }
 function pointInPoly(x, z, p) { let c = false; for (let i = 0, j = p.length - 2; i < p.length; j = i, i += 2) { if ((p[i + 1] > z) !== (p[j + 1] > z) && x < ((p[j] - p[i]) * (z - p[i + 1])) / (p[j + 1] - p[i + 1]) + p[i]) c = !c; } return c; }
 function tileBoxes(t) {
   const boxes = [];
-  for (const [rel, baseY, hgt, pitched] of t.b) {
+  for (const [rel, baseY, hgt, pitched, , , kind] of t.b) {
+    if (kind === 1) continue; // parking ramps are open: drive or walk in and hide
     const n = rel.length / 2, pts = new Float32Array(rel.length);
     for (let i = 0; i < n; i++) { pts[i * 2] = rel[i * 2] + t.ox; pts[i * 2 + 1] = rel[i * 2 + 1] + t.oz; }
     for (let i = 0; i < n; i++) {

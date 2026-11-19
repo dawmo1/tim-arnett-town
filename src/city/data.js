@@ -91,7 +91,7 @@ export function groundHeight(x, z) {
 export function roofAt(x, z) {
   const t = tiles.get(tileKey(Math.floor(x / TILE), Math.floor(z / TILE)));
   if (!t) return -Infinity;
-  if (!t.bb) t.bb = t.b.map(([rel, y, h]) => { let a = Infinity, b = -Infinity, c = Infinity, d = -Infinity; for (let i = 0; i < rel.length; i += 2) { a = Math.min(a, rel[i]); b = Math.max(b, rel[i]); c = Math.min(c, rel[i + 1]); d = Math.max(d, rel[i + 1]); } return [a + t.ox, b + t.ox, c + t.oz, d + t.oz, rel, y + h]; });
+  if (!t.bb) t.bb = t.b.map(([rel, y, h, , , , kind]) => { let a = Infinity, b = -Infinity, c = Infinity, d = -Infinity; for (let i = 0; i < rel.length; i += 2) { a = Math.min(a, rel[i]); b = Math.max(b, rel[i]); c = Math.min(c, rel[i + 1]); d = Math.max(d, rel[i + 1]); } return [a + t.ox, b + t.ox, c + t.oz, d + t.oz, rel, y + h, kind || 0]; });
   let top = -Infinity;
   for (const [a, b, c, d, rel, h] of t.bb) {
     if (x < a || x > b || z < c || z > d || h < top) continue;
@@ -101,10 +101,22 @@ export function roofAt(x, z) {
   }
   return top;
 }
+// The kind of building (see the bake: 1 = parking ramp) whose footprint contains (x, z), or -1.
+export function buildingKindAt(x, z) {
+  if (!isFinite(roofAt(x, z))) return -1;
+  const t = tiles.get(tileKey(Math.floor(x / TILE), Math.floor(z / TILE)));
+  for (const [a, b, c, d, rel, , kind] of t.bb) {
+    if (x < a || x > b || z < c || z > d) continue;
+    let inside = false; const lx = x - t.ox, lz = z - t.oz;
+    for (let i = 0, j = rel.length - 2; i < rel.length; j = i, i += 2) if ((rel[i + 1] > lz) !== (rel[j + 1] > lz) && lx < ((rel[j] - rel[i]) * (lz - rel[i + 1])) / (rel[j + 1] - rel[i + 1]) + rel[i]) inside = !inside;
+    if (inside) return kind;
+  }
+  return -1;
+}
 // What's under your feet when you're at height y: a roof you're standing on, else the ground.
 export function surfaceHeight(x, z, y) {
   const g = groundHeight(x, z), r = roofAt(x, z);
-  return r > g && r <= y + 0.7 ? r + 0.05 : g;
+  return r > g && r <= y + 0.7 && buildingKindAt(x, z) !== 1 ? r + 0.05 : g;
 }
 export function isLand(x, z) {
   if (terrainHeight(x, z) > WATER_Y + 0.05) return true;

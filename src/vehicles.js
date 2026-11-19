@@ -481,13 +481,13 @@ export function stepVehicle(v, inp, dt) {
   if (v.nitro === undefined) v.nitro = 1;
   const boosting = inp.nitro && v.nitro > 0 && inp.throttle > 0 && !T.bike;
   v.boosting = boosting;
-  v.nitro = boosting ? Math.max(0, v.nitro - dt / 3.5) : Math.min(1, v.nitro + dt / 14);
+  v.nitro = boosting ? Math.max(0, v.nitro - dt / (3.5 * (T.nitroMul || 1))) : Math.min(1, v.nitro + dt / 14);
   const fx = Math.sin(v.h), fz = Math.cos(v.h), rx = -Math.cos(v.h), rz = Math.sin(v.h);
   let vf = v.vx * fx + v.vz * fz, vr = v.vx * rx + v.vz * rz;
   const alive = v.hp > 0 && v.sinkT === 0;
   const grounded = !(v.air > 0);
   if (alive && grounded && inp.throttle > 0) vf += T.acc * inp.throttle * dt * (vf < 0 ? 2.5 : 1) * (boosting ? 1.6 : 1);
-  if (alive && grounded && inp.brake > 0) { if (vf > 0.5) vf -= T.acc * 2.4 * dt; else vf = Math.max(-T.max * 0.35, vf - T.acc * 0.7 * dt); }
+  if (alive && grounded && inp.brake > 0) { if (vf > 0.5) vf -= T.acc * 2.4 * (T.brakeMul || 1) * dt; else vf = Math.max(-T.max * 0.35, vf - T.acc * 0.7 * dt); }
   if (grounded) {
     vf -= vf * ((inp.throttle || inp.brake) && alive ? 0.12 : 0.7) * dt;
     if (inp.handbrake) vf -= vf * 1.4 * dt;

@@ -54,12 +54,12 @@ function markStores() {
   const spaced = (list, minD) => { const out = []; for (const p of list) if (!out.some((o) => Math.hypot(o.x - p.x, o.z - p.z) < minD)) out.push(p); return out; };
   const rob = spaced(poi.filter((p) => ['fuel', 'convenience', 'alcohol'].includes(p.kind)), 220);
   rob.slice(0, 15).forEach((p, i) => { const f = frontOf(p.x, p.z); if (f) stores.push({ name: ROB_NAMES[i % ROB_NAMES.length], kind: 'rob', ...f, cooldown: 0, progress: 0 }); });
-  // Arnett Arms downtown + by NorthPark, Arnett Auto on Brady St
-  for (const [x, z, name, kind] of [[60, -330, 'Arnett Arms', 'guns'], [300, -3990, 'Arnett Arms', 'guns'], [-30, -1450, 'Arnett Auto', 'body']]) { const f = frontOf(x, z); if (f) stores.push({ name, kind, ...f, cooldown: 0, progress: 0 }); }
+  // Arnett Arms and Tim's Threads downtown + by NorthPark, Arnett Auto on Brady St
+  for (const [x, z, name, kind] of [[60, -330, 'Arnett Arms', 'guns'], [300, -3990, 'Arnett Arms', 'guns'], [-30, -1450, 'Arnett Auto', 'body'], [230, 40, "Tim's Threads", 'clothes'], [420, -4200, "Tim's Threads", 'clothes']]) { const f = frontOf(x, z); if (f) stores.push({ name, kind, ...f, cooldown: 0, progress: 0 }); }
   for (const h of W.D.index.hospitals) { const f = frontOf(h.x, h.z); if (f) stores.push({ name: 'Hospital pharmacy', kind: 'meds', ...f }); }
   // a soft glowing ring on the sidewalk so you can find the door
   const ringGeo = new THREE.RingGeometry(0.7, 0.9, 28).rotateX(-Math.PI / 2);
-  const COL = { rob: 0x8fe38a, guns: 0xe5484d, body: 0x4aa3ff, meds: 0xffffff };
+  const COL = { rob: 0x8fe38a, guns: 0xe5484d, body: 0x4aa3ff, meds: 0xffffff, clothes: 0xff80ab };
   for (const s of stores) {
     const m = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: COL[s.kind], transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false }));
     m.position.set(s.x, W.groundHeight(s.x, s.z) + 0.12, s.z); scene.add(m); s.ring = m;
