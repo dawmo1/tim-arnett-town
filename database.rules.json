@@ -1,0 +1,35 @@
+{
+  "rules": {
+    "rooms": {
+      "$room": {
+        ".read": "auth != null && $room.matches(/^[A-Z0-9]{1,6}$/)",
+        "players": {
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid && $room.matches(/^[A-Z0-9]{1,6}$/)",
+            ".validate": "!newData.exists() || (newData.child('n').isString() && newData.child('n').val().length <= 16)"
+          }
+        },
+        "vehicles": {
+          "$vid": {
+            ".write": "auth != null && $room.matches(/^[A-Z0-9]{1,6}$/) && $vid.matches(/^[pt][0-9]{1,3}$/)"
+          }
+        },
+        "cops": {
+          ".write": "auth != null && $room.matches(/^[A-Z0-9]{1,6}$/)"
+        },
+        "events": {
+          ".indexOn": ["t"],
+          "$e": {
+            ".write": "auth != null && $room.matches(/^[A-Z0-9]{1,6}$/) && (newData.exists() ? newData.child('from').val() === auth.uid : data.child('from').val() === auth.uid)"
+          }
+        },
+        "chat": {
+          "$m": {
+            ".write": "auth != null && !data.exists() && $room.matches(/^[A-Z0-9]{1,6}$/)",
+            ".validate": "newData.child('m').isString() && newData.child('m').val().length <= 120 && newData.child('n').isString() && newData.child('n').val().length <= 16"
+          }
+        }
+      }
+    }
+  }
+}

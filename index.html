@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tim Arnett Town</title>
+  <meta name="description" content="Free multiplayer island sandbox. Steal cars, cause chaos, run from the cops.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bungee&family=Rubik:wght@400;600;800&display=swap">
+  <link rel="stylesheet" href="style.css">
+  <script type="importmap">
+    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+  </script>
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <div id="hud" hidden>
+    <div id="topleft"><div id="roomInfo"></div><ul id="playerList"></ul></div>
+    <div id="topright"><div id="stars"></div><ul id="feed"></ul></div>
+    <div id="crosshair"></div>
+    <div id="prompt" hidden></div>
+    <div id="chat">
+      <ul id="chatLog"></ul>
+      <input id="chatInput" maxlength="120" placeholder="Say something, Enter to send, Esc to cancel" autocomplete="off" hidden>
+    </div>
+    <div id="bottomleft"><div id="weapon"></div><div id="hpbar"><div id="hpfill"></div></div></div>
+    <canvas id="minimap" width="200" height="200"></canvas>
+    <div id="hurt"></div>
+    <div id="dead" hidden><span>YOU DIED</span><small>Respawning at Arnett Clinic…</small></div>
+    <div id="clickToPlay">Click to play · H for controls</div>
+    <div id="help" hidden>
+      <h2>Controls</h2>
+      <dl>
+        <dt>WASD</dt><dd>Move / drive</dd>
+        <dt>Mouse</dt><dd>Look and aim</dd>
+        <dt>Click</dt><dd>Attack / shoot</dd>
+        <dt>1–7, wheel</dt><dd>Fists, bat, pistol, SMG, shotgun, rifle, grenade</dd>
+        <dt>Shift</dt><dd>Sprint</dd>
+        <dt>Space</dt><dd>Jump / handbrake</dd>
+        <dt>E</dt><dd>Get in or out of a vehicle (steals it)</dd>
+        <dt>T</dt><dd>Chat</dd>
+        <dt>H</dt><dd>Show / hide this</dd>
+      </dl>
+      <p>Crimes give you wanted stars. Stay out of police sight to lose them.</p>
+    </div>
+  </div>
+
+  <div id="menu">
+    <div class="card">
+      <h1><span>Tim Arnett</span> Town</h1>
+      <p class="tag">An island of chaos. Grab a car. Grab your friends. Run from the cops.</p>
+      <label for="nameInput">Your name</label>
+      <input id="nameInput" maxlength="16" autocomplete="off">
+      <label for="roomInput">Room code <small>(same code = same game)</small></label>
+      <input id="roomInput" maxlength="6" autocomplete="off">
+      <button id="playBtn">Play</button>
+      <p id="netStatus">Checking multiplayer…</p>
+    </div>
+  </div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
