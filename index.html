@@ -18,9 +18,14 @@
   <div id="loader">
     <div class="slides"></div>
     <script>
-      // first picture right away (before the game code loads), and a different one every visit
-      (() => { let i = 0; try { i = (+localStorage.getItem('tat-art') + 1) % 4 || 0; localStorage.setItem('tat-art', i); } catch { i = Math.floor(Math.random() * 4); }
-        const u = `assets/load/art${i + 1}.jpg`, s = document.createElement('div'); s.className = 'slide on'; s.dataset.art = i;
+      // pictures come out of a shuffled bag (kept between visits), so you see them all, in a new order, before any repeats
+      window.tatNextArt = (n = 7) => {
+        let bag = []; try { bag = JSON.parse(localStorage.getItem('tat-bag') || '[]').filter((i) => i < n); } catch { /* private mode */ }
+        if (!bag.length) { bag = [...Array(n).keys()]; for (let i = n - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [bag[i], bag[j]] = [bag[j], bag[i]]; } }
+        const i = bag.shift(); try { localStorage.setItem('tat-bag', JSON.stringify(bag)); } catch { /* ignore */ }
+        return i;
+      };
+      (() => { const i = tatNextArt(), u = `assets/load/art${i + 1}.jpg`, s = document.createElement('div'); s.className = 'slide on';
         s.innerHTML = `<div class="fill" style="background-image:url(${u})"></div><img src="${u}" alt="">`;
         document.currentScript.previousElementSibling.append(s); })();
     </script>
@@ -36,6 +41,7 @@
 
     <div id="topright">
       <div id="cash">$0</div>
+      <div id="cashDelta"></div>
       <div id="weaponBox"><div id="weaponIcon"></div><div><div id="weapon"></div><div id="ammo"></div></div></div>
       <div id="stars"></div>
     </div>
@@ -48,7 +54,7 @@
 
     <div id="bottomleft">
       <div id="clock"></div>
-      <canvas id="minimap" width="300" height="190"></canvas>
+      <div id="mmFrame"><canvas id="minimap" width="300" height="190"></canvas></div>
       <div id="bars">
         <div class="bar hp"><div id="hpfill"></div></div>
         <div class="bar armor"><div id="armorfill"></div></div>
@@ -56,8 +62,9 @@
     </div>
 
     <div id="bottomright">
-      <div id="speedo" hidden></div>
+      <div id="vehName"></div>
       <div id="area"><b id="areaName"></b><span id="streetName"></span></div>
+      <div id="speedo" hidden></div>
     </div>
 
     <div id="crosshair"></div>
@@ -74,6 +81,7 @@
     <div id="shop" hidden>
       <div class="shopCard">
         <h2 id="shopTitle"></h2>
+        <div class="shopSub"><span>Items</span><b id="shopCash"></b></div>
         <ul id="shopItems"></ul>
         <button id="shopClose">Leave</button>
       </div>
@@ -82,15 +90,15 @@
     <div id="pause" hidden>
       <div class="pauseTop">
         <h2>Tim Arnett Town</h2>
-        <nav id="pauseTabs" aria-label="Pause menu">
-          <button data-tab="map" class="on">Map</button>
-          <button data-tab="goals">Goals</button>
-          <button data-tab="players">Players</button>
-          <button data-tab="controls">Controls</button>
-          <button data-tab="settings">Settings</button>
-        </nav>
-        <div id="roomInfo"></div>
+        <div class="pauseInfo"><span id="pauseTime"></span><b id="pauseCash"></b><small id="roomInfo"></small></div>
       </div>
+      <nav id="pauseTabs" aria-label="Pause menu">
+        <button data-tab="map" class="on">Map</button>
+        <button data-tab="goals">Goals</button>
+        <button data-tab="players">Players</button>
+        <button data-tab="controls">Controls</button>
+        <button data-tab="settings">Settings</button>
+      </nav>
       <div class="pauseBody">
         <section data-panel="map">
           <canvas id="bigmap" width="1000" height="560" aria-label="Map of Davenport. Click to set a waypoint."></canvas>

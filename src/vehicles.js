@@ -533,7 +533,11 @@ export function stepVehicle(v, inp, dt) {
     if (inp.handbrake) vf -= vf * 1.4 * dt;
     vr *= Math.exp(-(inp.handbrake ? 1.6 : T.grip * sky.grip) * dt);
   }
-  const cap = T.max * (boosting ? 1.25 : 1);
+  // grass, dirt and sand: extra drag and a much lower top speed than pavement
+  const cls = grounded ? W.classAt(v.x, v.z) : -1;
+  v.rough = cls === W.C.lawn || cls === W.C.park || cls === W.C.wood || cls === W.C.cemetery || cls === W.C.sand || cls === W.C.pitch;
+  if (v.rough) vf -= vf * 0.9 * dt;
+  const cap = T.max * (boosting ? 1.25 : 1) * (v.rough ? 0.5 : 1);
   if (vf > cap) vf = cap + (vf - cap) * Math.exp(-6 * dt);
   const yaw = alive ? (inp.steer || 0) * T.turn * clamp(vf / 5, -1, 1) * (1 - 0.35 * Math.min(1, Math.abs(vf) / T.max)) * (inp.handbrake ? 1.35 : 1) : 0;
   // spin: tires pull the turn rate toward what the steering asks for; a crash can overpower that

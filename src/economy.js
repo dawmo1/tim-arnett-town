@@ -2,7 +2,7 @@
 // (nothing is saved between sessions).
 import * as THREE from 'three';
 import * as W from './world.js';
-import { textTexture } from './util.js';
+import { lots } from './city/data.js';
 
 export const eco = { cash: 200, robbed: 0, jacked: 0, copCars: 0, done: new Set() };
 let scene, hooks = { announce() {}, sound() {}, feed() {} };
@@ -40,6 +40,8 @@ export function checkCountGoals() { for (const g of GOALS) if (g.max && g.get() 
 // ---------- stores ----------
 // kind: 'rob' (walk in, aim a gun at the clerk to empty the till), 'guns', 'meds', 'body', 'clothes', 'casino'
 export const stores = [];
+// kinds that are a real building you walk into (built by interiors.js): [width, depth] in m
+export const WALK_IN = { rob: [14, 11], guns: [16, 11], clothes: [18, 13] };
 // Made-up names on real Davenport gas stations and corner stores.
 const ROB_NAMES = ['Tim-Mart', 'Arnett Gas', 'Big River Liquor', 'Hilltop Pantry', 'QuikTim', 'River Bend Fuel', 'Corner Tim', 'Bluff Mart', 'Lucky Arnett', 'Mississippi Mini Mart', 'Quad Stop', 'Eagle Point Liquor', 'Kimberly Quick Stop', 'Brady Street Market', 'Village Pantry', 'Northside Gas'];
 // a sidewalk spot in front of a point of interest: {x, z} to stand on, door toward the building
@@ -50,7 +52,9 @@ function frontOf(px, pz) {
   const x = q.x + (dx / l) * off, z = q.z + (dz / l) * off;
   return { x, z, doorX: x + (dx / l) * 2.2, doorZ: z + (dz / l) * 2.2, face: Math.atan2(dx, dz) };
 }
-function markStores() {
+let planned = false;
+function planStores() {
+  if (planned) return; planned = true;
   const poi = W.D.index.poi;
   const spaced = (list, minD) => { const out = []; for (const p of list) if (!out.some((o) => Math.hypot(o.x - p.x, o.z - p.z) < minD)) out.push(p); return out; };
   const rob = spaced(poi.filter((p) => ['fuel', 'convenience', 'alcohol'].includes(p.kind)), 220);
@@ -61,23 +65,24 @@ function markStores() {
   const spare = rob.slice(15), ends = spare.length ? [spare.reduce((a, b) => (b.x > a.x ? b : a)), spare.reduce((a, b) => (b.x < a.x ? b : a))] : [];
   for (const p of ends) { const f = frontOf(p.x, p.z); if (f) stores.push({ name: 'Arnett Arms', kind: 'guns', ...f, cooldown: 0, progress: 0 }); }
   for (const h of W.D.index.hospitals) { const f = frontOf(h.x, h.z); if (f) stores.push({ name: 'Hospital pharmacy', kind: 'meds', ...f }); }
-  // a soft glowing ring on the sidewalk so you can find the door
+  // walk-in stores get their own lot: front wall 2 m behind the sidewalk spot, door facing the street
+  for (const s of stores) if (WALK_IN[s.kind]) { [s.w, s.d] = WALK_IN[s.kind]; s.cx = s.x + Math.sin(s.face) * (2 + s.d / 2); s.cz = s.z + Math.cos(s.face) * (2 + s.d / 2); }
+}
+// city/data.js drops any OSM building on these lots as tiles arrive (the first tile fetch runs this)
+lots.plan = () => { planStores(); return stores.filter((s) => s.w).map((s) => ({ x: s.cx, z: s.cz, fx: Math.sin(s.face), fz: Math.cos(s.face), hw: s.w / 2 + 1, hd: s.d / 2 + 1 })); };
+function markStores() {
+  planStores();
+  // a soft glowing ring on the sidewalk for the walk-up counters (pharmacy, body shop); walk-in stores are buildings (interiors.js)
   const ringGeo = new THREE.RingGeometry(0.7, 0.9, 28).rotateX(-Math.PI / 2);
-  const COL = { rob: 0x8fe38a, guns: 0xe5484d, body: 0x4aa3ff, meds: 0xffffff, clothes: 0xff80ab };
-  for (const s of stores) {
+  const COL = { body: 0x4aa3ff, meds: 0xffffff };
+  for (const s of stores) if (!s.w) {
     const m = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: COL[s.kind], transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false }));
     m.position.set(s.x, W.groundHeight(s.x, s.z) + 0.12, s.z); scene.add(m); s.ring = m;
-  }
-  // robbable stores also get a floating "$" over the door (faded while the till is empty, see updateEconomy)
-  const robTex = textTexture('$', { w: 128, h: 128, bg: '#2fbf4a', fg: '#ffffff', size: 100, border: '#ffffff' });
-  for (const s of stores) if (s.kind === 'rob') {
-    const t = new THREE.Sprite(new THREE.SpriteMaterial({ map: robTex, transparent: true, opacity: 0.9 }));
-    t.scale.set(1.1, 1.1, 1); t.position.set(s.x, W.groundHeight(s.x, s.z) + 3.4, s.z); scene.add(t); s.tag = t;
   }
 }
 export function storeNear(x, z, r = 3.2) {
   let best = null, bd = r;
-  for (const s of stores) { const d = Math.hypot(s.x - x, s.z - z); if (d < bd) { bd = d; best = s; } }
+  for (const s of stores) { if (s.w) continue; const d = Math.hypot(s.x - x, s.z - z); if (d < bd) { bd = d; best = s; } } // walk-in stores have a real door instead
   return best;
 }
 

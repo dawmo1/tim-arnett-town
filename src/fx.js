@@ -428,6 +428,7 @@ export const audio = () => ({ ac, noise, out: ac ? out() : null });
 export function soundGoal() { [523, 659, 784, 1046, 1318].forEach((f, i) => tone('triangle', f, 0.22, 0.13, i * 0.09)); }
 export function soundCash() { tone('square', 1318, 0.06, 0.06); tone('square', 1760, 0.08, 0.06, 0.06); }
 export function soundGnome() { [880, 1108, 1318, 1760].forEach((f, i) => tone('sine', f, 0.25, 0.12, i * 0.07)); }
+export function soundWhoosh() { burst(0.32, 1400, 0.3); burst(0.5, 400, 0.25); } // the spawn camera's cuts
 export function soundClick() { burst(0.03, 4000, 0.25); }
 export function soundReload() { burst(0.05, 3000, 0.3); setTimeout(() => burst(0.06, 2000, 0.35), 350); }
 export function soundNitro() { burst(0.6, 900, 0.3); }

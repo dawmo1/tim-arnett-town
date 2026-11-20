@@ -34,6 +34,7 @@ import { clamp, angDiff, rayOBB, raySphere, fmtDist } from './util.js';
 import { wanted, crime, updateWanted as tickWanted, resetWanted, cones, initWanted } from './wanted.js';
 import { eco, initEconomy, addCash, spend, goalDone, checkCountGoals, GOALS, storeNear, dropCash, updateEconomy, stores } from './economy.js';
 import { updateRadio, nextStation, currentStation } from './radio.js';
+import { drunk, drunkPass, drinkItems, resetDrunk, updateDrunk, wobble, drunkSteer, swayCamera } from './drunk.js';
 
 // Everyone owns every weapon (price is unused). mag/ammoPack: magazine size and rounds per purchase; ammoPrice: cost of one ammoPack
 const WEAPONS = [
@@ -126,6 +127,7 @@ composer.addPass(new ShaderPass({ uniforms: { tDiffuse: { value: null } },
   fragmentShader: 'uniform sampler2D tDiffuse; varying vec2 vUv; void main() { vec4 c = texture2D(tDiffuse, vUv); c.rgb = min(c.rgb, vec3(40.0)); if (c.r != c.r || c.g != c.g || c.b != c.b) c.rgb = vec3(0.0); gl_FragColor = c; }' }));
 const bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.35, 0.5, 0.88);
 composer.addPass(bloom);
+composer.addPass(drunkPass); // after bloom so the glow warps with the scene; disabled while sober
 composer.addPass(new OutputPass());
 // ---------- settings (remembered in this browser only) ----------
 const settings = { quality: 'auto', sens: 1, volume: 0.9, invertY: false };
@@ -194,14 +196,10 @@ initSettingsUi();
 // It covers the whole screen, so half-built streets never show. fade: just black + spinner (respawns).
 const TIPS = ['Hold Tab for the weapon wheel.', 'Press M for the map, click it to set a GPS route.', "Stores, Arnett Arms, Tim's Threads and the casino have doors: press E.", 'Hide in a shop or a parking ramp to shake the cops faster.', 'P calls the mechanic: he drops a car off near you.', 'Hold C while driving to look behind you.', 'G says hi. H insults people. Some swing back.', "Freight trains don't stop. Neither do barges.", 'Re-elect Mayor Tim Arnett.'];
 const loader = document.getElementById('loader'), slidesEl = loader.querySelector('.slides');
-// the four pictures play in order, and each visit starts on the next one (index.html shows the first)
-const ART = 4;
-let artI = +(slidesEl.firstElementChild?.dataset.art || 0), artK = 0, artShown = 0, artTimer = 0, loaderOut = 0;
-const artWait = [];
+// pictures come from a shuffled bag shared with index.html (which shows the first one before this code loads)
+let artK = 0, artTimer = 0, loaderOut = 0;
 function nextArt() {
-  artI = (artI + 1) % ART;
-  try { localStorage.setItem('tat-art', artI); } catch { /* private mode */ }
-  const url = `assets/load/art${artI + 1}.jpg`, img = new Image();
+  const url = `assets/load/art${window.tatNextArt() + 1}.jpg`, img = new Image();
   img.src = url; img.alt = '';
   img.decode().catch(() => {}).then(() => {
     if (loader.hidden || loader.classList.contains('fade')) return;
@@ -212,12 +210,8 @@ function nextArt() {
     requestAnimationFrame(() => requestAnimationFrame(() => sl.classList.add('on')));
     const old = [...slidesEl.children].slice(0, -1);
     setTimeout(() => old.forEach((o) => o.remove()), 1600);
-    artShown++;
-    for (let i = artWait.length - 1; i >= 0; i--) if (artShown >= artWait[i].n) { artWait[i].r(); artWait.splice(i, 1); }
   });
 }
-// resolves after n more pictures have come up (so even a fast load shows a few)
-const morePictures = (n) => new Promise((r) => artWait.push({ n: artShown + n, r }));
 // mode: 'art' (pictures, tip, spinner), 'fade' (black + spinner, for respawns), 'menu' (pictures behind the main menu)
 // resolves once the screen is fully covered
 function loading(on, label = '', mode = 'art') {
@@ -228,7 +222,7 @@ function loading(on, label = '', mode = 'art') {
   const tip = loader.querySelector('.tip'); tip.textContent = TIPS[Math.floor(Math.random() * TIPS.length)];
   if (label) { const sm = document.createElement('small'); sm.textContent = label; tip.prepend(sm); }
   loadProgress(0);
-  if (mode !== 'fade') artTimer = setInterval(nextArt, mode === 'menu' ? 7000 : 3000);
+  if (mode !== 'fade') artTimer = setInterval(nextArt, mode === 'menu' ? 7000 : 3200);
   if (!wasHidden) return Promise.resolve();
   loader.classList.add('out'); loader.hidden = false;
   requestAnimationFrame(() => requestAnimationFrame(() => loader.classList.remove('out')));
@@ -471,7 +465,7 @@ function startReload() {
 }
 // Right-click aim: snap onto the nearest threat (or person) roughly where you're looking.
 function findLockTarget() {
-  // in a shop the only target is the clerk (rooms sit underground, so lineOfSight below would refuse it)
+  // in a shop the only target is the clerk (the casino room sits underground, so lineOfSight below would refuse it)
   const R = interior.room;
   if (R) return R.clerk && Math.abs(angDiff(camYaw, Math.atan2(R.clerk.x - me.x, R.clerk.z - me.z))) < 0.7 ? { ref: R.clerk, kind: 'person' } : null;
   let best = null, bs = 0.26;
@@ -482,7 +476,7 @@ function findLockTarget() {
     const score = off + d * 0.004 - (kind === 'threat' ? 0.1 : 0);
     if (off < 0.35 && score < bs && W.lineOfSight(me.x, me.y + 1.5, me.z, x, y, z)) { bs = score; best = { ref, kind }; }
   };
-  for (const u of police.cops.values()) if (!police.isDown(u)) { const P = police.posOf(u); consider(P.x, u.kind === 3 ? u.y : (P.y || 0) + 1.2, P.z, u, 'threat'); }
+  for (const u of police.cops.values()) if (!police.isDown(u) && !u.parked) { const P = police.posOf(u); consider(P.x, u.kind === 3 ? u.y : (P.y || 0) + 1.2, P.z, u, 'threat'); }
   for (const w of walkers) if (!w.dead && !w.ch.rag) consider(w.x, (w.y || 0) + 1.2, w.z, w, w.mode === 'hostile' ? 'threat' : 'person');
   for (const r of remotes.values()) if (!r.dead) consider(r.x, r.y + 1.2, r.z, r, 'player');
   return best;
@@ -547,7 +541,8 @@ playBtn.addEventListener('click', async () => {
   const sp = firstSpawn;
   mmShow(null);
   await loading(true, W.areaAt(sp.x, sp.z)[0]);
-  const pics = morePictures(2); // even a fast load shows a few pictures
+  menuFocus = sp;
+  const pics = new Promise((r) => setTimeout(r, 22000)); // the pictures always get ~22 s, longer if the streets still aren't in
   ui.el.menu.hidden = true;
   await W.preload(sp.x, sp.z, 260, loadProgress);
   manageParked(0, sp.x, sp.z, true);
@@ -561,7 +556,7 @@ playBtn.addEventListener('click', async () => {
   await pics;
   ui.el.menu.hidden = true; ui.el.hud.hidden = false;
   playing = true;
-  setTimeout(() => loading(false), 250); // a few frames to settle behind the cover
+  setTimeout(() => { loading(false); startSpawnCam(); }, 250); // a few frames to settle behind the cover
   selectWeapon(2);
   fx.unlockAudio();
   ui.help('Welcome to <b>Tim Arnett Town</b>. <kbd>WASD</kbd> to move, mouse to look. Press <kbd>Esc</kbd> or <kbd>M</kbd> for the map.', 7);
@@ -817,6 +812,7 @@ function hurtWalker(w, dmg, dx, dz, p, force = 3, byNpc = false) {
 // imp (optional): a push like {x, y, z}; big pushes knock you over
 function damageMe(dmg, by, bu, imp) {
   if (me.dead || dmg <= 0) return;
+  dmg *= 0.45; // the player is tougher than everyone else (about 2.2x the health, bar still reads 0-100)
   if (me.armor > 0) { const soak = Math.min(me.armor, dmg * 0.7); me.armor -= soak; dmg -= soak; }
   me.hp -= dmg; me.lastBy = by; me.lastByUid = bu || '';
   me.lastImpulse = imp || null;
@@ -860,14 +856,14 @@ async function beginRespawn() {
   manageParked(0, sp.x, sp.z, true);
   respawn(false, sp);
   ui.addFeed(`Patched up at ${sp.name || 'the hospital'}`);
-  setTimeout(() => loading(false), 300);
+  setTimeout(() => { loading(false); startSpawnCam(); }, 300);
   respawning = false;
 }
 function respawn(first, sp) {
   interior.leave(); me.outside = null;
   me.x = sp.x; me.z = sp.z; me.h = sp.h; me.y = W.groundHeight(sp.x, sp.z); me.vy = 0;
   if (!first && eco.cash > 0) { const bill = Math.min(eco.cash, Math.max(50, Math.round(eco.cash * 0.1))); eco.cash -= bill; ui.addFeed(`Hospital bill: -$${bill}`); }
-  me.hp = 100; me.dead = false; resetWanted(); me.enter = null; me.exitT = 0; me.reloadT = 0; me.swim = false; deathSpin = 0; me.rag = null;
+  me.hp = 100; me.dead = false; resetWanted(); resetDrunk(); me.enter = null; me.exitT = 0; me.reloadT = 0; me.swim = false; deathSpin = 0; me.rag = null;
   release(me.ch);
   me.ch.body.rotation.set(0, 0, 0); me.ch.body.position.y = 0;
   camYaw = sp.h;
@@ -901,8 +897,10 @@ function nearestVehicle(reach = 1.6) {
   let best = null, bd = Infinity;
   for (const v of vehicles) {
     if (v.exploded || v.hp <= 0 || v.sinkT > 0) continue;
-    const d = Math.hypot(v.x - me.x, v.z - me.z);
-    if (d < v.T.len / 2 + reach && d < bd) { bd = d; best = v; }
+    // distance to the car's body (not its centre), so you have to be right next to it
+    const dx = me.x - v.x, dz = me.z - v.z, lf = dx * Math.sin(v.h) + dz * Math.cos(v.h), lr = dx * Math.cos(v.h) - dz * Math.sin(v.h);
+    const d = Math.hypot(Math.max(0, Math.abs(lr) - v.T.wid / 2), Math.max(0, Math.abs(lf) - v.T.len / 2));
+    if (d < reach && d < bd) { bd = d; best = v; }
   }
   return best;
 }
@@ -911,7 +909,7 @@ function toggleVehicle() {
   if (me.dead || me.rag) return;
   if (me.enter) { cancelEnter(); return; }
   if (me.veh) { leaveVehicle(); return; }
-  const v = nearestVehicle(4.5);
+  const v = nearestVehicle(1.3);
   if (!v) return;
   if (Math.hypot(v.vx || 0, v.vz || 0) > 3.5) { ui.flashPrompt("It's moving too fast to grab"); return; }
   me.enter = { v, phase: 'walk', t: 0 };
@@ -1108,7 +1106,7 @@ function fire(w) {
   const from = handPos();
   let last = null;
   for (let i = 0; i < (w.pellets || 1); i++) {
-    const dd = spread(d, w.spread * (aiming ? 1 : 2.2) * (me.veh ? 1.6 : 1));
+    const dd = spread(d, w.spread * (aiming ? 1 : 2.2) * (me.veh ? 1.6 : 1) * (1 + Math.min(1, drunk.lvl) * 1.5));
     const hit = raycast(o, dd, w.range);
     applyHit(hit, w, dd);
     bulletMarks(hit, dd);
@@ -1334,7 +1332,7 @@ function updateTraffic(dt, tSec) {
   allCars.length = 0; allCars.push(...vehicles);
   const sirens = [];
   const chase = wanted.stars > 0 || [...remotes.values()].some((r) => r.stars > 0);
-  for (const u of police.cops.values()) if (u.kind < 2 && !police.isDown(u)) { allCars.push(u.v); if (chase && u.kind === 0) sirens.push({ x: u.v.x, z: u.v.z }); }
+  for (const u of police.cops.values()) if (u.kind < 2 && !police.isDown(u)) { allCars.push(u.v); if (chase && u.kind === 0 && u.target) sirens.push({ x: u.v.x, z: u.v.z }); }
   for (const v of vehicles) if (v.T.siren && v.sirenOn) sirens.push({ x: v.x, z: v.z });
   const fxp = me.veh ? me.veh.x : me.x, fzp = me.veh ? me.veh.z : me.z;
   camera.getWorldDirection(tmpDir);
@@ -1529,6 +1527,7 @@ function footUpdate(dt, fwd, side) {
   let mx = Math.sin(camYaw) * fwd + rx * side, mz = Math.cos(camYaw) * fwd + rz * side;
   const ml = Math.hypot(mx, mz);
   if (ml > 0) { mx /= ml; mz /= ml; }
+  if (ml > 0 && drunk.lvl > 0.15 && !me.swim) { const d = wobble(dt) * 0.6; [mx, mz] = [mx + mz * d, mz - mx * d]; } // drunk: weave sideways
   const wk = WEAPONS[me.weapon].kind;
   const aimPose = wk === 'gun' && !me.swim && (aiming || me.aimT > 0);
   if (ml > 0 || aimPose || me.swing > 0) {
@@ -1589,7 +1588,7 @@ function driveUpdate(dt, fwd, side) {
   const v = me.veh;
   const pre = { vx: v.vx, vz: v.vz, speed: v.speed };
   const shift = keys.has('ShiftLeft') || keys.has('ShiftRight');
-  const imp = stepVehicle(v, { throttle: fwd > 0 ? 1 : 0, brake: fwd < 0 ? 1 : 0, steer: -side, handbrake: !v.T.heli && keys.has('Space'), nitro: shift && !v.T.heli, up: keys.has('Space'), down: shift }, dt);
+  const imp = stepVehicle(v, { throttle: fwd > 0 ? 1 : 0, brake: fwd < 0 ? 1 : 0, steer: drunkSteer(dt, -side), handbrake: !v.T.heli && keys.has('Space'), nitro: shift && !v.T.heli, up: keys.has('Space'), down: shift }, dt);
   engineSound(v, fwd, dt);
   // police spike strip: tyres burst (bulletproof tyres shrug it off)
   if (!v.flat && !v.T.bulletproof && !v.T.boat && !v.T.heli && police.spikesHit(v)) { v.flat = true; fx.sparks(v.x, v.y + 0.3, v.z, 14); fx.soundBoom(30); ui.flashPrompt('Tyres blown!'); }
@@ -1713,15 +1712,17 @@ function updateRemotes(dt) {
 let peakStars = 0, survive5 = 0, robberyPrompt = '';
 function updateWantedLevel(dt) {
   peakStars = Math.max(peakStars, wanted.stars);
-  if (tickWanted(dt, me) === 'lost') { ui.announce('COPS LOST', '', '#7cf29a'); if (peakStars >= 4) goalDone('lose4'); if (peakStars >= 5) goalDone('lose5'); peakStars = 0; }
+  if (tickWanted(dt, me) === 'lost') { if (peakStars >= 4) goalDone('lose4'); if (peakStars >= 5) goalDone('lose5'); peakStars = 0; }
   if (wanted.stars === 0) peakStars = 0;
   updateRobbery(dt);
 }
 // Robbing: inside, point a gun at the clerk (or the casino cashier) and keep it there while they fill the bag.
 // Corner stores: the clerk hits the silent alarm partway through. The casino calls it in at once.
+let tipRoom = null; // the shop the robbery tip was last shown in
 function updateRobbery(dt) {
   robberyPrompt = '';
   const R = interior.room;
+  if (R !== tipRoom) { tipRoom = R; if (R && (R.kind === 'rob' || R.kind === 'casino')) ui.help(`<b>Robbery:</b> hold right click to aim a gun at the ${R.kind === 'casino' ? 'cashier' : 'clerk'} and keep it on them until the bag is full. The alarm brings the cops.`, 7); }
   if (!R || !R.clerk || (R.kind !== 'rob' && R.kind !== 'casino')) return;
   const st = R.store, w = WEAPONS[me.weapon], c = R.clerk, casino = R.kind === 'casino', who = casino ? 'cashier' : 'clerk', till = casino ? 'cage' : 'till';
   const facing = aiming && Math.abs(angDiff(camYaw, Math.atan2(c.x - me.x, c.z - me.z))) < 0.35, close = Math.hypot(c.x - me.x, c.z - me.z) < 16;
@@ -1760,25 +1761,39 @@ function enterRoom(st) {
     const p = interior.enter(st, me.outside.y);
     me.x = p.x; me.y = p.y; me.z = p.z; me.vy = 0; me.h = 0; camYaw = 0;
     fadeEl.style.opacity = '0';
-    if (st.kind === 'rob' || st.kind === 'casino') ui.help(`<b>Robbery:</b> hold right click to aim a gun at the ${st.kind === 'casino' ? 'cashier' : 'clerk'} and keep it on them until the bag is full. The alarm brings the cops.`, 7);
   }, 350);
 }
 function leaveRoom() {
   fadeEl.style.opacity = '1';
   setTimeout(() => {
-    if (interior.room) Object.assign(interior.room.store, { alarmed: false, alarm: false, progress: 0 }); // walking out drops the robbery
+    const st = interior.room && interior.room.store;
+    if (st) Object.assign(st, { alarmed: false, alarm: false, progress: 0 }); // walking out drops the robbery
     interior.leave();
-    const o = me.outside || { x: me.x, z: me.z, y: W.groundHeight(me.x, me.z), h: 0 };
+    // the casino brings you back to its door; a storefront (e.g. passing out inside) puts you on the sidewalk outside
+    const o = me.outside || (st && st.w ? { x: st.x, z: st.z, y: W.groundHeight(st.x, st.z), h: st.face + Math.PI } : { x: me.x, z: me.z, y: W.groundHeight(me.x, me.z), h: 0 });
     me.x = o.x + Math.sin(o.h) * 1.2; me.z = o.z + Math.cos(o.h) * 1.2; me.y = o.y; me.vy = 0; me.h = o.h; camYaw = o.h; me.outside = null;
     fadeEl.style.opacity = '0';
   }, 350);
+}
+// drank past the limit: black out, come to outside the store or a few steps away, half sobered
+function passOut() {
+  drunk.lvl = 0.6;
+  fadeEl.style.opacity = '1';
+  ui.addFeed('Everything goes dark...');
+  setTimeout(() => {
+    if (interior.room && !me.dead) { leaveRoom(); return; }
+    const a = Math.random() * Math.PI * 2, x = me.x + Math.sin(a) * 6, z = me.z + Math.cos(a) * 6;
+    if (!me.dead && !me.veh && W.isLand(x, z) && !W.offMap(x, z)) { const p = W.pushOutCircle(x, z, 0.4); me.x = p.x; me.z = p.z; me.y = W.groundHeight(p.x, p.z); me.vy = 0; }
+    fadeEl.style.opacity = '0';
+    ui.flashPrompt('You wake up with a headache');
+  }, 2500);
 }
 function useStore() {
   if (me.dead || me.enter) return false;
   if (interior.room) {
     if (interior.nearExit(me.x, me.z)) { leaveRoom(); return true; }
     if (interior.nearCounter(me.x, me.z) && interior.room.kind === 'guns') { openShop('Arnett Arms', gunShopItems(), gunShopItems); return true; }
-    if (canBuyAtCounter()) { const basic = () => gunShopItems(true); openShop(interior.room.store.name, basic(), basic); return true; }
+    if (canBuyAtCounter()) { const basic = () => [...gunShopItems(true), ...drinkItems()]; openShop(interior.room.store.name, basic(), basic); return true; }
     if (interior.nearCounter(me.x, me.z) && interior.room.kind === 'clothes') { openShop(interior.room.store.name, clothingItems()); return true; }
     return true;
   }
@@ -1786,7 +1801,7 @@ function useStore() {
   if (!st) return false;
   if (st.kind === 'body' && me.veh && !me.veh.T.boat && !me.veh.T.heli) { bodyShop(me.veh); return true; }
   if (me.veh) return false;
-  if (st.kind === 'guns' || st.kind === 'rob' || st.kind === 'clothes' || st.kind === 'casino') { enterRoom(st); return true; }
+  if (st.kind === 'casino') { enterRoom(st); return true; } // other shops are buildings you walk into (interiors.js)
   if (st.kind === 'food') { if (me.hp >= 100) { ui.flashPrompt("You're not hungry"); return true; } if (!spend(8)) { ui.flashPrompt('A hot dog is $8'); return true; } me.hp = Math.min(100, me.hp + 30); fx.soundCash(); ui.flashPrompt('Hot dog: +30 health'); return true; }
   if (st.kind === 'meds') { openShop('Hospital Pharmacy', [{ label: 'Patch me up', sub: 'Full health', price: 60, ok: () => me.hp < 100, buy: () => { me.hp = 100; } }]); return true; }
   return false;
@@ -1913,6 +1928,30 @@ function closeShop() { shopOpen = false; paused = false; document.getElementById
 document.getElementById('shopClose').addEventListener('click', closeShop);
 
 let deathSpin = 0, camLag = null, camDist = null;
+// GTA-style arrival: a high overhead shot, a few hard cuts down toward you, then a swoop into the chase cam
+let spawnCam = null;
+const SPAWN_STEPS = [420, 170, 60], SPAWN_HOLD = 0.7, SPAWN_SWOOP = 1.1;
+const startSpawnCam = () => { spawnCam = { t: 0, step: -1 }; };
+const _from = new THREE.Vector3(), _to = new THREE.Vector3(), _look = new THREE.Vector3();
+function spawnCamera(dt, tx, ty, tz, lx, ly, lz) {
+  const S = spawnCam; S.t += dt;
+  const step = Math.floor(S.t / SPAWN_HOLD);
+  if (step !== S.step && step <= SPAWN_STEPS.length) { S.step = step; fx.soundWhoosh(); }
+  if (step < SPAWN_STEPS.length) {
+    const h = SPAWN_STEPS[step] * (1 - ((S.t % SPAWN_HOLD) / SPAWN_HOLD) * 0.15); // a slow push in during each shot
+    camera.position.set(tx, ty + h, tz + h * 0.12); // a hair off vertical so lookAt keeps north up
+    camera.lookAt(tx, ty, tz);
+    return;
+  }
+  // swoop from just overhead into wherever the chase cam already is this frame
+  const k = Math.min(1, (S.t - SPAWN_STEPS.length * SPAWN_HOLD) / SPAWN_SWOOP), e = k * k * (3 - 2 * k);
+  _to.copy(camera.position);
+  _from.set(tx, ty + 45, tz + 6);
+  camera.position.lerpVectors(_from, _to, e);
+  _look.set(tx, ty, tz).lerp(_to.set(lx, ly, lz), e);
+  camera.lookAt(_look);
+  if (k >= 1) spawnCam = null;
+}
 function updateCamera(dt) {
   const spd = me.veh ? Math.abs(me.veh.speed) : 0;
   const aimZoom = aiming && !me.dead && WEAPONS[me.weapon].kind === 'gun';
@@ -1959,6 +1998,8 @@ function updateCamera(dt) {
   const floorY = interior.room ? interior.room.y + 0.35 : W.isLand(camX, camZ) ? W.groundHeight(camX, camZ) + 0.35 : W.WATER_Y + 0.2;
   camera.position.set(camX, Math.max(floorY, ty - dy * d), camZ);
   camera.lookAt(ax + dx * 20, ty + dy * 20, az + dz * 20);
+  swayCamera(camera);
+  if (spawnCam) spawnCamera(dt, tx, ty, tz, ax + dx * 20, ty + dy * 20, az + dz * 20);
   followSun(tx, ty, tz);
   if (shake > 0) {
     camera.position.x += (Math.random() - 0.5) * shake; camera.position.y += (Math.random() - 0.5) * shake;
@@ -2081,8 +2122,10 @@ function updateHud(dt, t) {
     ui.setHealth(me.hp);
     ui.setCash(eco.cash);
     ui.setArmor(me.armor);
+    // drunk driving where a cop can see it: 1 star (same rule as assault: only counts if seen)
+    if (me.veh && drunk.lvl > 0.6 && Math.abs(me.veh.speed) > 5 && wanted.stars === 0 && Math.random() < 0.1) crime('assault', me.veh.x, me.veh.y, me.veh.z);
     if (wanted.stars >= 5 && !me.dead) { survive5 += 0.2; if (survive5 >= 60) goalDone('survive5'); } else survive5 = 0;
-    if (ui.setStars(wanted.stars, wanted.search)) { ui.announce('WANTED', '★'.repeat(wanted.stars), '#ff5e5b'); fx.soundWanted(); }
+    if (ui.setStars(wanted.stars, wanted.search)) fx.soundWanted(); // no banner: the stars alone show it
     ui.setSpeedo(me.veh, me.veh && !me.veh.T.bike ? currentStation().name : '', me.veh ? me.veh.nitro ?? 1 : 0);
     const [area, street] = W.areaAt(me.veh ? me.veh.x : me.x, me.veh ? me.veh.z : me.z); ui.showArea(area, street);
     if (waypoint && Math.hypot(waypoint.x - me.x, waypoint.z - me.z) < 25) { waypoint = null; gpsRoute = null; ui.help('You reached your waypoint.', 3, false); }
@@ -2100,16 +2143,16 @@ function updateHud(dt, t) {
   let prompt = robberyPrompt;
   if (!me.dead && !prompt) {
     const st = storeAt(me.veh ? me.veh.x : me.x, me.veh ? me.veh.z : me.z, me.veh ? 7 : 3.2);
-    if (interior.room) prompt = interior.nearExit(me.x, me.z) ? 'E: Leave' : interior.nearCounter(me.x, me.z) && interior.room.kind === 'guns' ? 'E: Buy ammo & loadouts' : interior.nearCounter(me.x, me.z) && interior.room.kind === 'clothes' ? 'E: Try on clothes' : canBuyAtCounter() ? 'E: Buy ammo · or aim a gun at the clerk to rob' :interior.room.clerk && (interior.room.kind === 'rob' || interior.room.kind === 'casino') && !robberyPrompt ? `Aim a gun at the ${interior.room.kind === 'casino' ? 'cashier' : 'clerk'} (right click) to rob ${interior.room.store.name}` : '';
+    if (interior.room) prompt = interior.nearExit(me.x, me.z) ? 'E: Leave' : interior.nearCounter(me.x, me.z) && interior.room.kind === 'guns' ? 'E: Buy ammo & loadouts' : interior.nearCounter(me.x, me.z) && interior.room.kind === 'clothes' ? 'E: Try on clothes' : canBuyAtCounter() ? 'E: Buy ammo & drinks · or aim a gun at the clerk to rob' :interior.room.clerk && (interior.room.kind === 'rob' || interior.room.kind === 'casino') && !robberyPrompt ? `Aim a gun at the ${interior.room.kind === 'casino' ? 'cashier' : 'clerk'} (right click) to rob ${interior.room.store.name}` : '';
     else if (st && st.kind === 'food') prompt = 'E: Buy a hot dog ($8, +30 health)';
-    else if (st && (st.kind === 'guns' || st.kind === 'clothes' || st.kind === 'rob' || st.kind === 'casino') && !me.veh) prompt = `E: Go into ${st.name}`;
+    else if (st && st.kind === 'casino' && !me.veh) prompt = `E: Go into ${st.name}`;
     else if (st && st.kind === 'meds' && !me.veh) prompt = 'E: Pharmacy (heal $60)';
     else if (st && st.kind === 'body' && me.veh && !me.veh.T.boat && !me.veh.T.heli) prompt = 'E: Arnett Auto (repairs & upgrades)';
   }
   if (!me.dead && !prompt) { const d = doorNear(); if (d) prompt = `E: ${d.label}`; }
   if (!me.dead && !prompt) {
     if (me.veh) prompt = '';
-    else if (!me.enter) { const v = nearestVehicle(4.5); if (v) prompt = Math.hypot(v.vx || 0, v.vz || 0) > 3.5 ? '' : `E: ${v.mode === 'traffic' || v.driver ? 'Carjack' : 'Enter'} ${v.T.name}`; }
+    else if (!me.enter) { const v = nearestVehicle(1.3); if (v) prompt = Math.hypot(v.vx || 0, v.vz || 0) > 3.5 ? '' : `E: ${v.mode === 'traffic' || v.driver ? 'Carjack' : 'Enter'} ${v.T.name}`; }
   }
   ui.setPrompt(prompt);
   mmT -= dt;
@@ -2121,12 +2164,13 @@ function updateHud(dt, t) {
     for (const r of remotes.values()) if (!r.dead) blips.push({ x: r.x, z: r.z, color: '#40c4ff', size: 4.5 });
     for (const sb of storeList(false)) blips.push(sb);
     for (const e of eventBlips()) blips.push(e);
-    for (const u of police.cops.values()) if (!police.isDown(u)) { const P = police.posOf(u); blips.push({ x: P.x, z: P.z, color: flash, size: u.kind === 3 ? 6 : u.kind === 2 ? 2.5 : 4 }); }
+    for (const s of police.stations()) if (Math.abs(s.x - me.x) < 400 && Math.abs(s.z - me.z) < 400) blips.push({ x: s.x, z: s.z, color: '#2f6fdc', size: 6, shape: 'square', label: '★' });
+    for (const u of police.cops.values()) if (!police.isDown(u) && !u.parked) { const P = police.posOf(u); blips.push({ x: P.x, z: P.z, color: flash, size: u.kind === 3 ? 6 : u.kind === 2 ? 2.5 : 4 }); }
     const spd = me.veh ? Math.abs(me.veh.speed) : 0;
     ui.drawMinimap({ x: me.veh ? me.veh.x : me.x, z: me.veh ? me.veh.z : me.z, yaw: camYaw }, me, blips, spd > 15 ? 0.75 : 1.1, wanted.search ? cones() : null, waypoint, gpsRoute);
     // siren volume from the nearest active police unit
     let nd = Infinity;
-    for (const u of police.cops.values()) if (!police.isDown(u) && u.kind !== 2) { const P = police.posOf(u); nd = Math.min(nd, Math.hypot(P.x - me.x, P.z - me.z)); }
+    for (const u of police.cops.values()) if (!police.isDown(u) && u.kind !== 2 && u.target) { const P = police.posOf(u); nd = Math.min(nd, Math.hypot(P.x - me.x, P.z - me.z)); }
     fx.setSiren(nd < 150 ? 1 - nd / 150 : 0);
   }
 }
@@ -2152,7 +2196,7 @@ function updateLamps(n, t) {
   const lit = new Set();
   for (const c of lampList) { setCarLamps(c.v, c.on, c.braking); lit.add(c.v); }
   for (const v of vehicles) if (!lit.has(v)) setCarLamps(v, false, false);
-  for (const u of police.cops.values()) if (u.kind < 2 && !police.isDown(u)) { lampList.push({ v: u.v, on, braking: Math.abs(u.v.speed || 0) < 0.5, reversing: (u.v.speed || 0) < -0.4, signal: 0, bar: chase }); setCarLamps(u.v, on, Math.abs(u.v.speed || 0) < 0.5); }
+  for (const u of police.cops.values()) if (u.kind < 2 && !police.isDown(u)) { lampList.push({ v: u.v, on: on && !u.parked, braking: Math.abs(u.v.speed || 0) < 0.5, reversing: (u.v.speed || 0) < -0.4, signal: 0, bar: chase && !!u.target }); setCarLamps(u.v, on && !u.parked, Math.abs(u.v.speed || 0) < 0.5); }
   updateCarLights(lampList, camera.position, Math.max(n, weather.rain * 0.5, weather.fog * 0.5), me.veh, t);
 }
 
@@ -2161,7 +2205,7 @@ const seatList = [];
 function seatPeople(dt) {
   seatList.length = 0;
   for (const v of vehicles) if (v !== me.veh && !v.driver && (v.mode === 'traffic' || v.mode === 'service' || v.npcDriver)) seatList.push({ v });
-  for (const u of police.cops.values()) if (u.kind < 2 && !police.isDown(u) && !u.deployed?.length) seatList.push({ v: u.v });
+  for (const u of police.cops.values()) if (u.kind < 2 && !police.isDown(u) && !u.deployed?.length && !u.parked) seatList.push({ v: u.v });
   updateOccupants(seatList, camera.position, dt);
 }
 
@@ -2215,6 +2259,8 @@ function update(dt, t) {
   isHost = hostUid() === net.uid;
   updateVehicles(dt, tSec, nowMs);
   updatePlayer(dt);
+  updateDrunk(dt);
+  if (drunk.lvl >= 1 && !me.veh && !me.dead && !me.enter && !me.move && !me.rag && !shopOpen) passOut();
   updateRemotes(dt);
   updateWalkers(dt, tSec, nowMs, camView());
   updateEmergency(dt, { x: me.veh ? me.veh.x : me.x, z: me.veh ? me.veh.z : me.z }, camView(), tSec);
@@ -2248,8 +2294,9 @@ function update(dt, t) {
 }
 
 // Slow pan over the riverfront while the menu is open.
+let menuFocus = null; // once you press Play the (hidden) menu camera streams around your spawn instead
 function menuCamera(t) {
-  const p = W.places.menu, a = t * 0.05;
+  const p = menuFocus || W.places.menu, a = t * 0.05;
   camera.position.set(p.x + Math.cos(a) * 230, 115, p.z + Math.sin(a) * 230);
   camera.lookAt(p.x, 10, p.z - 160);
   followSun(p.x, 0, p.z);

@@ -1,5 +1,6 @@
 // Wanted level: crimes need witnesses, and stars depend on how bad the crime was.
 // While no cop can see you, the police search your last known spot; their vision cones show on the minimap.
+// HUD reads wanted.stars and wanted.search (true = cops lost sight and are searching, false = they see you).
 import * as W from './world.js';
 import * as police from './police.js';
 import { walkers } from './npc.js';
@@ -70,7 +71,7 @@ export function updateWanted(dt, me) {
     w.call.t -= dt;
     if (w.call.t <= 0) {
       const c = w.call; w.call = null; wanted.callers.splice(i, 1);
-      if (!me.dead) { hooks.announce('SOMEONE CALLED THE COPS'); raise(c.lvl, c.x, c.z, false); }
+      if (!me.dead) raise(c.lvl, c.x, c.z, false); // no banner: the stars (flashing while wanted.search) say it
     }
   }
   if (wanted.stars <= 0 || me.dead) return null;

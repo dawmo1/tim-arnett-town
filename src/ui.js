@@ -10,7 +10,11 @@ export const el = {
   roomInfo: $('roomInfo'), playerList: $('playerList'), help: $('help'), minimap: $('minimap'), hurt: $('hurt'),
   wheel: $('wheel'), wheelName: $('wheelName'), wheelStats: $('wheelStats'), announce: $('announce'), speedo: $('speedo'),
   crosshair: $('crosshair'), clock: $('clock'),
+  cashDelta: $('cashDelta'), vehName: $('vehName'), bottomleft: $('bottomleft'), pauseCash: $('pauseCash'), pauseTime: $('pauseTime'), shopCash: $('shopCash'),
 };
+// restart a one-shot CSS animation; the class drops itself when it ends
+function replay(node, cls) { node.classList.remove(cls); void node.offsetWidth; node.classList.add(cls); }
+for (const n of [el.cashDelta, el.vehName]) n.addEventListener('animationend', () => n.classList.remove('on'));
 
 // Simple weapon silhouettes (viewBox 0 0 48 24).
 export const ICONS = {
@@ -30,18 +34,24 @@ export const ICONS = {
 
 export function setHealth(hp) {
   el.hpfill.style.width = Math.max(0, hp) + '%';
-  el.hpfill.style.background = hp > 50 ? '#43d17a' : hp > 25 ? '#f5b041' : '#ec4747';
+  el.hpfill.style.background = hp > 50 ? '#5bb85b' : hp > 25 ? '#d9a63a' : '#d23c30';
 }
 export function flashHurt() { el.hurt.classList.remove('on'); void el.hurt.offsetWidth; el.hurt.classList.add('on'); }
 export function setWeapon(name, ammo = '') {
   el.weapon.textContent = name;
-  el.ammo.textContent = ammo;
+  const m = /^(\d+) \/ (\d+)$/.exec(ammo); // "clip / reserve" -> GTA-style reserve + clip
+  if (m) el.ammo.innerHTML = `<span>${m[2]}</span><b>${m[1]}</b>`; else el.ammo.textContent = ammo;
   el.weaponIcon.innerHTML = `<svg viewBox="0 0 48 24" fill="currentColor" aria-hidden="true">${ICONS[name] || ''}</svg>`;
 }
+// Hidden until wanted. Cops see you: solid stars, red/blue siren glow (and on the minimap frame).
+// Searching: stars blink grey, "waning away" until they are lost. Rebuilt only when the count changes.
 let lastStars = 0;
-export function setStars(n, flashing) {
-  el.stars.innerHTML = Array.from({ length: 5 }, (_, i) => `<span class="${i < n ? 'on' : ''}">★</span>`).join('');
-  el.stars.classList.toggle('flash', !!flashing && n > 0);
+export function setStars(n, searching) {
+  if (n !== lastStars) el.stars.innerHTML = Array.from({ length: 5 }, (_, i) => `<i class="${i < n ? 'on' : ''}"></i>`).join('');
+  el.stars.classList.toggle('none', n <= 0);
+  el.stars.classList.toggle('flash', n > 0 && !!searching);
+  el.stars.classList.toggle('hot', n > 0 && !searching);
+  el.bottomleft.classList.toggle('hot', n > 0 && !searching);
   const up = n > lastStars;
   lastStars = n;
   return up;
@@ -64,11 +74,18 @@ let promptHold = 0;
 export function setPrompt(t) { if (performance.now() < promptHold) return; el.prompt.textContent = t || ''; el.prompt.hidden = !t; }
 export function flashPrompt(t) { el.prompt.textContent = t; el.prompt.hidden = false; promptHold = performance.now() + 1500; }
 export function setArmor(a) { el.armorfill.style.width = Math.max(0, Math.min(100, a)) + '%'; }
-let shownCash = -1;
+let shownCash = -1, deltaSum = 0, deltaUntil = 0;
 export function setCash(n) {
   if (n === shownCash) return;
-  if (shownCash >= 0) { el.cash.classList.remove('bump'); void el.cash.offsetWidth; el.cash.classList.add('bump'); }
-  shownCash = n; el.cash.textContent = '$' + n.toLocaleString('en-US');
+  if (shownCash >= 0) {
+    replay(el.cash, 'bump');
+    // +$ / -$ under the cash; changes close together add up, like GTA
+    const now = performance.now(); deltaSum = (now < deltaUntil ? deltaSum : 0) + n - shownCash; deltaUntil = now + 2500;
+    el.cashDelta.textContent = (deltaSum >= 0 ? '+$' : '-$') + Math.abs(deltaSum).toLocaleString('en-US');
+    el.cashDelta.classList.toggle('down', deltaSum < 0); replay(el.cashDelta, 'on');
+  }
+  shownCash = n;
+  el.cash.textContent = el.pauseCash.textContent = el.shopCash.textContent = '$' + n.toLocaleString('en-US');
 }
 // Top-left help box: short tips, one at a time. Text may contain <kbd>X</kbd>.
 const helpQ = []; let helpT = 0;
@@ -111,6 +128,7 @@ export function announce(text, sub = '', color = '#ffd23f') {
   queue.push({ text, sub, color });
   if (!showing) nextAnnounce();
 }
+// "MISSION PASSED"-style: big coloured title, then a dark band with a strip in the same colour.
 function nextAnnounce() {
   const a = queue.shift();
   if (!a) { showing = false; return; }
@@ -118,14 +136,19 @@ function nextAnnounce() {
   el.announce.innerHTML = '';
   const t = document.createElement('div'); t.className = 'big'; t.textContent = a.text; t.style.color = a.color;
   el.announce.append(t);
-  if (a.sub) { const s = document.createElement('div'); s.className = 'sub'; s.textContent = a.sub; el.announce.append(s); }
+  const band = document.createElement('div'); band.className = 'band';
+  if (a.sub) { const s = document.createElement('div'); s.className = 'sub'; s.textContent = a.sub; band.append(s); }
+  el.announce.append(band); el.announce.style.setProperty('--c', a.color);
   el.announce.classList.remove('on'); void el.announce.offsetWidth; el.announce.classList.add('on');
-  setTimeout(nextAnnounce, 2200);
+  setTimeout(nextAnnounce, 2600);
 }
 
 const WX = { clear: 'Clear', cloudy: 'Cloudy', rain: 'Rain', storm: 'Storm' };
-export function setClock(time, wx, night) { el.clock.textContent = `${time} · ${WX[wx] || wx}${night ? ' · Night' : ''}`; }
+export function setClock(time, wx, night) { el.clock.textContent = el.pauseTime.textContent = `${time} · ${WX[wx] || wx}${night ? ' · Night' : ''}`; }
+let lastVeh = null;
 export function setSpeedo(v, station = '', nitro = 0) {
+  // vehicle name, big and bottom-right for a few seconds after getting in (GTA does this)
+  if (v !== lastVeh) { lastVeh = v; if (v) { el.vehName.textContent = v.T.name; replay(el.vehName, 'on'); } }
   if (!v) { el.speedo.hidden = true; return; }
   el.speedo.hidden = false;
   const alt = v.T.heli ? `<span>Altitude ${Math.round((v.alt ?? v.y) * FT)} ft</span>` : '';
@@ -133,7 +156,7 @@ export function setSpeedo(v, station = '', nitro = 0) {
   // damage meter: green when healthy, red when it's about to give up
   const hp = Math.max(0, Math.min(1, v.hp / v.T.hp)), hc = hp > 0.6 ? '#7cf29a' : hp > 0.3 ? '#ffc94a' : '#ff5e5b';
   const dm = `<div id="vdmg" title="Damage"><i style="width:${Math.round(hp * 100)}%;background:${hc}"></i></div>`;
-  el.speedo.innerHTML = `<b>${fmtSpeed(v.speed)}</b><small>mph</small><span>${v.T.name}${station ? ' · ' + station : ''}</span>${alt}${nb}${dm}`;
+  el.speedo.innerHTML = `<b>${fmtSpeed(v.speed)}</b><small>mph</small>${station ? `<span>${station}</span>` : ''}${alt}${nb}${dm}`;
 }
 let hitT = 0;
 export function hitMarker(kill) {
@@ -202,8 +225,8 @@ const mm = el.minimap.getContext('2d');
 const SCALE = 0.6; // minimap pixels per metre (before zoom)
 const BASE_S = 0.25;
 let minX = 0, minZ = 0, maxX = 1, maxZ = 1, base = null;
-const ROAD_STYLE = { motor: ['#ffd27a', 1.2], trunk: ['#ffe6a8', 1.15], primary: ['#ffffff', 1.1], secondary: ['#f4f4f4', 1.05], tertiary: ['#e9ecef', 1], minor: ['#dfe3e6', 1], residential: ['#dfe3e6', 1], service: ['#c9ced2', 0.9] };
-const WATER = '#3d8fb0', LAND = '#6f7d68', OFFMAP = '#66735f', BLDG = '#545e57';
+const ROAD_STYLE = { motor: ['#c3c7cb', 1.2], trunk: ['#b5babe', 1.15], primary: ['#a6acb1', 1.1], secondary: ['#9aa0a5', 1.05], tertiary: ['#8e9499', 1], minor: ['#82888d', 1], residential: ['#82888d', 1], service: ['#6c7277', 0.9] };
+const WATER = '#2c4f6b', LAND = '#3b4247', OFFMAP = '#33393d', BLDG = '#4b5359';
 export function drawMapBase() {
   const I = W.D.index;
   minX = I.tx0 * 200; maxX = (I.tx1 + 1) * 200; minZ = I.tz0 * 200; maxZ = (I.tz1 + 1) * 200;
