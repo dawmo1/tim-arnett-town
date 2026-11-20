@@ -17,7 +17,8 @@ Everyone who types the same **room code** ends up in the same game. You can also
 | Right click | Aim (zooms in and locks onto nearby targets; the sniper zooms further) |
 | R | Reload |
 | Shift | Sprint. Driving: nitro. Helicopter: descend (Space climbs) |
-| Space | Jump / handbrake |
+| Space | Jump / handbrake. In front of a wall, fence or car: climb up or vault over |
+| C (on foot) | Crouch. Crouch next to a wall or car to take cover |
 | E | Get in or out of a vehicle (yanks the driver out) · go into shops, take stairs, use counters |
 | C (driving) | Look behind |
 | P | Phone: call the mechanic to drop off a car |
@@ -33,9 +34,12 @@ Everyone who types the same **room code** ends up in the same game. You can also
 - **Traffic** follows the real lanes, one-way streets, traffic lights and stop signs, pulls over for sirens and floors it away from gunfire. Lots of parked cars to steal, plus taxis, buses, garbage and tow trucks, limos, muscle cars and the odd monster truck.
 - **People** walk the sidewalks and cross at corners on the walk signal: office workers downtown, students by Palmer, shoppers at NorthPark, joggers and dog walkers on the riverfront, bus stops, buskers, hot dog carts (buy one to heal), road crews, crowds at the ballpark and bandshell in the evening and outside bars at night. Squirrels, rabbits and cats too.
 - **Police** patrol with traffic and give you a star the moment they see a crime. Units roll out of the real police stations and route along the streets; the helicopter lifts off the station roof. Ambulances revive people who went down nearby, fire trucks put out burning cars.
-- **Crime and money:** rob 15 corner stores and gas stations (hold a gun on the clerk) or the **Arnett Belle** riverboat casino. Buy guns at Arnett Arms (knife, crowbar, pistol, SMG, shotgun, rifle, sniper, grenades, Molotovs, RPG), clothes at Tim's Threads, and upgrades at Arnett Auto (paint, rims, engine, brakes, tires, nitro, armor, bulletproof tires). A helicopter waits on a downtown rooftop: take the roof-access stairs. Stop muggings, purse snatchers and car thieves for a reward.
+- **Crime and money:** rob 15 corner stores and gas stations (hold a gun on the clerk) or the **Arnett Belle** riverboat casino. Buy guns at Arnett Arms (knife, crowbar, pistol, SMG, shotgun, rifle, sniper, grenades, Molotovs, RPG), outfits, haircuts, beards, tattoos and masks (ski mask or a Tim Arnett mask) at Tim's Threads, and upgrades at Arnett Auto (paint, rims, engine, brakes, tires, nitro, armor, bulletproof tires). A helicopter waits on a downtown rooftop: take the roof-access stairs. Stop muggings, purse snatchers and car thieves for a reward.
 - **Wanted level** works on witnesses: a cop has to see it or a bystander has to call it in. To shake the cops, get out of every vision cone (they show on the minimap while they search). Hiding inside a shop or a parking ramp loses them faster, unless they know you're in the place you just robbed. Respraying only repairs the car now.
-- **Living world:** a day lasts 24 real minutes and the weather changes (clear, cloudy, rain, storms), the same for everyone in the room. At night windows and shop signs light up, there are fewer people and more cops, and the odd drunk driver.
+- **Living world:** a day lasts 24 real minutes and the weather changes (clear, cloudy, rain, storms, river fog, snow), the same for everyone in the room. At night windows and shop signs light up, there are fewer people and more cops, and the odd drunk driver.
+- **Looks:** people, cars, guns and street props are modeled in Blender (`assets/src/*.py` build them into `assets/models/*.glb`). Every person is mixed from bodies, painted faces, hair and outfits; every car has an interior, opening doors, dents, glass and a driver. Buildings have brick and stone relief, recessed windows that reflect the sky, cornices, shop awnings, fire escapes and rooftop tanks; houses get porches, fences, driveways and gardens; trees sway in the wind.
+- **Gangs:** the Westside Wolves (West End), Hilltop Hounds (Hilltop) and Kimberly Kings (Kimberly Road) hang out on their turf, shown faintly on the map. Flash a gun there and they'll warn you off; start something and the whole crew joins in.
+- **Getting wasted:** dying plays a slow-motion **WASTED**, then you wake up at the hospital minus a bill (you keep your guns).
 
 ## Turn on multiplayer (one-time, about 5 minutes)
 
@@ -77,4 +81,5 @@ Then open http://localhost:8765. Open two browser tabs with the same room code t
 
 - Map data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors, available under the Open Database License (ODbL).
 - Elevation from the [AWS Open Data Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) (USGS and other public sources).
+- 3D models built for this game in [Blender](https://www.blender.org/) from Python scripts; car brands are made-up parodies.
 - Business names in the game are made up. Tim Arnett is not actually the mayor. Yet.

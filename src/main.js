@@ -146,6 +146,7 @@ function applyQuality(q) {
   scene.userData.sky.scale.setScalar(camera.far * 0.9);
   fogView.near = camera.far * 0.2; fogView.far = camera.far * 0.88;
   W.setDetailRadius(q === 'low' ? 260 : q === 'medium' ? 400 : 520);
+  W.setPropQuality(q);
   resize();
   const note = document.getElementById('qualityNote');
   if (note) note.textContent = settings.quality === 'auto' ? `Auto picked ${q}. It drops a level if the game runs slowly.` : '';
@@ -502,6 +503,7 @@ net.handlers.vehicle = (id, rec) => {
   v.tgt = { x: rec.x, z: rec.z, h: rec.h, y: rec.y || 0 };
   v.hp = rec.hp; v.driver = rec.d || ''; v.burnAt = rec.b || 0; v.burnBy = rec.bb || '';
   if (rec.e) v.exploded = true;
+  if (typeof rec.l === 'number') { const l = rec.l; v.sirenOn = !!(l & 1); v.netBrake = !!(l & 2); v.netRev = !!(l & 4); v.doorOpen = l & 8 ? 1 : 0; v.flat = !!(l & 16); v.brokenHead = !!(l & 32); v.brokenTail = !!(l & 64); }
   if (Array.isArray(rec.dz)) { const [f, b, l, r] = rec.dz; if (f !== Math.round(v.dz.f) || b !== Math.round(v.dz.b) || l !== Math.round(v.dz.l) || r !== Math.round(v.dz.r)) { v.dz = { f, b, l, r }; applyDamageVisual(v); } }
 };
 net.handlers.vehicleGone = (id) => { const v = vehById.get(id); if (v) resetVehicle(v); };
@@ -533,7 +535,13 @@ function writeVeh(v, force) {
   if (!force && n - v.lastWrite < 100) return;
   v.lastWrite = n;
   v.touchedAt = net.now();
-  setVehicle(v.id, { ti: v.ti, c: v.color, x: r1(v.x), y: r2(v.y), z: r1(v.z), h: r2(v.h), hp: Math.round(v.hp), d: v.driver || '', b: v.burnAt || 0, bb: v.burnBy || '', e: v.exploded ? 1 : 0, dz: [v.dz.f, v.dz.b, v.dz.l, v.dz.r].map(Math.round) });
+  setVehicle(v.id, { ti: v.ti, c: v.color, x: r1(v.x), y: r2(v.y), z: r1(v.z), h: r2(v.h), hp: Math.round(v.hp), d: v.driver || '', b: v.burnAt || 0, bb: v.burnBy || '', e: v.exploded ? 1 : 0, dz: [v.dz.f, v.dz.b, v.dz.l, v.dz.r].map(Math.round), l: vehBits(v) });
+}
+// siren, brake/reverse lights, open door, flat tyres and smashed lamps, packed for the network
+function vehBits(v) {
+  const mine = v === me.veh, fwd = keys.has('KeyS') || keys.has('ArrowDown');
+  const braking = mine ? (fwd && v.speed > 0.5) || keys.has('Space') : false, reversing = mine && v.speed < -0.4;
+  return (v.sirenOn ? 1 : 0) | (braking ? 2 : 0) | (reversing ? 4 : 0) | (v.doorOpen ? 8 : 0) | (v.flat ? 16 : 0) | (v.brokenHead ? 32 : 0) | (v.brokenTail ? 64 : 0);
 }
 function resetVehicle(v) {
   if (me.veh === v) return;
@@ -1403,6 +1411,7 @@ function footUpdate(dt, fwd, side) {
     me.y = m.kind === 'climb' ? m.from.y + (m.to.y - m.from.y) * Math.min(1, k / 0.6) : m.from.y + (m.to.y - m.from.y) * e + Math.sin(k * Math.PI) * Math.max(0.3, m.peak - Math.max(m.from.y, m.to.y));
     me.vy = 0; me.moveSpeed = 0;
     me.ch.g.position.set(me.x, me.y, me.z); me.ch.g.rotation.set(0, me.h, 0);
+    me.netPose = m.kind === 'climb' ? 8 : 16; me.netK = Math.round(k * 100) / 100;
     animateCharacter(me.ch, dt, m.kind === 'climb' ? { climb: k } : { vault: k });
     if (k >= 1) { me.move = null; me.grounded = true; }
     return;
@@ -1466,6 +1475,7 @@ function footUpdate(dt, fwd, side) {
   me.ch.g.rotation.set(0, me.h, 0);
   const wpn = WEAPONS[me.weapon];
   me.recoil = Math.max(0, (me.recoil || 0) - dt * 8);
+  me.netPose = ((crouch && !me.inCover && !aimPose) ? 1 : 0) | ((me.inCover && !aimPose) ? 2 : 0) | (me.reloadT > 0 ? 4 : 0); me.netPitch = aimPose ? Math.round(-camPitch * 57) : 0; me.netK = 0;
   animateCharacter(me.ch, dt, { crouch: crouch && !me.inCover && !aimPose, cover: me.inCover && !aimPose, speed: aimPose ? Math.min(me.moveSpeed, 3) : me.moveSpeed, aim: aimPose, swim: me.swim, swing: me.swing, weapon: me.swim ? 'none' : wk, wmodel: me.swim ? null : wpn.model, rifle: wpn.long, recoil: me.recoil, reload: me.reloadT > 0 ? 1 - me.reloadT / (wpn.name === 'Shotgun' ? 1.8 : 1.3) : 0, pitch: aimPose ? -camPitch * 57 : 0, carry: !aimPose && wpn.long });
 }
 
@@ -1583,8 +1593,9 @@ function updateRemotes(dt) {
     } else {
       r.ch.g.visible = true;
       placeCharacter(r.ch, r.x, r.y, r.z, r.h);
-      const sw = r.y < W.SWIM_Y + 0.4;
-      animateCharacter(r.ch, dt, { speed: r.speed, aim: wk === 'gun', swim: sw, dead: r.dead, weapon: sw ? 'none' : wk, wmodel: sw ? null : WEAPONS[r.weapon]?.model ?? null, rifle: !!WEAPONS[r.weapon]?.long });
+      const sw = r.y < W.SWIM_Y + 0.4, bits = s[17] | 0, wr = WEAPONS[r.weapon];
+      if (bits & 24) animateCharacter(r.ch, dt, bits & 8 ? { climb: +s[19] || 0 } : { vault: +s[19] || 0 });
+      else animateCharacter(r.ch, dt, { speed: r.speed, aim: wk === 'gun' && !(bits & 2), swim: sw, dead: r.dead, crouch: !!(bits & 1), cover: !!(bits & 2), reload: bits & 4 ? (performance.now() / 1300) % 1 : 0, pitch: +s[18] || 0, carry: !!wr?.long && wk !== 'gun', weapon: sw ? 'none' : wk, wmodel: sw ? null : wr?.model ?? null, rifle: !!wr?.long });
     }
     r.tagT = (r.tagT || 0) - dt;
     if (r.tagT <= 0) { r.tagT = 0.3; const d = Math.hypot(r.x - camera.position.x, r.z - camera.position.z); r.tagOn = !r.dead && d < 40 && W.lineOfSight(camera.position.x, camera.position.y, camera.position.z, r.x, r.y + 2.2, r.z); }
@@ -2005,7 +2016,7 @@ function updateLamps(n, t) {
     if (!driven && !hazard) continue;
     let braking = v.braking, reversing = false;
     if (mine) { braking = (fwd && v.speed > 0.5) || keys.has('Space') || Math.abs(v.speed) < 0.3; reversing = v.speed < -0.4; }
-    else if (v.driver) { braking = Math.abs(v.speed || 0) < 0.3; }
+    else if (v.driver) { braking = v.netBrake !== undefined ? v.netBrake || Math.abs(v.speed || 0) < 0.3 : Math.abs(v.speed || 0) < 0.3; reversing = !!v.netRev; }
     lampList.push({ v, on: on && driven, braking: driven && braking, reversing, signal: hazard ? 2 : v.mode === 'traffic' ? v.signal : 0, bar: !!(v.T.siren && v.sirenOn) });
   }
   // lamp lenses glow on the cars that have their lights on (and dark on everything else)
@@ -2102,7 +2113,7 @@ function update(dt, t) {
   sendT -= dt;
   if (sendT <= 0) {
     sendT = 0.1;
-    sendState([r1(me.x), r2(me.y), r1(me.z), r2(me.h), r1(me.moveSpeed), me.veh ? me.veh.id : '', Math.round(me.hp), wanted.stars, me.weapon, me.shotSeq, r1(me.shot[0]), r1(me.shot[1]), r1(me.shot[2]), wanted.search ? 1 : 0, r1(wanted.lk.x), r1(wanted.lk.z), me.ch.rag && !me.dead ? 1 : 0]);
+    sendState([r1(me.x), r2(me.y), r1(me.z), r2(me.h), r1(me.moveSpeed), me.veh ? me.veh.id : '', Math.round(me.hp), wanted.stars, me.weapon, me.shotSeq, r1(me.shot[0]), r1(me.shot[1]), r1(me.shot[2]), wanted.search ? 1 : 0, r1(wanted.lk.x), r1(wanted.lk.z), me.ch.rag && !me.dead ? 1 : 0, me.netPose || 0, me.netPitch || 0, me.netK || 0]);
   }
   updateHud(dt, t);
 }

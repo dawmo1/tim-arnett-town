@@ -15,6 +15,9 @@ const listeners = { built: [], unloaded: [] };
 export const on = (ev, fn) => listeners[ev].push(fn);
 export const builtTiles = built;
 export function setDetailRadius(r) { R = r; }
+// Low draws small props and full tree canopies over a shorter range
+let propScale = 1, treeNear = 110;
+export function setPropQuality(q) { propScale = q === 'low' ? 0.55 : q === 'high' ? 1.25 : 1; treeNear = q === 'low' ? 55 : q === 'high' ? 150 : 110; instDirty = true; }
 
 // ---------- collision walls straight from tile data (so far-off tiles still block police cars) ----------
 function pointInPoly(x, z, p) { let c = false; for (let i = 0, j = p.length - 2; i < p.length; j = i, i += 2) { if ((p[i + 1] > z) !== (p[j + 1] > z) && x < ((p[j] - p[i]) * (z - p[i + 1])) / (p[j + 1] - p[i + 1]) + p[i]) c = !c; } return c; }
@@ -190,7 +193,7 @@ function rebuildInstances() {
   // props by kind (rooftop units, fire escapes, dumpsters, benches, ...)
   const byKind = new Map(), oj = new THREE.Object3D();
   for (const j of all.junk) {
-    const far = PROP_FAR[j.kind] || 200; if ((j.x - instAt.x) ** 2 + (j.z - instAt.z) ** 2 > far * far) continue;
+    const far = (PROP_FAR[j.kind] || 200) * propScale; if ((j.x - instAt.x) ** 2 + (j.z - instAt.z) ** 2 > far * far) continue;
     let a = byKind.get(j.kind); if (!a) byKind.set(j.kind, a = []); a.push(j);
   }
   for (const name of Object.keys(inst)) if (!byKind.has(name) && PROP_GEO.has(name) && !/_(trunk|leaves|lens|lo|far)$|^streetlight$/.test(name)) inst[name].count = 0;
@@ -206,7 +209,7 @@ function rebuildInstances() {
   const hasLo = !!propGeometry('oak_leaves_lo');
   for (const t of T) {
     let sp = t.kind === 1 ? 'pine' : t.kind === 2 ? 'small' : t.seed < 0.55 ? 'oak' : 'maple';
-    if (hasLo && (sp === 'oak' || sp === 'maple') && (t.x - instAt.x) ** 2 + (t.z - instAt.z) ** 2 > 110 * 110) sp += '_lo';
+    if (hasLo && (sp === 'oak' || sp === 'maple') && (t.x - instAt.x) ** 2 + (t.z - instAt.z) ** 2 > treeNear * treeNear) sp += '_lo';
     groups[sp].push(t);
   }
   for (const sp of SPEC) {
