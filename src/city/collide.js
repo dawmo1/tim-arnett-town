@@ -69,8 +69,16 @@ export function pushOutCircle(x, z, r, y = -Infinity) {
 
 // Distance along a ray to the first wall (walks the grid cells the ray crosses, nearest first).
 const stamp = new WeakMap(); let rayId = 0;
+export const rayHit = { box: null };
+// outward normal of the wall the last rayBuildings() hit, at point p
+export function wallNormal(px, py, pz) {
+  const b = rayHit.box; if (!b) return { x: 0, y: 1, z: 0 };
+  const dx = px - b.cx, dz = pz - b.cz, lu = dx * b.ux + dz * b.uz, lv = dx * b.vx + dz * b.vz;
+  if (py > b.y0 + b.h - 0.05) return { x: 0, y: 1, z: 0 };
+  return Math.abs(lu) / b.hu > Math.abs(lv) / b.hv ? { x: b.ux * Math.sign(lu), y: 0, z: b.uz * Math.sign(lu) } : { x: b.vx * Math.sign(lv), y: 0, z: b.vz * Math.sign(lv) };
+}
 export function rayBuildings(ox, oy, oz, dx, dy, dz, maxT = 400) {
-  rayId++;
+  rayId++; rayHit.box = null;
   let best = maxT;
   const hl = Math.hypot(dx, dz);
   let i = Math.floor(ox / CELL), j = Math.floor(oz / CELL);
@@ -84,7 +92,7 @@ export function rayBuildings(ox, oy, oz, dx, dy, dz, maxT = 400) {
     if (arr) for (const b of arr) {
       if (stamp.get(b) === rayId) continue; stamp.set(b, rayId);
       const t = rayOBB(ox, oy, oz, dx, dy, dz, b.cx, b.y0 + b.h / 2, b.cz, b.ux, b.uz, b.hu, b.h / 2, b.vx, b.vz, b.hv);
-      if (t < best) best = t;
+      if (t < best) { best = t; rayHit.box = b; }
     }
     if (tx < tz) { tEnter = tx; tx += tdx; i += si; } else { tEnter = tz; tz += tdz; j += sj; }
     if (tEnter === Infinity) break;

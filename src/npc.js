@@ -463,7 +463,8 @@ export function updateWalkers(dt, tSec, nowMs, cam) {
     }
     const sitting = w.mode === 'fixed' && w.fixed.pose === 'sit' && !w.dead;
     placeCharacter(w.ch, w.x, w.y + (sitting ? -0.35 : 0), w.z, w.h);
-    const anim = { speed, dead: !!w.dead, phone: !!w.call || pose.phone, look: w.mode === 'walk' || w.mode === 'fixed' ? w.look || 0 : 0, ...pose };
+    if (w.limp > 0) w.limp -= dt; if (w.clutch > 0) w.clutch -= dt;
+    const anim = { speed, dead: !!w.dead, phone: !!w.call || pose.phone, look: w.mode === 'walk' || w.mode === 'fixed' ? w.look || 0 : 0, limp: w.limp > 0, clutch: w.clutch > 0, ...pose };
     if (w.pose === 'bike' && !w.dead && !freeModes.has(w.mode)) { anim.sit = true; anim.speed = 0; }
     animateCharacter(w.ch, dt, anim);
     if (w.dog && !w.dead) {

@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { initPeople, buildPerson, propMesh, setExpression, T } from './people/rig.js';
 import { initPose, animate, snapPose } from './people/pose.js';
 import { randomLook as rl, roleLook, normLook } from './people/looks.js';
+import { gltf } from './assets.js';
 
 const mats = new Map();
 export function mat(c) {
@@ -18,10 +19,42 @@ export { roleLook, normLook };
 let ready = false;
 export function initCharacters(quality) { if (!ready) { initPeople(quality); initPose(); ready = true; } }
 
-// held weapons (simple shapes until the weapon models replace them): in the hand's canonical frame
-// the arm hangs down, so "down" (-Y) is where the hand points and -Z is the back of the hand.
-const gunMat = new THREE.MeshStandardMaterial({ color: 0x1b1b1d, roughness: 0.45, metalness: 0.6 });
-const batMat = new THREE.MeshStandardMaterial({ color: 0x9c6b3a, roughness: 0.6 });
+// Held weapons come from assets/models/weapons.glb (grip at the origin, barrel forward). In the
+// hand's canonical frame the arm hangs down, so the barrel goes along -Y and the grip's top faces +Z.
+const WEAPON_SRC = new Map();
+export function weaponModel(name) {
+  if (!name) return null;
+  let src = WEAPON_SRC.get(name);
+  if (src === undefined) {
+    const g = gltf('weapons'); src = null;
+    if (g) g.scene.traverse((o) => { if (!src && o.name === 'w_' + name) src = o; });
+    WEAPON_SRC.set(name, src);
+  }
+  if (!src) return null;
+  const m = src.clone(true);
+  m.position.set(0, 0, 0); m.rotation.set(0, 0, 0);
+  m.traverse((o) => { if (o.isMesh) o.castShadow = true; if (o.name.startsWith('muzzle')) m.userData.muzzle = o; });
+  return m;
+}
+export function holdWeapon(ch, name) {
+  if (ch.heldName === name) return ch.held;
+  if (ch.held) ch.held.visible = false;
+  ch.heldName = name; ch.held = null;
+  if (!name) return null;
+  let m = ch.weapons[name];
+  if (!m) {
+    m = weaponModel(name); if (!m) return null;
+    const twoHanded = ['bat', 'crowbar'].includes(name);
+    canonicalChild(ch.bones.handR, 'handR', m, [0, -0.085, 0.015], [Math.PI / 2, 0, 0]);
+    ch.weapons[name] = m;
+    if (twoHanded) m.position.y -= 0.02;
+  }
+  m.visible = true; ch.held = m;
+  return m;
+}
+const MUZ = new THREE.Vector3();
+// where bullets leave the gun (world space), or null
+export function muzzleOf(ch) { const m = ch.held && ch.held.userData.muzzle; if (!m) return null; m.getWorldPosition(MUZ); return MUZ; }
 function canonicalChild(bone, name, obj, pos, rot = [0, 0, 0]) {
   // place obj at `pos` (character space at the canonical pose, relative to the bone) and orient it
   const r = boneRest(name), q = r.Ci;
@@ -50,16 +83,7 @@ export function makeCharacter(look, opts = {}) {
   const female = p.look[1] === 3;
   p.rig.scale.setScalar((female ? 0.95 : 1.0) * (0.96 + (seed % 1) * 0.08));
   const B = p.bones;
-  // gun: barrel down the hand, grip toward the back of the hand
-  const gun = new THREE.Group();
-  const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.2, 0.045), gunMat); barrel.position.set(0, -0.08, 0.0); gun.add(barrel);
-  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.045, 0.1), gunMat); grip.position.set(0, 0.0, -0.04); gun.add(grip);
-  canonicalChild(B.handR, 'handR', gun, [0, -0.07, 0.01]);
-  const bat = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.018, 0.85, 8).translate(0, -0.35, 0), batMat);
-  canonicalChild(B.handR, 'handR', bat, [0, -0.06, 0]);
-  gun.visible = bat.visible = false;
-  gun.traverse((o) => { o.castShadow = true; }); bat.castShadow = true;
-  const ch = { g, body, rig: p.rig, mesh: p.body, acc: p.acc, mat: p.mat, bones: B, look: p.look, gun, bat, props: {}, seed, roll: (Math.random() - 0.5) * 2, walk: 0, deadT: 0 };
+  const ch = { g, body, rig: p.rig, mesh: p.body, acc: p.acc, mat: p.mat, bones: B, look: p.look, weapons: {}, held: null, heldName: null, props: {}, seed, roll: (Math.random() - 0.5) * 2, walk: 0, deadT: 0 };
   return ch;
 }
 
@@ -97,12 +121,22 @@ export function placeCharacter(c, x, y, z, h) {
 }
 export function animateCharacter(c, dt, st) {
   if (c.rag) return;
-  c.gun.visible = st.weapon === 'gun';
-  c.bat.visible = st.weapon === 'bat';
+  // st.wmodel names the model; older callers just say weapon: 'gun' | 'bat'
+  holdWeapon(c, st.wmodel !== undefined ? st.wmodel : st.weapon === 'gun' ? 'pistol' : st.weapon === 'bat' ? 'bat' : null);
   c.animSpeed = st.speed || 0;
   setExpression(c, !!(st.cower || st.handsUp || st.beg || st.scared || st.flee));
   animate(c, dt, st);
+  // long guns point where the person faces (and aims), not along the forearm
+  if (c.held && LONG.has(c.heldName)) {
+    c.g.updateMatrixWorld(true);
+    const tilt = st.aim ? -(st.pitch || 0) * DEG : 0.55;
+    LQ.copy(c.g.quaternion).multiply(LE.setFromEuler(LEU.set(tilt, 0, 0)));
+    c.held.parent.getWorldQuaternion(LQ2);
+    c.held.quaternion.copy(LQ2.invert().multiply(LQ));
+  }
 }
+const LONG = new Set(['smg', 'shotgun', 'rifle', 'sniper', 'rpg']), DEG = Math.PI / 180;
+const LQ = new THREE.Quaternion(), LQ2 = new THREE.Quaternion(), LE = new THREE.Quaternion(), LEU = new THREE.Euler();
 export { snapPose };
 
 export function nameTag(text, color = '#ffffff') {

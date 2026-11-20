@@ -4,7 +4,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import * as W from './world.js';
-import { makeCharacter, animateCharacter, placeCharacter, randomLook, nameTag, mat, initCharacters, normLook, setProp } from './character.js';
+import { makeCharacter, animateCharacter, placeCharacter, randomLook, nameTag, mat, initCharacters, normLook, setProp, muzzleOf, weaponModel } from './character.js';
 import { SKIN as SKIN_TONES, TOPS, BOTTOMS, HAIRS, HATS, CLOTH, HAIRC, SHOES, BEARDS, GLASSES, MASKS } from './people/looks.js';
 import { createAllVehicles, makeParked, makeVehicle, V, TYPES, initFarCars, farCarsBegin, farCarAdd, farCarsEnd, stepVehicle, collideVehicles, pushCharOut, circles, charVehicle, makeVehicleMesh, damageZone, applyDamageVisual, applyBump } from './vehicles.js';
 import { initTraffic, updateTraffic as tickTraffic, bumpTraffic, scareTraffic, updateSignals, traffic, patrolViewers } from './traffic.js';
@@ -16,7 +16,7 @@ import { initEvents, updateEvents, eventBlips } from './events.js';
 import { say, line } from './npc.js';
 import { initDayNight, updateDayNight, sky as weather, clockText, view as fogView } from './daynight.js';
 import { initLife, updateLife, startle, updateAnimals } from './life.js';
-import { loadAssets } from './assets.js';
+import { loadAssets, geometryOf } from './assets.js';
 import { initCarLights, updateCarLights, setLightQuality, wetUniform } from './carlights.js';
 import { initPhysics, updateRagdolls, ragdoll, release, ragPos, syncPhysics } from './ragdoll.js';
 import { initNav, updateNav } from './nav.js';
@@ -45,6 +45,9 @@ const WEAPONS = [
   { name: 'Molotov', grenade: true, molotov: true, rate: 0.8, kind: 'none', price: 150, mag: 1, ammoPack: 4, ammoPrice: 150 },
   { name: 'RPG', rocket: true, rate: 0.5, kind: 'gun', price: 3000, mag: 1, ammoPack: 4, ammoPrice: 500 },
 ];
+const W_MODEL = { Fists: null, Bat: 'bat', Pistol: 'pistol', SMG: 'smg', Shotgun: 'shotgun', Rifle: 'rifle', Grenade: 'grenade', Knife: 'knife', Crowbar: 'crowbar', Sniper: 'sniper', Molotov: 'molotov', RPG: 'rpg' };
+const TWO_HANDED = new Set(['SMG', 'Shotgun', 'Rifle', 'Sniper', 'RPG']);
+for (const w of WEAPONS) { w.model = W_MODEL[w.name]; w.long = TWO_HANDED.has(w.name); }
 const r1 = (n) => Math.round(n * 10) / 10, r2 = (n) => Math.round(n * 100) / 100;
 
 // ---------- renderer & scene ----------
@@ -180,6 +183,7 @@ const playBtn = document.getElementById('playBtn');
 playBtn.disabled = true; playBtn.textContent = 'Loading models…';
 await loadAssets((p) => { playBtn.textContent = `Loading models… ${Math.round(p * 100)}%`; });
 initCharacters(activeQuality);
+fx.setCasingGeometry(geometryOf('weapons', 'casing'));
 playBtn.textContent = 'Loading Davenport…';
 await W.initWorld(scene);
 await W.preload(W.places.menu.x, W.places.menu.z, 320, (p) => { playBtn.textContent = `Loading Davenport… ${Math.round(p * 100)}%`; });
@@ -657,7 +661,17 @@ function hurtWalker(w, dmg, dx, dz, p, force = 3) {
   const hp = p || { x: w.x, y: (w.y || 0) + 1.2, z: w.z };
   fx.blood(hp.x, hp.y, hp.z, dx, dz, 10);
   const vel = { x: dx * force, y: 1.2 + force * 0.25, z: dz * force };
-  if (w.hp > 0) { if (force >= 6) knock(w, vel, false); else { flinch(w); provoke(w); } }
+  if (w.hp > 0) {
+    if (force >= 6) knock(w, vel, false);
+    else {
+      flinch(w); provoke(w);
+      // stagger away from the hit; a leg hit makes them limp, a body hit makes them clutch the wound
+      const c = w.ch, ch_ = Math.cos(w.h), sh = Math.sin(w.h);
+      c.hitT = 1; c.hitX = dx * ch_ - dz * sh; c.hitZ = dx * sh + dz * ch_;
+      const hy = hp.y - (w.y || 0);
+      if (hy < 0.8) w.limp = 30; else if (hy < 1.5 && Math.random() < 0.6) w.clutch = 12;
+    }
+  }
   else knock(w, vel, true);
   if (w.hp <= 0) {
     w.dead = { x: r1(w.x), z: r1(w.z), h: r2(w.h), t: net.now() };
@@ -933,6 +947,7 @@ function applyHit(hit, w, d) {
 }
 function handPos() {
   if (me.veh) return { x: me.veh.x, y: me.veh.y + 1.4, z: me.veh.z };
+  const mz = muzzleOf(me.ch); if (mz) return { x: mz.x, y: mz.y, z: mz.z };
   return { x: me.x + Math.sin(me.h) * 0.6 - Math.cos(me.h) * 0.35, y: me.y + 1.35, z: me.z + Math.cos(me.h) * 0.6 + Math.sin(me.h) * 0.35 };
 }
 function fire(w) {
@@ -953,17 +968,33 @@ function fire(w) {
     const dd = spread(d, w.spread * (aiming ? 1 : 2.2) * (me.veh ? 1.6 : 1));
     const hit = raycast(o, dd, w.range);
     applyHit(hit, w, dd);
+    bulletMarks(hit, dd);
     if (i < 3) fx.tracer(from, hit.p);
     last = hit.p;
   }
   me.shotSeq++; me.shot = [last.x, last.y, last.z];
   fx.muzzleFlash(from);
-  fx.soundShot(w.snd);
+  fx.soundShot(w.name === 'Sniper' ? 'sniper' : w.snd);
+  me.recoil = 1;
+  if (!w.rocket && !me.veh) fx.casing({ x: from.x - Math.sin(me.h) * 0.25, y: from.y + 0.03, z: from.z - Math.cos(me.h) * 0.25 }, { x: -Math.cos(me.h), z: Math.sin(me.h) });
   if (performance.now() - lastAttack > 1000) report('gunfire'); else lastAttack = performance.now();
   if (w.name === 'Shotgun' || w.name === 'Rifle') shake = Math.max(shake, 0.12);
   if (a.mag <= 0 && a.res > 0) startReload();
   refreshWeaponHud();
   panicNear(me.x, me.z, 30); startle(me.x, me.z, 30); scareTraffic(me.x, me.z, 60);
+}
+// Where a bullet ends: holes and dust on walls and the ground, sparks off metal, and blood sprayed
+// onto the wall or the road behind whoever got hit.
+function bulletMarks(hit, d) {
+  const p = hit.p;
+  if (hit.kind === 'wall') fx.impact(p, W.wallNormal(p.x, p.y, p.z), 'wall');
+  else if (hit.kind === 'ground') fx.impact(p, { x: 0, y: 1, z: 0 }, 'ground');
+  else if (hit.kind === 'veh' || (hit.kind === 'cop' && hit.ref.kind !== 2)) fx.impact(p, { x: -d.x, y: -d.y, z: -d.z }, 'metal');
+  else if (hit.kind === 'walker' || hit.kind === 'player' || hit.kind === 'cop') {
+    const t = W.rayBuildings(p.x, p.y, p.z, d.x, d.y, d.z, 3.5);
+    if (t < 3.5) { const q = { x: p.x + d.x * t, y: p.y + d.y * t, z: p.z + d.z * t }; fx.mark('splat', q, W.wallNormal(q.x, q.y, q.z), 0.8 + Math.random() * 0.5); }
+    else if (Math.random() < 0.6) { const gx = p.x + d.x * 1.5, gz = p.z + d.z * 1.5; if (W.isLand(gx, gz)) fx.mark('splat', { x: gx, y: W.groundHeight(gx, gz) + 0.03, z: gz }, { x: 0, y: 1, z: 0 }, 0.7); }
+  }
 }
 function melee(w) {
   const fx_ = Math.sin(me.h), fz_ = Math.cos(me.h);
@@ -980,7 +1011,8 @@ const rocketGeo = new THREE.CylinderGeometry(0.09, 0.09, 0.8, 8).rotateX(Math.PI
 // g.kind: 'nade' (bounces, 2.4 s fuse) | 'molotov' (smashes and burns) | 'rocket' (flies straight, blows on contact)
 function spawnNade(g) {
   g.kind = g.kind || 'nade';
-  g.m = new THREE.Mesh(g.kind === 'rocket' ? rocketGeo : g.kind === 'molotov' ? bottleGeo : nadeGeo, mat(g.kind === 'rocket' ? 0x556b2f : g.kind === 'molotov' ? 0x6d8b3a : 0x2e7d32));
+  g.m = weaponModel(g.kind === 'rocket' ? 'rocket' : g.kind === 'molotov' ? 'molotov' : 'grenade') || new THREE.Mesh(g.kind === 'rocket' ? rocketGeo : g.kind === 'molotov' ? bottleGeo : nadeGeo, mat(0x2e7d32));
+  if (g.kind === 'rocket') g.m.lookAt(g.m.position.x + g.vx, g.m.position.y + g.vy, g.m.position.z + g.vz);
   scene.add(g.m); grenades.push(g);
 }
 function throwGrenade(kind = 'nade') {
@@ -1344,7 +1376,9 @@ function footUpdate(dt, fwd, side) {
   me.ch.g.visible = true;
   me.ch.g.position.set(me.x, me.y, me.z);
   me.ch.g.rotation.set(0, me.h, 0);
-  animateCharacter(me.ch, dt, { speed: aimPose ? Math.min(me.moveSpeed, 3) : me.moveSpeed, aim: aimPose, swim: me.swim, swing: me.swing, weapon: me.swim ? 'none' : wk });
+  const wpn = WEAPONS[me.weapon];
+  me.recoil = Math.max(0, (me.recoil || 0) - dt * 8);
+  animateCharacter(me.ch, dt, { speed: aimPose ? Math.min(me.moveSpeed, 3) : me.moveSpeed, aim: aimPose, swim: me.swim, swing: me.swing, weapon: me.swim ? 'none' : wk, wmodel: me.swim ? null : wpn.model, rifle: wpn.long, recoil: me.recoil, reload: me.reloadT > 0 ? 1 - me.reloadT / (wpn.name === 'Shotgun' ? 1.8 : 1.3) : 0, pitch: aimPose ? -camPitch * 57 : 0, carry: !aimPose && wpn.long });
 }
 
 function driveUpdate(dt, fwd, side) {
@@ -1458,7 +1492,7 @@ function updateRemotes(dt) {
       r.ch.g.visible = true;
       placeCharacter(r.ch, r.x, r.y, r.z, r.h);
       const sw = r.y < W.SWIM_Y + 0.4;
-      animateCharacter(r.ch, dt, { speed: r.speed, aim: wk === 'gun', swim: sw, dead: r.dead, weapon: sw ? 'none' : wk });
+      animateCharacter(r.ch, dt, { speed: r.speed, aim: wk === 'gun', swim: sw, dead: r.dead, weapon: sw ? 'none' : wk, wmodel: sw ? null : WEAPONS[r.weapon]?.model ?? null, rifle: !!WEAPONS[r.weapon]?.long });
     }
     r.tagT = (r.tagT || 0) - dt;
     if (r.tagT <= 0) { r.tagT = 0.3; const d = Math.hypot(r.x - camera.position.x, r.z - camera.position.z); r.tagOn = !r.dead && d < 40 && W.lineOfSight(camera.position.x, camera.position.y, camera.position.z, r.x, r.y + 2.2, r.z); }
@@ -1903,6 +1937,8 @@ function updateWorldLife(dt, nowMs, t) {
     const c = camera.position;
     let wet = 0; for (const [ox, oz] of [[0, 0], [45, 0], [-45, 0], [0, 45], [0, -45]]) if (!W.isLand(c.x + ox, c.z + oz)) wet++;
     const shore = (wet / 5) * 0.5;
+    let walls = 0; for (let k = 0; k < 6; k++) { const a = k * 1.047; if (W.rayBuildings(c.x, c.y, c.z, Math.sin(a), 0, Math.cos(a), 35) < 35) walls++; }
+    fx.setEcho(walls / 6); // street canyons echo
     fx.setAmbient({ hum: (1 - shore * 0.6) * (0.6 + 0.4 * weather.day), rain: weather.rain, waves: shore, crickets: n * (1 - weather.rain), birds: weather.day * (1 - weather.rain) * (1 - weather.night) });
   }
 }

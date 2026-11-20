@@ -80,6 +80,62 @@ export function debris(m, vx, vy, vz) {
   debrisList.push({ m, vx, vy, vz, wx: (Math.random() - 0.5) * 8, wz: (Math.random() - 0.5) * 8, life: 40, rest: false });
   if (debrisList.length > 40) { const d = debrisList.shift(); scene.remove(d.m); }
 }
+// ---------- gunfight detail: bullet holes, wall blood, impact dust, shell casings ----------
+function splatTex(kind) {
+  const n = 64, c = document.createElement('canvas'); c.width = c.height = n;
+  const g = c.getContext('2d');
+  if (kind === 'hole') {
+    let gr = g.createRadialGradient(32, 32, 0, 32, 32, 30); gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(0.18, 'rgba(10,10,10,1)'); gr.addColorStop(0.3, 'rgba(60,60,60,0.7)'); gr.addColorStop(1, 'rgba(60,60,60,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, n, n);
+  } else {
+    g.fillStyle = 'rgba(110,0,0,0.92)';
+    for (let k = 0; k < 14; k++) { const a = Math.random() * 7, r = Math.random() * 18; g.beginPath(); g.arc(32 + Math.cos(a) * r, 32 + Math.sin(a) * r, 3 + Math.random() * 9, 0, 7); g.fill(); }
+    for (let k = 0; k < 7; k++) { const a = Math.random() * 7; g.beginPath(); g.ellipse(32 + Math.cos(a) * 22, 32 + Math.sin(a) * 22, 1.5, 4, a, 0, 7); g.fill(); }
+  }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+const marks = {};
+function markPool(kind, size) {
+  if (marks[kind]) return marks[kind];
+  const m = new THREE.InstancedMesh(new THREE.PlaneGeometry(size, size), new THREE.MeshStandardMaterial({ map: splatTex(kind), transparent: true, depthWrite: false, roughness: kind === 'hole' ? 0.9 : 0.3, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }), 160);
+  m.count = 0; m.frustumCulled = false; scene.add(m);
+  return (marks[kind] = { m, i: 0 });
+}
+const mo = new THREE.Object3D(), nrm = new THREE.Vector3(), zAxis = new THREE.Vector3(0, 0, 1);
+// a mark on a surface at p facing along normal n (bullet hole or blood splatter)
+export function mark(kind, p, n, scale = 1) {
+  const pool = markPool(kind, kind === 'hole' ? 0.12 : 0.9);
+  nrm.set(n.x, n.y, n.z).normalize();
+  mo.position.set(p.x + nrm.x * 0.01, p.y + nrm.y * 0.01, p.z + nrm.z * 0.01);
+  mo.quaternion.setFromUnitVectors(zAxis, nrm); mo.rotateZ(Math.random() * 6.28);
+  mo.scale.setScalar(scale * (0.8 + Math.random() * 0.5)); mo.updateMatrix();
+  pool.m.setMatrixAt(pool.i, mo.matrix); pool.i = (pool.i + 1) % 160; pool.m.count = Math.max(pool.m.count, pool.i === 0 ? 160 : pool.i);
+  pool.m.instanceMatrix.needsUpdate = true;
+}
+const dustMat = new THREE.MeshLambertMaterial({ color: 0xb8ae9c, transparent: true, opacity: 0.32, depthWrite: false });
+// a bullet hitting something: kind 'wall' | 'ground' | 'metal'
+export function impact(p, n, kind) {
+  if (kind === 'metal') { sparks(p.x, p.y, p.z, 6, n.x * 0.5, n.z * 0.5); return; }
+  for (let i = 0; i < 4 && parts.length < 300; i++) {
+    const s = new THREE.Mesh(sphere, dustMat); s.position.set(p.x, p.y, p.z); s.scale.setScalar(0.025 + Math.random() * 0.025); scene.add(s);
+    parts.push({ m: s, vx: n.x * 1.2 + (Math.random() - 0.5) * 0.6, vy: n.y * 1.2 + 0.3 + Math.random() * 0.4, vz: n.z * 1.2 + (Math.random() - 0.5) * 0.6, life: 0.4, kind: 'smoke' });
+  }
+  for (let i = 0; i < 3 && parts.length < 300; i++) {
+    const m = new THREE.Mesh(box, dustMat); m.scale.setScalar(0.025); m.position.set(p.x, p.y, p.z); scene.add(m);
+    parts.push({ m, vx: n.x * 3 + (Math.random() - 0.5) * 3, vy: 2 + Math.random() * 2, vz: n.z * 3 + (Math.random() - 0.5) * 3, life: 0.5, kind: 'spark' });
+  }
+  mark('hole', p, n);
+}
+// brass flying out of the gun, bouncing on the ground
+let casingGeo = null;
+const casingMat = new THREE.MeshStandardMaterial({ color: 0xc89a3a, metalness: 0.9, roughness: 0.3 });
+export function setCasingGeometry(g) { casingGeo = g; }
+export function casing(p, side) {
+  if (parts.length > 280) return;
+  const m = new THREE.Mesh(casingGeo || box, casingMat); if (!casingGeo) m.scale.set(0.01, 0.02, 0.01);
+  m.position.set(p.x, p.y, p.z); scene.add(m);
+  parts.push({ m, vx: side.x * (1.5 + Math.random()) , vy: 1.6 + Math.random(), vz: side.z * (1.5 + Math.random()), life: 1.6, kind: 'casing', spin: 20 });
+}
 export function muzzleFlash(p) {
   const m = new THREE.Mesh(sphere, flashMat);
   m.position.set(p.x, p.y, p.z); m.scale.setScalar(0.18);
@@ -145,11 +201,14 @@ export function updateFx(dt) {
     if (p.kind === 'smoke') { p.m.position.x += p.vx * dt; p.m.position.y += p.vy * dt; p.m.position.z += p.vz * dt; p.m.scale.multiplyScalar(1 + dt * 0.6); }
     else {
       p.vy -= 18 * dt;
+      if (p.spin) { p.m.rotation.x += p.spin * dt; p.m.rotation.z += p.spin * 0.7 * dt; }
       p.m.position.x += p.vx * dt; p.m.position.y += p.vy * dt; p.m.position.z += p.vz * dt;
       if (p.gy === undefined) p.gy = groundHeight(p.m.position.x, p.m.position.z);
       if (p.m.position.y < p.gy + 0.05) {
         if (p.kind === 'blood' && Math.random() < 0.5) addDecal(p.m.position.x, p.m.position.z, 0.15 + Math.random() * 0.25, 0);
         if (p.kind === 'glass') { p.m.position.y = p.gy + 0.06; p.vx = p.vy = p.vz = 0; }
+        else if (p.kind === 'casing' && p.vy < -1) { p.m.position.y = p.gy + 0.05; p.vy = -p.vy * 0.35; p.vx *= 0.5; p.vz *= 0.5; if (Math.random() < 0.3) tink(); }
+        else if (p.kind === 'casing') { p.m.position.y = p.gy + 0.02; p.vx = p.vy = p.vz = 0; p.spin = 0; }
         else p.life = 0;
       }
     }
@@ -216,13 +275,37 @@ function burst(dur, freq, vol) {
   src.start(); src.stop(ac.currentTime + dur);
 }
 const fall = (dist) => Math.max(0, 1 - dist / 140);
-export function soundShot(kind, dist = 0) {
-  const v = fall(dist);
-  if (kind === 'shotgun') burst(0.35, 2200, 0.9 * v);
-  else if (kind === 'rifle') burst(0.25, 3500, 0.8 * v);
-  else if (kind === 'smg') burst(0.08, 4000, 0.45 * v);
-  else burst(0.15, 3000, 0.6 * v);
+// Gunshots: a sharp crack, a noise body and a low thump, duller and quieter with distance, with an
+// echo off the buildings when you're in a built-up street (echo 0..1 from main).
+const GUN = { pistol: [0.6, 0.14, 3200, 95], smg: [0.45, 0.07, 3800, 110], shotgun: [1.0, 0.4, 2000, 70], rifle: [0.85, 0.22, 3600, 85], sniper: [1.0, 0.35, 3000, 60] };
+let echoBus = null;
+function echo() {
+  if (echoBus) return echoBus;
+  const d = ac.createDelay(1), fb = ac.createGain(), lp = ac.createBiquadFilter(), g = ac.createGain();
+  d.delayTime.value = 0.13; fb.gain.value = 0.32; lp.type = 'lowpass'; lp.frequency.value = 1800; g.gain.value = 0;
+  g.connect(d); d.connect(lp); lp.connect(fb); fb.connect(d); lp.connect(out());
+  return (echoBus = g);
 }
+export let echoAmount = 0;
+export function setEcho(e) { echoAmount = e; }
+export function soundShot(kind, dist = 0) {
+  if (!ac) return;
+  const [vol, len, bright, thump] = GUN[kind] || GUN.pistol;
+  const v = vol * Math.max(0, 1 - dist / 260), cut = bright * Math.max(0.15, 1 - dist / 180);
+  if (v <= 0.01) return;
+  const t = ac.currentTime;
+  const src = ac.createBufferSource(); src.buffer = noise;
+  const f = ac.createBiquadFilter(); f.type = 'lowpass'; f.frequency.setValueAtTime(cut * 1.6, t); f.frequency.exponentialRampToValueAtTime(cut * 0.35, t + len);
+  const g = ac.createGain(); g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(0.001, t + len);
+  src.connect(f); f.connect(g); g.connect(out());
+  const e = echo(), eg = ac.createGain(); eg.gain.value = echoAmount * 0.8; g.connect(eg); eg.connect(e); e.gain.value = 1;
+  src.start(t, Math.random() * 0.5); src.stop(t + len + 0.05);
+  // crack (close only) and thump
+  if (dist < 60) { const c = ac.createBufferSource(); c.buffer = noise; const hp = ac.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 2500; const cg = ac.createGain(); cg.gain.setValueAtTime(v * 0.7 * (1 - dist / 60), t); cg.gain.exponentialRampToValueAtTime(0.001, t + 0.03); c.connect(hp); hp.connect(cg); cg.connect(out()); c.start(t); c.stop(t + 0.04); }
+  const o = ac.createOscillator(), og = ac.createGain(); o.type = 'sine'; o.frequency.setValueAtTime(thump * 1.8, t); o.frequency.exponentialRampToValueAtTime(thump * 0.6, t + 0.12);
+  og.gain.setValueAtTime(v * 0.8, t); og.gain.exponentialRampToValueAtTime(0.001, t + 0.18); o.connect(og); og.connect(out()); o.start(t); o.stop(t + 0.2);
+}
+export function tink() { tone('triangle', 3200 + Math.random() * 1500, 0.06, 0.03); }
 export function soundBoom(dist = 0) { burst(1.4, 500, 1.2 * fall(dist * 0.6)); }
 export function soundHit() { burst(0.06, 900, 0.4); }
 

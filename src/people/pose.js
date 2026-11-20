@@ -229,7 +229,7 @@ export function animate(ch, dt, st) {
     if (ch.flinch > 0) { ch.flinch = Math.max(0, ch.flinch - dt * 4); add(P, 'spine', -18 * ch.flinch); add(P, 'head', -25 * ch.flinch); add(P, 'upper_armL', -30 * ch.flinch); add(P, 'upper_armR', -30 * ch.flinch); }
     if (ch.hitT > 0) { // stagger from a hit (direction given by ch.hitX = sideways, ch.hitZ = front/back)
       ch.hitT = Math.max(0, ch.hitT - dt * 3); const k = ch.hitT;
-      add(P, 'spine', -ch.hitZ * 25 * k, 0, -ch.hitX * 20 * k); add(P, 'head', -ch.hitZ * 20 * k); P.root[1] -= 0.05 * k;
+      add(P, 'spine', ch.hitZ * 25 * k, 0, ch.hitX * 20 * k); add(P, 'head', ch.hitZ * 20 * k); P.root[1] -= 0.05 * k;
     }
   }
   if (st.flinch) ch.flinch = 1;
