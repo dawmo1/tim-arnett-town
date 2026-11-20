@@ -149,7 +149,11 @@ export function updateDayNight(dt, nowMs, cam) {
   R.sun.color.copy(sunCol);
   R.sun.intensity = 2.4 * sky.day * (1 - 0.6 * sky.cloud) + 0.55 * moonLight;
   // moon shadows cost a lot of draw calls with a low light; only on High
-  R.sun.castShadow = (sky.day > 0.25 && sky.cloud < 0.6) || (moonLight > 0.5 && sky.moonShadows);
+  // Turning castShadow on/off recompiles every material (a freeze, and weather runs on the real clock, so
+  // everyone froze at once). Instead the shadow camera collapses to a sliver: nothing casts, nothing is drawn.
+  const shadowsOn = (sky.day > 0.25 && sky.cloud < 0.6) || (moonLight > 0.5 && sky.moonShadows);
+  const sc = R.sun.shadow.camera, far = shadowsOn ? 300 : sc.near + 0.01;
+  if (sc.far !== far) { sc.far = far; sc.updateProjectionMatrix(); }
   if (sky.night > 0.5) sky.sunDir.set(-sky.sunDir.x, Math.max(0.35, -Math.sin(ang)), sky.sunDir.z).normalize();
   R.hemi.intensity = 0.55 + 0.55 * sky.day * (1 - 0.3 * sky.cloud) + sky.flash * 3;
   R.hemi.color.copy(C(0xffffff).lerp(C(0x8ea2e0), sky.night));
