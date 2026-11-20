@@ -177,8 +177,8 @@ export function updateCarLights(cars, camPos, night, mine, t) {
     mesh.updateMatrixWorld();
     const L = lampsOf(v), sz = L.size, on = c.on;
     if (on && wetUniform.value > 0.02 && d2 < 120 * 120) for (const h of L.head) streak(mesh, v, h, 0.6 * (0.3 + night), 0.56 * (0.3 + night), 0.46 * (0.3 + night));
-    if (on) for (const h of L.head) flare(mesh, h[0], h[1], h[2], false, sz * (0.35 + night * 0.4), 0.55 + night * 0.45, 0.52 + night * 0.42, 0.45 + night * 0.35);
-    const tailK = (on ? 0.35 + night * 0.4 : 0) + (c.braking ? 0.9 : 0);
+    if (on && !v.brokenHead) for (const h of L.head) flare(mesh, h[0], h[1], h[2], false, sz * (0.35 + night * 0.4), 0.55 + night * 0.45, 0.52 + night * 0.42, 0.45 + night * 0.35);
+    const tailK = v.brokenTail ? 0 : (on ? 0.35 + night * 0.4 : 0) + (c.braking ? 0.9 : 0);
     if (tailK > 0.6 && wetUniform.value > 0.02 && d2 < 90 * 90) for (const h of L.tail) streak(mesh, v, h, 0.8 * tailK, 0.03, 0.02);
     if (tailK > 0) for (const h of L.tail) flare(mesh, h[0], h[1], h[2], true, sz * (c.braking ? 0.62 : 0.45), tailK, 0.04 * tailK, 0.03 * tailK);
     if (c.reversing) for (const h of L.tail) flare(mesh, h[0] * 0.6, h[1], h[2], true, sz * 0.6, 0.9, 0.9, 0.85);

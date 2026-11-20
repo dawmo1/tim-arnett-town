@@ -17,6 +17,8 @@ import { say, line } from './npc.js';
 import { initDayNight, updateDayNight, sky as weather, clockText, view as fogView } from './daynight.js';
 import { initLife, updateLife, startle, updateAnimals } from './life.js';
 import { loadAssets, geometryOf } from './assets.js';
+import { animateWheels, setCarLamps } from './carmodel.js';
+import { updateOccupants, emptyCar, setOccupantBudget } from './occupants.js';
 import { initCarLights, updateCarLights, setLightQuality, wetUniform } from './carlights.js';
 import { initPhysics, updateRagdolls, ragdoll, release, ragPos, syncPhysics } from './ragdoll.js';
 import { initNav, updateNav } from './nav.js';
@@ -134,6 +136,7 @@ function applyQuality(q) {
   scene.traverse((o) => { if (o.material && o.material.needsUpdate !== undefined && o.receiveShadow) o.material.needsUpdate = true; });
   bloom.enabled = q !== 'low';
   setLightQuality(q);
+  setOccupantBudget(q === 'low' ? 4 : q === 'medium' ? 10 : 16);
   scene.userData.sky.material.uniforms.clouds.value = q === 'low' ? 0 : 1;
   // view distance + how much of the city is built in full detail
   camera.far = q === 'low' ? 900 : q === 'medium' ? 1500 : 2200; camera.updateProjectionMatrix();
@@ -839,9 +842,29 @@ function enterUpdate(dt) {
   me.ch.g.rotation.set(0, me.h, 0);
   animateCharacter(me.ch, dt, pose);
 }
+// your engine: rpm climbs through five gears; muscle and sports cars pop on lift-off
+let lastGear = 0, offT = 0;
+function engineSound(v, fwd, dt) {
+  const T = v.T, kind = T.bike ? (T.name === 'Scooter' ? 'scooter' : 'bike') : T.heli ? 'heli' : T.boat ? 'boat' : T.muscle || T.monster ? 'muscle' : T.name === 'Sports car' || T.convertible ? 'sports' : T.truck || T.bus || T.cabbed ? 'truck' : 'car';
+  if (v.hp <= 0) { fx.setEngine(null); return; }
+  const s = Math.min(1, Math.abs(v.speed || 0) / T.max), g = Math.min(4, Math.floor(s * 5)), frac = s * 5 - g;
+  const rpm = T.heli ? (v.driver || v.y > 0.5 ? 0.6 + 0.4 * (fwd !== 0 ? 1 : 0) : 0) : s < 0.02 ? (fwd > 0 ? 0.35 : 0.06) : 0.2 + 0.8 * frac;
+  fx.setEngine(kind, rpm, fwd > 0 ? 1 : 0.25);
+  const tail = { x: v.x - Math.sin(v.h) * (T.len / 2 + 0.1), y: v.y + 0.35, z: v.z - Math.cos(v.h) * (T.len / 2 + 0.1) };
+  if (fwd > 0 && s < 0.35 && Math.random() < dt * 6) fx.exhaust(tail.x, tail.y, tail.z, -(v.vx || 0), -(v.vz || 0));
+  // lift off at high revs: pop pop
+  if (fwd <= 0 && lastGear >= 0 && rpm > 0.65 && (kind === 'muscle' || kind === 'sports' || kind === 'bike') && offT <= 0 && Math.random() < 0.5) {
+    fx.soundBackfire(); fx.exhaust(tail.x, tail.y, tail.z, -(v.vx || 0), -(v.vz || 0), true); offT = 1.2;
+  }
+  offT -= dt; lastGear = g;
+}
 function yankDriver(v) {
   const d = doorSpot(v);
-  if (v.mode === 'traffic' || v.npcDriver) { freeTraffic(v, true); v.npcDriver = false; spawnFleeing(d.x, d.z, v.h + Math.PI / 2, 1.2); }
+  if (v.mode === 'traffic' || v.npcDriver) {
+    freeTraffic(v, true); v.npcDriver = false; spawnFleeing(d.x, d.z, v.h + Math.PI / 2, 1.2);
+    const n = emptyCar(v), lx = Math.cos(v.h), lz = -Math.sin(v.h);
+    for (let i = 1; i < n; i++) spawnFleeing(v.x - lx * 1.6 + Math.sin(v.h) * (i - 1.5), v.z - lz * 1.6 + Math.cos(v.h) * (i - 1.5), v.h - Math.PI / 2, 0.8 + i * 0.3);
+  }
   else if (v.driver && v.driver !== net.uid) { sendEvent('jack', { to: v.driver, id: v.id }); ui.announce('CARJACKED', nameOf(v.driver)); }
   if (v.patrol || v.T.police) report('hitcop', v.x, v.z); // dragging a cop out of a squad car
   eco.jacked++; checkCountGoals();
@@ -1245,6 +1268,7 @@ function updateVehicles(dt, tSec, nowMs) {
     v.mesh.visible = !isFar;
     if (isFar) continue;
     const body = v.mesh.userData.body;
+    animateWheels(v, dt);
     body.rotation.z = v.T.bike ? (v.driver ? v.tilt : 0.3) : 0;
     body.rotation.x = v.T.boat || v.T.heli ? v.pitch || 0 : v.air > 0.05 ? clamp(-(v.vy || 0) * 0.025, -0.35, 0.35) + (v.gp || 0) : v.gp || 0;
     if (!v.T.bike && !v.T.heli && !v.T.boat) body.rotation.z = v.gr || 0;
@@ -1386,6 +1410,7 @@ function driveUpdate(dt, fwd, side) {
   const pre = { vx: v.vx, vz: v.vz, speed: v.speed };
   const shift = keys.has('ShiftLeft') || keys.has('ShiftRight');
   const imp = stepVehicle(v, { throttle: fwd > 0 ? 1 : 0, brake: fwd < 0 ? 1 : 0, steer: -side, handbrake: !v.T.heli && keys.has('Space'), nitro: shift && !v.T.heli, up: keys.has('Space'), down: shift }, dt);
+  engineSound(v, fwd, dt);
   if (v.boosting) { fx.sparks(v.x - Math.sin(v.h) * v.T.len / 2, v.y + 0.4, v.z - Math.cos(v.h) * v.T.len / 2, 2, -Math.sin(v.h), -Math.cos(v.h)); if (!v.boostSnd) { fx.soundNitro(); v.boostSnd = true; } } else v.boostSnd = false;
   if (v.T.boat && Math.abs(v.speed) > 6 && Math.random() < 0.5) fx.smokePuff(v.x - Math.sin(v.h) * v.T.len / 2, -0.1, v.z - Math.cos(v.h) * v.T.len / 2, true, 0.6);
   const wallHit = v.hit;
@@ -1909,8 +1934,21 @@ function updateLamps(n, t) {
     else if (v.driver) { braking = Math.abs(v.speed || 0) < 0.3; }
     lampList.push({ v, on: on && driven, braking: driven && braking, reversing, signal: hazard ? 2 : v.mode === 'traffic' ? v.signal : 0, bar: !!(v.T.siren && v.sirenOn) });
   }
-  for (const u of police.cops.values()) if (u.kind < 2 && !police.isDown(u)) lampList.push({ v: u.v, on, braking: Math.abs(u.v.speed || 0) < 0.5, reversing: (u.v.speed || 0) < -0.4, signal: 0, bar: chase });
+  // lamp lenses glow on the cars that have their lights on (and dark on everything else)
+  const lit = new Set();
+  for (const c of lampList) { setCarLamps(c.v, c.on, c.braking); lit.add(c.v); }
+  for (const v of vehicles) if (!lit.has(v)) setCarLamps(v, false, false);
+  for (const u of police.cops.values()) if (u.kind < 2 && !police.isDown(u)) { lampList.push({ v: u.v, on, braking: Math.abs(u.v.speed || 0) < 0.5, reversing: (u.v.speed || 0) < -0.4, signal: 0, bar: chase }); setCarLamps(u.v, on, Math.abs(u.v.speed || 0) < 0.5); }
   updateCarLights(lampList, camera.position, Math.max(n, weather.rain * 0.5, weather.fog * 0.5), me.veh, t);
+}
+
+// Drivers and passengers of the cars around the camera (traffic, cops, ambulances, fire trucks).
+const seatList = [];
+function seatPeople(dt) {
+  seatList.length = 0;
+  for (const v of vehicles) if (v !== me.veh && !v.driver && (v.mode === 'traffic' || v.mode === 'service' || v.npcDriver)) seatList.push({ v });
+  for (const u of police.cops.values()) if (u.kind < 2 && !police.isDown(u) && !u.deployed?.length) seatList.push({ v: u.v });
+  updateOccupants(seatList, camera.position, dt);
 }
 
 // Sky, weather, lights, wildlife and ambience. Runs in the menu too.
@@ -1975,12 +2013,14 @@ function update(dt, t) {
   police.render(dt, isHost, t, camera.position, farCarDist());
   farCarsEnd();
   updateGrenades(dt);
+  seatPeople(dt);
   updateWantedLevel(dt);
   updateRagdolls(dt);
   updateCamera(dt);
   updateWorldLife(dt, nowMs, t);
   updateEconomy(dt, me, t);
   updateRadio(!!me.veh && !me.veh.T.bike && !me.dead);
+  if (!me.veh || me.dead) fx.setEngine(null);
   fx.updateFx(dt);
   sendT -= dt;
   if (sendT <= 0) {

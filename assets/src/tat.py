@@ -127,11 +127,19 @@ def export_glb(name, objs=None, anims=False):
         for c in o.children_recursive:
             c.select_set(True)
     path = OUT + name + '.glb'
+    import io, contextlib, logging
+    logging.disable(logging.INFO)
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        _export(path)
+    logging.disable(logging.NOTSET)
+    return os.path.getsize(path) // 1024
+
+
+def _export(path):
     bpy.ops.export_scene.gltf(filepath=path, export_format='GLB', use_selection=True, export_apply=True,
                               export_yup=True, export_texcoords=True, export_normals=True,
                               export_materials='EXPORT', export_animations=anims, export_skins=True,
                               export_extras=False, export_cameras=False, export_lights=False)
-    return os.path.getsize(path) // 1024
 
 
 def preview(path, target=(0, 0, 1), dist=3.0, yaw=20, pitch=8, size=(640, 640), lens=50, engine='BLENDER_WORKBENCH'):
@@ -154,6 +162,7 @@ def preview(path, target=(0, 0, 1), dist=3.0, yaw=20, pitch=8, size=(640, 640), 
         sh.light = 'STUDIO'
         sh.color_type = 'MATERIAL'
         sh.show_cavity = True
+        sh.show_backface_culling = True  # catch faces pointing the wrong way (the game culls them)
     sc.render.resolution_x, sc.render.resolution_y = size
     sc.render.film_transparent = False
     sc.render.filepath = path

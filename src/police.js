@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import * as W from './world.js';
 import { makeVehicle, stepVehicle, collideVehicles, circles, charVehicle, POLICE, farCarAdd } from './vehicles.js';
+import { animateWheels } from './carmodel.js';
 import { makeCharacter, animateCharacter, placeCharacter, mat } from './character.js';
 import { ragdoll, ragPos } from './ragdoll.js';
 import * as nav from './nav.js';
@@ -374,6 +375,7 @@ export function render(dt, isHost, t, cam = null, farDist = 1e9) {
       v.mesh.position.set(v.x, v.y, v.z);
       v.mesh.rotation.y = v.h;
       v.mesh.userData.body.rotation.set(v.gp || 0, 0, v.gr || 0);
+      animateWheels(v, dt);
       const isFar = cam && !u.fire && Math.hypot(v.x - cam.x, v.z - cam.z) > farDist && farCarAdd(v);
       v.mesh.visible = !isFar;
       const L = v.mesh.userData.lights;

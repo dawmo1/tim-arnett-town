@@ -191,7 +191,7 @@ function buildCasino(x0) {
   const sg = signMesh(['THE ARNETT BELLE', 'CASINO · OPEN 24 HOURS'], 22, 4.2, { bg: '#1a0033', fg: '#ffd54f', size: 64, w: 1024, h: 200, border: '#ff4081', glow: 1.6 });
   sg.position.set(0, 16.5, 8.2); g.add(sg);
   const sg2 = sg.clone(); sg2.position.z = -8.2; sg2.rotation.y = Math.PI; g.add(sg2);
-  for (let i = -30; i <= 30; i += 4) { const b = box(g, 0, 0.4, 0.4, 0.4, i, 3.4, 9.2, glow([0xffeb3b, 0xff4081, 0x40c4ff][(i / 4 + 30) % 3], 2.5)); void b; }
+  for (let i = -30; i <= 30; i += 4) { const b = box(g, 0, 0.4, 0.4, 0.4, i, 3.4, 9.2, glow([0xffeb3b, 0xff4081, 0x40c4ff][Math.abs(Math.round(i / 4)) % 3], 2.5)); void b; }
   // hull walls (boats bump into it), and a gangway to the bank
   const hx = Math.sin(h), hz = Math.cos(h);
   addBoxes('casino', [makeBox(x, z, hz, -hx, 9, 35, WATER_Y - 3, 6)].map((b) => b));

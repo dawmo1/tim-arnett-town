@@ -4,6 +4,7 @@ import * as W from './world.js';
 import { rng, clamp } from './util.js';
 import * as fx from './fx.js';
 import { sky } from './daynight.js';
+import { buildCarMesh, dent } from './carmodel.js';
 
 export const TYPES = [
   { name: 'Sedan', len: 4.4, wid: 1.9, hgt: 1.45, max: 32, acc: 13, turn: 1.9, grip: 7, mass: 1.2, hp: 100 },
@@ -56,7 +57,10 @@ function bx(g, c, sx, sy, sz, x, y, z, material) {
   m.scale.set(sx, sy, sz); m.position.set(x, y, z); m.castShadow = true; g.add(m); return m;
 }
 
-export function makeVehicleMesh(T, color) {
+export function makeVehicleMesh(T, color, dirt = 0) {
+  const ti = TYPES.indexOf(T);
+  const model = buildCarMesh(ti, color, { dirt });
+  if (model) return model;
   curPaint = color;
   const g = new THREE.Group();
   const body = new THREE.Group(); g.add(body);
@@ -248,10 +252,18 @@ export function charVehicle(v) {
   parts.wheels = [];
 }
 
+// how grimy a car is (0 clean .. 3 filthy): work trucks and pickups more often, taxis and limos rarely
+function dirtFor(id, ti) {
+  let h = 0; for (let i = 0; i < String(id).length; i++) h = (h * 31 + String(id).charCodeAt(i)) >>> 0;
+  const r = (h % 1000) / 1000, T = TYPES[ti];
+  if (T.limo || T.police || T.taxi) return r < 0.85 ? 0 : 1;
+  if (T.pickup || T.truck || T.cabbed || T.van) return r < 0.25 ? 0 : r < 0.6 ? 1 : r < 0.88 ? 2 : 3;
+  return r < 0.5 ? 0 : r < 0.8 ? 1 : r < 0.95 ? 2 : 3;
+}
 export function makeVehicle(id, ti, color, home) {
   const T = TYPES[ti];
   return {
-    id, ti, T, color, mesh: makeVehicleMesh(T, color),
+    id, ti, T, color, mesh: makeVehicleMesh(T, color, dirtFor(id, ti)),
     x: home.x, z: home.z, h: home.h, y: W.groundHeight(home.x, home.z), vx: 0, vz: 0, w: 0, speed: 0,
     hp: T.hp, driver: '', mode: 'parked', burnAt: 0, burnBy: '', exploded: false, sinkT: 0,
     home, tgt: null, lastWrite: 0, localSim: false, loop: null, slot: 0, charred: false, tilt: 0,
@@ -286,11 +298,18 @@ export function damageZone(v, px, pz, imp) {
   const lf = (px - v.x) * fx + (pz - v.z) * fz, lr = (px - v.x) * rx + (pz - v.z) * rz;
   const zone = Math.abs(lf) / v.T.len > Math.abs(lr) / v.T.wid ? (lf > 0 ? 'f' : 'b') : lr > 0 ? 'r' : 'l';
   v.dz[zone] += imp;
+  // dent the panels where it hit (car-local: +x left, +z forward)
+  const P = v.mesh.userData.parts;
+  if (P && P.model && !v.T.heli && !v.T.boat) {
+    const lx = -lr, lz = lf, l = Math.hypot(lx, lz) || 1;
+    dent(v, lx, 0.65, lz, -lx / l, -lz / l, Math.min(0.13, imp * 0.0045), zone === 'f' || zone === 'b' ? 0.9 : 1.1);
+  }
   applyDamageVisual(v);
 }
 export function applyDamageVisual(v) {
   const P = v.mesh.userData.parts;
   if (!P || v.T.bike) return;
+  if (P.model) { modelDamage(v, P); return; }
   const k = (z) => Math.min(1, v.dz[z] / 45);
   const segL = P.segL;
   if (P.frontG) {
@@ -318,6 +337,36 @@ export function applyDamageVisual(v) {
   }
 }
 
+// Blender cars: hood and trunk spring up, bumpers / hood / doors come off, lamps break, glass cracks then shatters
+function modelDamage(v, P) {
+  const k = (z) => Math.min(1, v.dz[z] / 45);
+  const f = k('f'), b = k('b'), l = k('l'), r = k('r');
+  if (P.hood) P.hood.rotation.x = -0.4 * Math.max(0, f - 0.3);
+  if (f > 0.45 && P.bumpF) { launchPart(v, P.bumpF, 4); P.bumpF = null; }
+  if (f > 0.5 && !v.brokenHead) { v.brokenHead = true; P.lampState = -1; fx.glass(v.x + Math.sin(v.h) * v.T.len / 2, v.y + 0.7, v.z + Math.cos(v.h) * v.T.len / 2, 6); }
+  if (f > 0.95 && P.hood) { launchPart(v, P.hood, 5); P.hood = null; }
+  if (P.trunk) P.trunk.rotation.x = 0.4 * Math.max(0, b - 0.3);
+  if (b > 0.45 && P.bumpR) { launchPart(v, P.bumpR, 4); P.bumpR = null; }
+  if (b > 0.5 && !v.brokenTail) { v.brokenTail = true; P.lampState = -1; }
+  if (b > 0.95 && P.trunk) { launchPart(v, P.trunk, 5); P.trunk = null; }
+  for (const [side, d] of [['L', l], ['R', r]]) {
+    for (const nm of ['door' + side, 'door' + side + '2']) {
+      const door = P[nm]; if (!door) continue;
+      if (d > 0.92 && !(nm === 'door' + side && v.driver)) { launchPart(v, door, 4); P[nm] = null; if (nm === 'doorL') P.doorL = null; }
+    }
+  }
+  const total = v.dz.f + v.dz.b + v.dz.l + v.dz.r;
+  if (total > 30 && !P.cracked) {
+    P.cracked = true;
+    const g = P.glassMat.clone(); g.map = crackTex; g.color.setHex(0xb8c4cc); g.opacity = 0.75; P.glassMat = g;
+    for (const m of P.glass) m.material = g;
+  }
+  if (total > 70 && !P.shattered) {
+    P.shattered = true;
+    for (const m of P.glass) m.visible = false;
+    fx.glass(v.x, v.y + v.T.hgt * 0.8, v.z, 22);
+  }
+}
 export function circles(v) {
   const T = v.T, fx = Math.sin(v.h), fz = Math.cos(v.h);
   const off = T.bike ? 0.5 : T.len / 2 - T.wid / 2, r = T.bike ? 0.45 : T.wid / 2;
@@ -463,6 +512,7 @@ function stepHeli(v, inp, dt) {
 
 // Arcade car physics. inp: {throttle, brake, steer, handbrake, nitro}. Returns impact speed against walls.
 export function stepVehicle(v, inp, dt) {
+  v.steerIn = inp.steer || 0;
   const T = v.T;
   if (T.boat) return stepBoat(v, inp, dt);
   if (T.heli) return stepHeli(v, inp, dt);

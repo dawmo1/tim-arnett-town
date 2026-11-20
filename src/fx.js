@@ -406,3 +406,39 @@ export function soundGnome() { [880, 1108, 1318, 1760].forEach((f, i) => tone('s
 export function soundClick() { burst(0.03, 4000, 0.25); }
 export function soundReload() { burst(0.05, 3000, 0.3); setTimeout(() => burst(0.06, 2000, 0.35), 350); }
 export function soundNitro() { burst(0.6, 900, 0.3); }
+
+// ---------- engine of the vehicle you're in: pitch follows rpm, a sound per type ----------
+// profile: [base Hz at idle, Hz at redline, waveform, filter, lumpiness (V8 burble), volume]
+const ENGINE = {
+  car: [42, 160, 'sawtooth', 900, 0, 0.11], sports: [60, 260, 'sawtooth', 1800, 0.05, 0.12], muscle: [34, 150, 'sawtooth', 700, 0.5, 0.15],
+  truck: [26, 90, 'sawtooth', 500, 0.15, 0.14], bike: [70, 330, 'square', 1500, 0.2, 0.09], scooter: [110, 420, 'square', 2200, 0, 0.06],
+  heli: [9, 18, 'sawtooth', 300, 0.9, 0.2], boat: [55, 210, 'square', 1200, 0.1, 0.08],
+};
+let eng = null;
+export function setEngine(kind, rpm, load) {
+  if (!ac) return;
+  if (!kind) { if (eng) eng.g.gain.setTargetAtTime(0, ac.currentTime, 0.15); return; }
+  const P = ENGINE[kind] || ENGINE.car;
+  if (!eng || eng.kind !== kind) {
+    if (eng) { eng.g.gain.setTargetAtTime(0, ac.currentTime, 0.05); const old = eng; setTimeout(() => { try { old.o1.stop(); old.o2.stop(); old.lfo.stop(); } catch { /* already stopped */ } }, 400); }
+    const o1 = ac.createOscillator(), o2 = ac.createOscillator(), f = ac.createBiquadFilter(), g = ac.createGain(), lfo = ac.createOscillator(), lg = ac.createGain();
+    o1.type = P[2]; o2.type = 'triangle'; f.type = 'lowpass'; f.frequency.value = P[3]; f.Q.value = 2;
+    lfo.type = 'square'; lg.gain.value = 0;
+    o1.connect(f); o2.connect(f); f.connect(g); lfo.connect(lg); lg.connect(g.gain); g.gain.value = 0; g.connect(out());
+    o1.start(); o2.start(); lfo.start();
+    eng = { kind, o1, o2, f, g, lfo, lg };
+  }
+  const t = ac.currentTime, hz = P[0] + (P[1] - P[0]) * rpm;
+  eng.o1.frequency.setTargetAtTime(hz, t, 0.05); eng.o2.frequency.setTargetAtTime(hz * 0.5, t, 0.05);
+  eng.f.frequency.setTargetAtTime(P[3] * (0.6 + 0.8 * load + rpm * 0.6), t, 0.05);
+  eng.lfo.frequency.setTargetAtTime(hz / 4, t, 0.05); eng.lg.gain.setTargetAtTime(P[4] * P[5] * 0.6, t, 0.05);
+  eng.g.gain.setTargetAtTime(P[5] * (0.55 + 0.45 * load) * (0.7 + 0.3 * rpm), t, 0.05);
+}
+export function soundBackfire(dist = 0) { burst(0.09, 700, 0.55 * fall(dist)); setTimeout(() => burst(0.06, 500, 0.35 * fall(dist)), 70); }
+const exhaustMat = new THREE.MeshLambertMaterial({ color: 0x9a9a9a, transparent: true, opacity: 0.35, depthWrite: false });
+// a little puff from the tailpipe (dark when flooring it, fire on a backfire)
+export function exhaust(x, y, z, vx, vz, flame = false) {
+  if (parts.length > 270) return;
+  const s = new THREE.Mesh(sphere, flame ? fireMat : exhaustMat); s.position.set(x, y, z); s.scale.setScalar(flame ? 0.12 : 0.08); scene.add(s);
+  parts.push({ m: s, vx: vx * 0.2 + (Math.random() - 0.5) * 0.4, vy: 0.3 + Math.random() * 0.3, vz: vz * 0.2 + (Math.random() - 0.5) * 0.4, life: flame ? 0.12 : 0.8, kind: 'smoke' });
+}
