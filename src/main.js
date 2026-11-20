@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import * as W from './world.js';
@@ -119,6 +120,10 @@ function followSun(x, y, z) {
 // Post-processing: bloom makes lamps, headlights, fire and windows glow; OutputPass applies tone mapping.
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
+// clamp blown-out pixels (shiny glass/wet road at a grazing angle) before bloom spreads them into black squares
+composer.addPass(new ShaderPass({ uniforms: { tDiffuse: { value: null } },
+  vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  fragmentShader: 'uniform sampler2D tDiffuse; varying vec2 vUv; void main() { vec4 c = texture2D(tDiffuse, vUv); c.rgb = min(c.rgb, vec3(40.0)); if (c.r != c.r || c.g != c.g || c.b != c.b) c.rgb = vec3(0.0); gl_FragColor = c; }' }));
 const bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.35, 0.5, 0.88);
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
@@ -185,16 +190,59 @@ resize();
 applyQuality(settings.quality === 'auto' ? 'medium' : settings.quality);
 initSettingsUi();
 
+// ---------- loading screen (TAT V): drifting full-screen art, the logo, a tip and a spinner ----------
+// It covers the whole screen, so half-built streets never show. fade: just black + spinner (respawns).
+const TIPS = ['Hold Tab for the weapon wheel.', 'Press M for the map, click it to set a GPS route.', "Stores, Arnett Arms, Tim's Threads and the casino have doors: press E.", 'Hide in a shop or a parking ramp to shake the cops faster.', 'P calls the mechanic: he drops a car off near you.', 'Hold C while driving to look behind you.', 'G says hi. H insults people. Some swing back.', "Freight trains don't stop. Neither do barges.", 'Re-elect Mayor Tim Arnett.'];
+const loader = document.getElementById('loader'), slidesEl = loader.querySelector('.slides');
+const ART = 7;
+let artI = 5, artK = 0, artTimer = 0, loaderOut = 0;
+function nextArt() {
+  artI = (artI + 1 + Math.floor(Math.random() * (ART - 1))) % ART;
+  const url = `assets/load/art${artI + 1}.jpg`, img = new Image();
+  img.src = url; img.alt = '';
+  img.decode().catch(() => {}).then(() => {
+    if (loader.hidden || loader.classList.contains('fade')) return;
+    const sl = document.createElement('div');
+    sl.className = 'slide ' + (artK++ % 2 ? 'a' : 'b') + (img.naturalWidth / img.naturalHeight < 1.15 ? ' tall' : '');
+    const fill = document.createElement('div'); fill.className = 'fill'; fill.style.backgroundImage = `url(${url})`;
+    sl.append(fill, img); slidesEl.append(sl);
+    requestAnimationFrame(() => requestAnimationFrame(() => sl.classList.add('on')));
+    const old = [...slidesEl.children].slice(0, -1);
+    setTimeout(() => old.forEach((o) => o.remove()), 1600);
+  });
+}
+// resolves once the screen is fully covered
+function loading(on, label = '', fade = false) {
+  clearInterval(artTimer); clearTimeout(loaderOut);
+  if (!on) { loader.classList.add('out'); loaderOut = setTimeout(() => { loader.hidden = true; }, 650); return Promise.resolve(); }
+  const wasHidden = loader.hidden || loader.classList.contains('out');
+  loader.classList.toggle('fade', fade);
+  const tip = loader.querySelector('.tip'); tip.textContent = TIPS[Math.floor(Math.random() * TIPS.length)];
+  if (label) { const sm = document.createElement('small'); sm.textContent = label; tip.prepend(sm); }
+  loadProgress(0);
+  if (!fade) artTimer = setInterval(nextArt, 7500);
+  if (!wasHidden) return Promise.resolve();
+  loader.classList.add('out'); loader.hidden = false;
+  requestAnimationFrame(() => requestAnimationFrame(() => loader.classList.remove('out')));
+  return new Promise((r) => setTimeout(r, 650));
+}
+function loadProgress(p) { loader.querySelector('.bar i').style.width = Math.round(p * 100) + '%'; }
+loading(true, 'Davenport, Iowa');
+
 // ---------- load Davenport (the menu waits for the city around the riverfront) ----------
 const playBtn = document.getElementById('playBtn');
-playBtn.disabled = true; playBtn.textContent = 'Loading models…';
-await loadAssets((p) => { playBtn.textContent = `Loading models… ${Math.round(p * 100)}%`; });
+playBtn.disabled = true; playBtn.textContent = 'Loading…';
+// models, the map index and the first streets all download at the same time
+let pModels = 0, pCity = 0;
+const loadBar = () => loadProgress(pModels * 0.4 + pCity * 0.6);
+const modelsReady = loadAssets((p) => { pModels = p; loadBar(); });
+await W.initWorld(scene, activeQuality);
+await Promise.all([modelsReady, W.prefetch(W.places.menu.x, W.places.menu.z, 320)]);
 initCharacters(activeQuality);
 fx.setCasingGeometry(geometryOf('weapons', 'casing'));
-playBtn.textContent = 'Loading Davenport…';
-await W.initWorld(scene, activeQuality);
-await W.preload(W.places.menu.x, W.places.menu.z, 320, (p) => { playBtn.textContent = `Loading Davenport… ${Math.round(p * 100)}%`; });
+await W.preload(W.places.menu.x, W.places.menu.z, 320, (p) => { pCity = p; loadBar(); });
 playBtn.disabled = false; playBtn.textContent = 'Play';
+const firstSpawn = W.randomSpawn(); // picked now so its streets can download while you're in the menu
 fx.initFx(scene);
 initWalkers(scene);
 initDayNight({ scene, sun, hemi, skyMat: scene.userData.sky.material, renderer });
@@ -211,6 +259,7 @@ const enginesReady = Promise.all([
 initCarLights(scene);
 const vehicles = createAllVehicles(scene, []);
 initFarCars(scene);
+await Promise.race([document.fonts.load('16px "Pricedown Bl"'), new Promise((r) => setTimeout(r, 3000))]).catch(() => {}); // the map labels use it
 ui.drawMapBase();
 ui.setTurfs(GANGS);
 ui.buildWheel(WEAPONS, (i) => { selectWeapon(i); closeWheel(false); });
@@ -270,7 +319,7 @@ addEventListener('mousemove', (e) => {
     if (Math.hypot(wheelX, wheelY) > 25) { wheelSel = ui.wheelIndex(wheelX, wheelY, WEAPONS.length); ui.wheelHighlight(wheelSel, WEAPONS[wheelSel]); }
     return;
   }
-  const sens = (aiming ? (WEAPONS[me.weapon].scope ? 0.0005 : 0.0013) : 0.0025) * settings.sens;
+  const sens = (aiming ? (WEAPONS[me.weapon].scope ? 0.00065 : 0.0017) : 0.0034) * settings.sens;
   camYaw -= e.movementX * sens;
   camPitch = clamp(camPitch + e.movementY * sens * (settings.invertY ? -1 : 1), -0.5, 1.2);
   lastMouse = performance.now();
@@ -456,20 +505,21 @@ playBtn.addEventListener('click', async () => {
   playBtn.textContent = 'Loading Davenport…';
   await enginesReady;
   // drop in somewhere random in the city (load the streets around you first)
-  const sp = W.randomSpawn();
-  ui.el.menu.hidden = true; loading(true, W.areaAt(sp.x, sp.z)[0]);
-  await W.preload(sp.x, sp.z, 260, (p) => { loadProgress(p); playBtn.textContent = `Loading Davenport… ${Math.round(p * 100)}%`; });
-  loading(false);
+  const sp = firstSpawn;
+  await loading(true, W.areaAt(sp.x, sp.z)[0]);
+  ui.el.menu.hidden = true;
+  await W.preload(sp.x, sp.z, 260, loadProgress);
   manageParked(0, sp.x, sp.z, true);
   me.name = name; me.look = randomLook();
   try { await joinRoom(room, name, me.look); }
-  catch (e) { console.error(e); netStatus.textContent = "Couldn't join the room: " + (e.code || e.message); playBtn.disabled = false; playBtn.textContent = 'Play'; return; }
+  catch (e) { console.error(e); netStatus.textContent = "Couldn't join the room: " + (e.code || e.message); playBtn.disabled = false; playBtn.textContent = 'Play'; ui.el.menu.hidden = false; loading(false); return; }
   history.replaceState(null, '', '#' + room);
   me.ch = makeCharacter(me.look);
   scene.add(me.ch.g);
   respawn(true, sp);
   ui.el.menu.hidden = true; ui.el.hud.hidden = false;
   playing = true;
+  setTimeout(() => loading(false), 250); // a few frames to settle behind the cover
   selectWeapon(2);
   fx.unlockAudio();
   ui.help('Welcome to <b>Tim Arnett Town</b>. <kbd>WASD</kbd> to move, mouse to look. Press <kbd>Esc</kbd> or <kbd>M</kbd> for the map.', 7);
@@ -593,9 +643,29 @@ function manageParked(dt, x, z, force) {
 function freeTraffic(v, noFlee, keepDriver) {
   if (v.mode !== 'traffic') return;
   v.mode = 'free'; v.driver = ''; v.localSim = true;
-  if (keepDriver) { v.npcDriver = true; v.npcOutT = 2 + Math.random() * 2.5; v.npcAngry = Math.random() < 0.5; }
+  // keepDriver = crash impact: the driver reacts a beat after the car comes to rest (see driverReacts)
+  if (keepDriver) {
+    const imp = keepDriver, r = Math.random();
+    v.npcDriver = true; v.npcOutT = 0.6 + Math.random() * 0.9;
+    if (imp >= 13 && Math.random() < (imp > 22 ? 0.85 : 0.55)) { // knocked out cold, hazards on; a third come to and stagger out
+      v.npcReact = 'ko'; v.ko = true; v.npcOutT = Math.random() < 0.35 ? 8 + Math.random() * 12 : 0; v.alarmUntil = performance.now() / 1000 + 90;
+    } else v.npcReact = r < 0.25 + Math.min(0.2, (imp - 4) * 0.02) ? 'angry' : r < 0.55 ? 'flee' : imp < 13 && r < 0.78 ? 'drive' : 'stay';
+  }
   else if (!noFlee) spawnFleeing(v.x + Math.cos(v.h) * 1.6, v.z - Math.sin(v.h) * 1.6, v.h + Math.PI / 2);
   writeVeh(v, true);
+}
+const DRIVER_YELLS = ['Learn to drive!', 'Are you blind?!', 'Hey! My car!', 'Watch it, pal!', 'Seriously?!'];
+function honkYell(v) { fx.soundHorn(distCam(v.x, v.z)); if (Math.random() < 0.5) say(v.yeller || (v.yeller = { ch: { g: v.mesh } }), DRIVER_YELLS[Math.floor(Math.random() * DRIVER_YELLS.length)]); }
+// A driver whose car got hit decides what to do: floor it back into traffic, sit and yell, or get out
+// (angry ones come at you, the rest run; a knocked-out driver who comes to stumbles out and falls).
+function driverReacts(v) {
+  const k = v.npcReact, lx = Math.cos(v.h), lz = -Math.sin(v.h);
+  if (k === 'drive' && v.hp > 0 && joinTraffic(v)) { v.ag.panicT = 5 + Math.random() * 4; honkYell(v); writeVeh(v, true); return; }
+  if (k === 'drive' || k === 'stay') { honkYell(v); return; }
+  v.npcDriver = false; v.doorOpen = 1; v.doorCloseAt = performance.now() + 1200;
+  const n = emptyCar(v);
+  spawnFleeing(v.x + lx * 1.7, v.z + lz * 1.7, v.h + Math.PI / 2, k === 'ko' ? 1.6 : 0, k === 'angry');
+  for (let i = 1; i < n; i++) spawnFleeing(v.x - lx * 1.6 + Math.sin(v.h) * (i - 1.5), v.z - lz * 1.6 + Math.cos(v.h) * (i - 1.5), v.h - Math.PI / 2, 0);
 }
 function damageVehicle(v, dmg, hit) {
   if (v.exploded || dmg <= 0) return;
@@ -736,28 +806,19 @@ function die() {
   ui.el.dead.hidden = false;
   canvas.classList.add('dead');
 }
-// Loading screen: a slow pan over the city with the logo, a tip and a progress bar.
-const TIPS = ['Hold Tab for the weapon wheel.', 'Press M for the map, click it to set a GPS route.', "Stores, Arnett Arms, Tim's Threads and the casino have doors: press E.", 'Hide in a shop or a parking ramp to shake the cops faster.', 'P calls the mechanic: he drops a car off near you.', 'Hold C while driving to look behind you.', 'G says hi. H insults people. Some swing back.', "Freight trains don't stop. Neither do barges.", 'Re-elect Mayor Tim Arnett.'];
-const loadEl = Object.assign(document.createElement('div'), { id: 'loading', hidden: true });
-loadEl.innerHTML = '<h1>TIM ARNETT <span>TOWN</span></h1><p></p><div class="bar"><i></i></div>';
-document.body.append(loadEl);
-function loading(on, label) {
-  loadEl.hidden = !on;
-  if (on) { loadEl.querySelector('p').textContent = (label ? label + ' · ' : '') + TIPS[Math.floor(Math.random() * TIPS.length)]; loadEl.querySelector('i').style.width = '0%'; }
-}
-const loadProgress = (p) => { loadEl.querySelector('i').style.width = Math.round(p * 100) + '%'; };
 // After dying you wake up outside the nearest hospital (the streets there load first).
 let respawning = false;
 async function beginRespawn() {
   if (respawning) return;
   respawning = true;
   const sp = W.hospitalSpawn(me.x, me.z);
-  loading(true, sp.name || 'To the hospital');
+  await loading(true, '', true); // WASTED fades to black
+  ui.el.dead.hidden = true;
   await W.preload(sp.x, sp.z, 200, loadProgress);
-  loading(false);
   manageParked(0, sp.x, sp.z, true);
   respawn(false, sp);
   ui.addFeed(`Patched up at ${sp.name || 'the hospital'}`);
+  setTimeout(() => loading(false), 300);
   respawning = false;
 }
 function respawn(first, sp) {
@@ -877,7 +938,7 @@ function engineSound(v, fwd, dt) {
 function yankDriver(v) {
   const d = doorSpot(v);
   if (v.mode === 'traffic' || v.npcDriver) {
-    freeTraffic(v, true); v.npcDriver = false; spawnFleeing(d.x, d.z, v.h + Math.PI / 2, 1.2);
+    freeTraffic(v, true); v.npcDriver = false; spawnFleeing(d.x, d.z, v.h + Math.PI / 2, v.ko ? 4 : 1.2); // a knocked-out driver stays down longer
     const n = emptyCar(v), lx = Math.cos(v.h), lz = -Math.sin(v.h);
     for (let i = 1; i < n; i++) spawnFleeing(v.x - lx * 1.6 + Math.sin(v.h) * (i - 1.5), v.z - lz * 1.6 + Math.cos(v.h) * (i - 1.5), v.h - Math.PI / 2, 0.8 + i * 0.3);
   }
@@ -924,7 +985,8 @@ function ejectMe() {
   const lx = Math.cos(v.h), lz = -Math.sin(v.h), off = v.T.wid / 2 + 0.7;
   const p = W.pushOutCircle(v.x + lx * off, v.z + lz * off, 0.4);
   me.x = p.x; me.z = p.z; me.y = W.isLand(p.x, p.z) ? W.groundHeight(p.x, p.z) : W.SWIM_Y; me.vy = 0; me.h = v.h;
-  me.ch.g.rotation.set(0, me.h, 0);
+  me.ch.g.position.set(me.x, me.y, me.z); me.ch.g.rotation.set(0, me.h, 0); // (the body was left where you got in; a ragdoll would start there)
+  me.ch.g.visible = true;
   if (v.driver === net.uid) {
     v.driver = '';
     v.localSim = Math.hypot(v.vx, v.vz) > 0.5;
@@ -1047,8 +1109,10 @@ function bulletMarks(hit, d) {
 function melee(w) {
   const fx_ = Math.sin(me.h), fz_ = Math.cos(me.h);
   const inFront = (x, z) => { const dx = x - me.x, dz = z - me.z, d = Math.hypot(dx, dz); return d < w.range && (dx * fx_ + dz * fz_) / (d || 1) > 0.35; };
-  lastAttack = performance.now();
-  for (const wk of walkers) if (!wk.dead && inFront(wk.x, wk.z)) { const k = hurtWalker(wk, w.dmg, fx_, fz_, null, w.name === 'Bat' ? 7.5 : w.force || (Math.random() < 0.25 ? 6 : 3)); if (!k) report('assault', wk.x, wk.z); ui.hitMarker(k); fx.soundHit(); if (performance.now() - lastIncident > 6000) { lastIncident = performance.now(); incident(wk.x, wk.z, 'fight'); } return; }
+  lastAttack = performance.now(); me.kick = false;
+  // bare-handed at someone down low (on the ground, getting up, cowering, frozen, begging, playing dead): kick instead
+  const low = (wk) => wk.ch.rag || wk.ch.getUp > 0 || wk.mode === 'cower' || wk.freezeT > 0 || (wk.mode === 'surrender' && wk.giveUp && wk.giveUp !== 'cash');
+  for (const wk of walkers) if (!wk.dead && inFront(wk.x, wk.z)) { me.kick = w.name === 'Fists' && !!low(wk); const k = hurtWalker(wk, w.dmg, fx_, fz_, me.kick ? { x: wk.x, y: (wk.y || 0) + 0.3, z: wk.z } : null, me.kick ? 3 : w.name === 'Bat' ? 7.5 : w.force || (Math.random() < 0.25 ? 6 : 3)); if (!k) report('assault', wk.x, wk.z); ui.hitMarker(k); fx.soundHit(); if (performance.now() - lastIncident > 6000) { lastIncident = performance.now(); incident(wk.x, wk.z, 'fight'); } return; }
   for (const u of police.cops.values()) if (u.kind === 2 && !u.dead && inFront(u.x, u.z)) { damageCopUnit(u, w.dmg); fx.soundHit(); return; }
   for (const r of remotes.values()) if (!r.dead && !r.veh && inFront(r.x, r.z)) {
     sendEvent('hit', { to: r.uid, dmg: w.dmg, by: me.name }); report('assault', r.x, r.z); fx.blood(r.x, r.y + 1.3, r.z, fx_, fz_); fx.soundHit(); return;
@@ -1175,10 +1239,13 @@ function collideAround(v, sliding) {
       const i0 = collideVehicles(v, o, false);
       if (i0 <= 0) continue;
       const pb = o.pending; o.pending = null;
-      // tap: they brake and lean on the horn. Real hit: the car is knocked loose with the driver still in it.
-      // Big crash: the driver jumps out and runs.
-      if (i0 < 4) { bumpTraffic(o); if (!o.honkCd || performance.now() > o.honkCd) { fx.soundHorn(distCam(o.x, o.z)); o.honkCd = performance.now() + 1500; } }
-      else { freeTraffic(o, false, i0 < 13); if (pb) applyBump(o, pb); }
+      // tap: they brake, then a beat later lean on the horn and yell, or floor it out of there.
+      // Anything harder knocks the car loose with the driver still in it; freeTraffic picks how they react.
+      if (i0 < 4) {
+        bumpTraffic(o);
+        if (!o.honkCd || performance.now() > o.honkCd) { o.honkCd = performance.now() + 2500; setTimeout(() => { if (o.mode !== 'traffic' || !o.ag) return; if (Math.random() < 0.3) o.ag.panicT = 4 + Math.random() * 3; else honkYell(o); }, 600 + Math.random() * 900); }
+      }
+      else { freeTraffic(o, false, i0); if (pb) applyBump(o, pb); }
     } else {
       const pushable = !o.driver || o.driver === net.uid;
       if (collideVehicles(v, o, pushable) <= 0) continue;
@@ -1251,13 +1318,10 @@ function updateVehicles(dt, tSec, nowMs) {
     } else {
       if (head) {
         head.visible = (!!v.driver || !!v.npcDriver) && !v.exploded;
-        // a driver whose car got knocked loose: stays in and honks, or climbs out angry
-        if (v.npcDriver && v.npcOutT > 0 && v.speed < 1 && me.enter?.v !== v) {
+        // a driver whose car got knocked loose reacts once it has come to rest
+        if (v.npcDriver && v.npcOutT > 0 && Math.abs(v.speed || 0) < 1 && me.enter?.v !== v) {
           v.npcOutT -= dt;
-          if (v.npcOutT <= 0) {
-            if (v.npcAngry) { v.npcDriver = false; const lx = Math.cos(v.h), lz = -Math.sin(v.h); spawnFleeing(v.x + lx * 1.7, v.z + lz * 1.7, v.h + Math.PI / 2, 0, true); }
-            else fx.soundHorn(distCam(v.x, v.z));
-          }
+          if (v.npcOutT <= 0) driverReacts(v);
         }
         if (v.driver && v.headFor !== v.driver) {
           v.headFor = v.driver;
@@ -1476,7 +1540,7 @@ function footUpdate(dt, fwd, side) {
   const wpn = WEAPONS[me.weapon];
   me.recoil = Math.max(0, (me.recoil || 0) - dt * 8);
   me.netPose = ((crouch && !me.inCover && !aimPose) ? 1 : 0) | ((me.inCover && !aimPose) ? 2 : 0) | (me.reloadT > 0 ? 4 : 0); me.netPitch = aimPose ? Math.round(-camPitch * 57) : 0; me.netK = 0;
-  animateCharacter(me.ch, dt, { crouch: crouch && !me.inCover && !aimPose, cover: me.inCover && !aimPose, speed: aimPose ? Math.min(me.moveSpeed, 3) : me.moveSpeed, aim: aimPose, swim: me.swim, swing: me.swing, weapon: me.swim ? 'none' : wk, wmodel: me.swim ? null : wpn.model, rifle: wpn.long, recoil: me.recoil, reload: me.reloadT > 0 ? 1 - me.reloadT / (wpn.name === 'Shotgun' ? 1.8 : 1.3) : 0, pitch: aimPose ? -camPitch * 57 : 0, carry: !aimPose && wpn.long });
+  animateCharacter(me.ch, dt, { crouch: crouch && !me.inCover && !aimPose, cover: me.inCover && !aimPose, speed: aimPose ? Math.min(me.moveSpeed, 3) : me.moveSpeed, aim: aimPose, swim: me.swim, swing: me.kick && wpn.name === 'Fists' ? 0 : me.swing, punch: me.kick && wpn.name === 'Fists' && me.swing > 0 ? { i: 4, t: 0.22 * Math.sin((1 - me.swing) * Math.PI) } : undefined, weapon: me.swim ? 'none' : wk, wmodel: me.swim ? null : wpn.model, rifle: wpn.long, recoil: me.recoil, reload: me.reloadT > 0 ? 1 - me.reloadT / (wpn.name === 'Shotgun' ? 1.8 : 1.3) : 0, pitch: aimPose ? -camPitch * 57 : 0, carry: !aimPose && wpn.long });
 }
 
 function driveUpdate(dt, fwd, side) {
@@ -1789,7 +1853,7 @@ function openShop(title, items) {
 function closeShop() { shopOpen = false; paused = false; document.getElementById('shop').hidden = true; lockMouse(); }
 document.getElementById('shopClose').addEventListener('click', closeShop);
 
-let deathSpin = 0, camLag = null;
+let deathSpin = 0, camLag = null, camDist = null;
 function updateCamera(dt) {
   const spd = me.veh ? Math.abs(me.veh.speed) : 0;
   const aimZoom = aiming && !me.dead && WEAPONS[me.weapon].kind === 'gun';
@@ -1824,8 +1888,14 @@ function updateCamera(dt) {
   const dist = me.veh ? (me.veh.T.heli ? 16 : 4.6 + me.veh.T.len + Math.min(4, spd * 0.09)) : me.dead ? 5 + deathSpin * 4 : aimZoom ? 2.3 : 4.2;
   const cp = Math.cos(camPitch), dx = Math.sin(camYaw) * cp, dy = -Math.sin(camPitch), dz = Math.cos(camYaw) * cp;
   const sh = me.veh ? 0 : aimZoom ? 0.85 : 0.55, ax = tx - Math.cos(camYaw) * sh, az = tz + Math.sin(camYaw) * sh;
-  const back = W.rayBuildings(ax, ty, az, -dx, -dy, -dz, dist);
-  const d = Math.max(0.8, Math.min(dist, back - 0.3));
+  let back = W.rayBuildings(ax, ty, az, -dx, -dy, -dz, dist);
+  // other cars between you and the camera push it in too (looking out from inside a car is a black box)
+  if (me.veh) for (const v of [...vehicles, ...[...police.cops.values()].map((u) => u.v)]) if (v && v !== me.veh && !v.exploded && Math.abs(v.x - ax) < dist + 6 && Math.abs(v.z - az) < dist + 6) back = Math.min(back, vehRay({ x: ax, y: ty, z: az }, { x: -dx, y: -dy, z: -dz }, v));
+  // in a car never pull in past your own bumper; snap in fast, ease back out so walls don't make it flicker
+  const minD = me.veh && !me.veh.T.heli ? me.veh.T.len * 0.5 + 1.2 : 0.8;
+  const want = Math.max(minD, Math.min(dist, back - 0.3));
+  camDist = camDist === null || want < camDist ? want : camDist + (want - camDist) * Math.min(1, dt * 4);
+  const d = camDist;
   const camX = ax - dx * d, camZ = az - dz * d;
   const floorY = interior.room ? interior.room.y + 0.35 : W.isLand(camX, camZ) ? W.groundHeight(camX, camZ) + 0.35 : W.WATER_Y + 0.2;
   camera.position.set(camX, Math.max(floorY, ty - dy * d), camZ);
@@ -2148,4 +2218,8 @@ function frame(now) {
   composer.render();
 }
 requestAnimationFrame(frame);
+// let a few frames render (and shaders compile) behind the loading screen, then show the menu
+setTimeout(() => loading(false), 400);
+// meanwhile, download the streets where you'll start
+W.prefetch(firstSpawn.x, firstSpawn.z, 260);
 

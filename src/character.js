@@ -143,7 +143,7 @@ export function nameTag(text, color = '#ffffff') {
   const c = document.createElement('canvas');
   c.width = 256; c.height = 64;
   const x = c.getContext('2d');
-  x.font = 'bold 34px system-ui, sans-serif';
+  x.font = '38px "Pricedown Bl", Impact, sans-serif';
   x.textAlign = 'center'; x.textBaseline = 'middle';
   x.lineWidth = 6; x.strokeStyle = 'rgba(0,0,0,.75)';
   x.strokeText(text, 128, 32);

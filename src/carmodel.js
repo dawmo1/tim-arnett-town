@@ -50,7 +50,9 @@ export const LAMP = {
   headOff: new THREE.MeshStandardMaterial({ color: 0xdfe4ea, roughness: 0.08, metalness: 0.6, envMapIntensity: 1.5 }),
   headOn: new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xfff2d0, emissiveIntensity: 2.2, roughness: 0.1 }),
   tailOff: new THREE.MeshStandardMaterial({ color: 0x7a0c0c, roughness: 0.15, metalness: 0.3, envMapIntensity: 1.2 }),
-  tailOn: new THREE.MeshStandardMaterial({ color: 0xff2020, emissive: 0xff1010, emissiveIntensity: 1.6, roughness: 0.2 }),
+  tailOn: new THREE.MeshStandardMaterial({ color: 0xff2020, emissive: 0xff1010, emissiveIntensity: 1.1, roughness: 0.2 }),
+  // braking: clearly brighter than plain tail lights, so the lens itself flares up (bloom does the glow)
+  tailBrake: new THREE.MeshStandardMaterial({ color: 0xff3030, emissive: 0xff1a12, emissiveIntensity: 3.2, roughness: 0.2 }),
 };
 let decalTex = null;
 // one small atlas: plate, taxi sign, ambulance stripe and cross, tow hazard stripes, bus sign (glTF UVs: v=0 at the top)
@@ -162,13 +164,14 @@ function makeWheel(src, p, part, key) {
   return w;
 }
 
-// headlights / tail lamps glow when the lights are on (swapped per car only when it changes)
+// headlights / tail lamps glow when the lights are on, brighter when braking (swapped per car only when it changes)
 export function setCarLamps(v, on, braking) {
   const P = v.mesh.userData.parts; if (!P || !P.lampMeshes) return;
-  const hs = on ? 1 : 0, ts = on || braking ? 1 : 0, st = hs * 2 + ts;
+  const hs = on ? 1 : 0, ts = braking ? 2 : on ? 1 : 0, st = hs * 3 + ts;
   if (P.lampState === st) return;
   P.lampState = st;
-  for (const [m, kind] of P.lampMeshes) m.material = kind === 'head' ? (hs && !v.brokenHead ? LAMP.headOn : LAMP.headOff) : (ts && !v.brokenTail ? LAMP.tailOn : LAMP.tailOff);
+  const tail = v.brokenTail ? LAMP.tailOff : [LAMP.tailOff, LAMP.tailOn, LAMP.tailBrake][ts];
+  for (const [m, kind] of P.lampMeshes) m.material = kind === 'head' ? (hs && !v.brokenHead ? LAMP.headOn : LAMP.headOff) : tail;
 }
 
 // spin the wheels and turn the front ones

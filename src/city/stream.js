@@ -319,18 +319,22 @@ export function updateStream(px, pz, dt) {
   if (instDirty && instT <= 0) { instDirty = false; instT = 0.4; instAt.x = px; instAt.z = pz; rebuildInstances(); }
   discard.center.value.set(px, pz); discard.radius.value = solidRadius(px, pz);
 }
+// Download (but don't build) the tiles around a point, e.g. where you'll spawn, while the menu is up.
+export function prefetch(px, pz, rad) {
+  return Promise.all(wantData(px, pz, rad + TILE * 1.5).map((w) => fetchTile(w.tx, w.tz).then(onData).catch(() => {})));
+}
 // Load and build everything within `rad` of a point before the game starts.
 export async function preload(px, pz, rad, onProgress) {
   const need = wantData(px, pz, rad + TILE * 1.5);
   let done = 0;
   await Promise.all(need.map((w) => fetchTile(w.tx, w.tz).then(onData).catch(() => {}).finally(() => { done++; onProgress?.(done / need.length * 0.6); })));
   const toBuild = wantData(px, pz, rad).filter((w) => D.tileSet.has(w.key));
-  let b = 0;
+  let b = 0, tYield = performance.now();
   const saveR = R; R = Math.max(R, rad);
   while (true) {
     if (!buildOne(px, pz)) break;
     b++; onProgress?.(0.6 + Math.min(1, b / Math.max(1, toBuild.length)) * 0.4);
-    if (b % 2 === 0) await new Promise((r) => setTimeout(r, 0));
+    if (performance.now() - tYield > 40) { await new Promise((r) => setTimeout(r, 0)); tYield = performance.now(); } // keep the spinner turning
   }
   R = saveR;
   instAt.x = px; instAt.z = pz; rebuildInstances(); instDirty = false;

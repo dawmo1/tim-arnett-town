@@ -82,4 +82,5 @@ Then open http://localhost:8765. Open two browser tabs with the same room code t
 - Map data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors, available under the Open Database License (ODbL).
 - Elevation from the [AWS Open Data Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) (USGS and other public sources).
 - 3D models built for this game in [Blender](https://www.blender.org/) from Python scripts; car brands are made-up parodies.
+- Font: [Pricedown](https://typodermicfonts.com/pricedown/) by Typodermic Fonts, loaded from cdnfonts.com. Loading-screen art is in `assets/load/`.
 - Business names in the game are made up. Tim Arnett is not actually the mayor. Yet.

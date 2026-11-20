@@ -310,11 +310,11 @@ export function drawMinimap(view, me, blips, zoom = 1, cones = null, waypoint = 
     if (b.shape === 'square') mm.rect(x - b.size, y - b.size, b.size * 2, b.size * 2);
     else mm.arc(x, y, b.size, 0, 7);
     mm.fill(); mm.stroke();
-    if (b.label) { mm.fillStyle = '#fff'; mm.font = 'bold 10px system-ui'; mm.textAlign = 'center'; mm.textBaseline = 'middle'; mm.fillText(b.label, x, y + 0.5); }
+    if (b.label) { mm.fillStyle = '#fff'; mm.font = '12px "Pricedown Bl", Impact, sans-serif'; mm.textAlign = 'center'; mm.textBaseline = 'middle'; mm.fillText(b.label, x, y + 0.5); }
   }
   const [nx, ny] = clampPt(raw(view.x, view.z - 100000), 11);
   mm.fillStyle = 'rgba(8,12,18,.85)'; mm.beginPath(); mm.arc(nx, ny, 8, 0, 7); mm.fill();
-  mm.fillStyle = '#fff'; mm.font = 'bold 10px system-ui'; mm.textAlign = 'center'; mm.textBaseline = 'middle'; mm.fillText('N', nx, ny + 0.5);
+  mm.fillStyle = '#fff'; mm.font = '12px "Pricedown Bl", Impact, sans-serif'; mm.textAlign = 'center'; mm.textBaseline = 'middle'; mm.fillText('N', nx, ny + 0.5);
   const [px, py] = raw(me.x, me.z);
   const hx = Math.sin(me.h), hz = Math.cos(me.h);
   const ang = Math.atan2(hx * Math.sin(alpha) + hz * Math.cos(alpha), hx * Math.cos(alpha) - hz * Math.sin(alpha));
@@ -348,8 +348,8 @@ export function drawBigMap(me, blips, waypoint, route) {
     if (x < -20 || y < -20 || x > Wd + 20 || y > Ht + 20) continue;
     bm.fillStyle = b.color; bm.strokeStyle = '#000'; bm.lineWidth = 1.5;
     bm.beginPath(); if (b.shape === 'square') bm.rect(x - b.size, y - b.size, b.size * 2, b.size * 2); else bm.arc(x, y, b.size, 0, 7); bm.fill(); bm.stroke();
-    if (b.label) { bm.fillStyle = '#fff'; bm.font = 'bold 11px system-ui'; bm.textAlign = 'center'; bm.textBaseline = 'middle'; bm.fillText(b.label, x, y + 0.5); }
-    if (b.name && s > big.fit * 1.6) { bm.font = '600 11px Inter, system-ui'; bm.textAlign = 'left'; bm.lineWidth = 3; bm.strokeStyle = 'rgba(0,0,0,.75)'; bm.strokeText(b.name, x + 9, y + (b.dy || 1)); bm.fillStyle = '#fff'; bm.fillText(b.name, x + 9, y + (b.dy || 1)); }
+    if (b.label) { bm.fillStyle = '#fff'; bm.font = '13px "Pricedown Bl", Impact, sans-serif'; bm.textAlign = 'center'; bm.textBaseline = 'middle'; bm.fillText(b.label, x, y + 0.5); }
+    if (b.name && s > big.fit * 1.6) { bm.font = '400 13px "Pricedown Bl", Impact, sans-serif'; bm.textAlign = 'left'; bm.lineWidth = 3; bm.strokeStyle = 'rgba(0,0,0,.75)'; bm.strokeText(b.name, x + 9, y + (b.dy || 1)); bm.fillStyle = '#fff'; bm.fillText(b.name, x + 9, y + (b.dy || 1)); }
   }
   if (waypoint) { const [x, y] = P(waypoint.x, waypoint.z); bm.fillStyle = '#b678ff'; bm.strokeStyle = '#000'; bm.lineWidth = 1.5; bm.beginPath(); bm.arc(x, y, 8, 0, 7); bm.fill(); bm.stroke(); }
   const [px, py] = P(me.x, me.z);
@@ -358,10 +358,10 @@ export function drawBigMap(me, blips, waypoint, route) {
   bm.beginPath(); bm.moveTo(11, 0); bm.lineTo(-7, 7); bm.lineTo(-3, 0); bm.lineTo(-7, -7); bm.closePath(); bm.fill(); bm.stroke();
   bm.restore();
   bm.fillStyle = 'rgba(0,0,0,.55)'; bm.fillRect(8, Ht - 26, 330, 18);
-  bm.fillStyle = '#fff'; bm.font = '12px system-ui'; bm.textAlign = 'left'; bm.textBaseline = 'middle';
+  bm.fillStyle = '#fff'; bm.font = '14px "Pricedown Bl", Impact, sans-serif'; bm.textAlign = 'left'; bm.textBaseline = 'middle';
   bm.fillText('Scroll to zoom · drag to move · click to set a waypoint', 14, Ht - 17);
   bm.textAlign = 'right'; bm.fillStyle = 'rgba(0,0,0,.55)'; bm.fillRect(Wd - 250, Ht - 22, 244, 16);
-  bm.fillStyle = '#fff'; bm.font = '11px system-ui'; bm.fillText('Map data © OpenStreetMap contributors', Wd - 12, Ht - 14);
+  bm.fillStyle = '#fff'; bm.font = '13px "Pricedown Bl", Impact, sans-serif'; bm.fillText('Map data © OpenStreetMap contributors', Wd - 12, Ht - 14);
 }
 const canvasPt = (ev) => { const r = el.bigmap.getBoundingClientRect(); return [((ev.clientX - r.left) / r.width) * el.bigmap.width, ((ev.clientY - r.top) / r.height) * el.bigmap.height]; };
 export function bigMapToWorld(ev) {

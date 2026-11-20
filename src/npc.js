@@ -146,8 +146,11 @@ function newWalker(role, x, z, h, grp) {
   const ch = makeCharacter(lookFor(role));
   scene.add(ch.g);
   const w = { ch, role, x, z, y: W.groundHeight(x, z), h, hp: 40, dead: null, panic: 0, mode: 'walk', grp,
-    temper: Math.random() < 0.18 ? 'brawler' : Math.random() < 0.08 ? 'gunman' : 'normal', speed: 1.15 + Math.random() * 0.5, lat: (Math.random() - 0.5) * 0.9, shirt: ch.shirtColor };
+    temper: Math.random() < 0.18 ? 'brawler' : Math.random() < 0.027 ? 'gunman' : 'normal', speed: 1.15 + Math.random() * 0.5, lat: (Math.random() - 0.5) * 0.9, shirt: ch.shirtColor,
+    react: 0.25 + Math.random() ** 2 * 0.75 }; // seconds to notice danger: most are quickish, a few are slow
   if (role === 'office') w.speed += 0.2;
+  if ((role === 'walk' || role === 'office' || role === 'student' || role === 'shopper') && Math.random() < 0.15) w.texting = true; // eyes on the phone
+  if (role === 'elderly') w.react += 0.3;
   if (role === 'jogger') w.speed = 3 + Math.random() * 0.8;
   if (role === 'cyclist') { w.speed = 4 + Math.random() * 1.5; holdProps.bike(ch); w.pose = 'bike'; }
   if (role === 'shopper' && Math.random() < 0.8) holdProps.bag(ch);
@@ -229,7 +232,7 @@ function spawnScene(role, e, s, side, p) {
       const a = (i / n) * Math.PI * 2, x = Math.cos(a) * 1.1 - fx * 0.6, z = Math.sin(a) * 1.1 - fz * 0.6;
       const pose = deal && i < 2 ? 'chat' : ['chat', 'smoke', 'phone', 'stand'][Math.floor(Math.random() * 4)];
       const w = add('gang:' + g.id, x, z, Math.atan2(-x, -z), { pose });
-      w.gang = g.id; w.temper = Math.random() < 0.45 ? 'gunman' : 'brawler'; w.farCol = parseInt(g.color.slice(1), 16);
+      w.gang = g.id; w.temper = Math.random() < 0.18 ? 'gunman' : 'brawler'; w.farCol = parseInt(g.color.slice(1), 16);
       if (pose === 'smoke') setProp(w.ch, 'cig');
     }
     grp.gang = g.id;
@@ -298,7 +301,7 @@ function manageRivals(focus, dt) {
   const a = Math.random() * Math.PI * 2, rx = home.x + Math.cos(a) * 24, rz = home.z + Math.sin(a) * 24;
   if (!W.isLand(rx, rz) || W.pushOutCircle(rx, rz, 1).hit) return;
   const crew = [];
-  for (let i = 0; i < 3; i++) { const w = newWalker('gang:' + rival.id, rx + (i - 1) * 1.2, rz, 0, null); w.gang = rival.id; w.temper = Math.random() < 0.5 ? 'gunman' : 'brawler'; w.farCol = parseInt(rival.color.slice(1), 16); crew.push(w); }
+  for (let i = 0; i < 3; i++) { const w = newWalker('gang:' + rival.id, rx + (i - 1) * 1.2, rz, 0, null); w.gang = rival.id; w.temper = Math.random() < 0.2 ? 'gunman' : 'brawler'; w.farCol = parseInt(rival.color.slice(1), 16); crew.push(w); }
   const locals = home.members.filter((m) => !m.dead);
   for (const w of crew) { w.enemy = locals[Math.floor(Math.random() * locals.length)]; say(w, `${rival.name}!`); goHostile(w, w.temper === 'gunman' ? 'gun' : 'melee', false); w.modeT = 30; }
   for (const m of locals) { m.enemy = crew[Math.floor(Math.random() * crew.length)]; goHostile(m, m.temper === 'gunman' ? 'gun' : 'melee', false); m.modeT = 30; }
@@ -339,10 +342,14 @@ export function scare(x, z, radius, kind = 'gunfire') {
     if (d > radius) continue;
     if (w.temper === 'gunman' && d < 30 && kind !== 'explosion' && Math.random() < 0.5) { goHostile(w, 'gun'); continue; }
     if (w.call) continue; // already on the phone to the cops
+    // calm people take their own moment to clock it (a bang is hard to miss), then run, hide or trip (see w.pending)
+    if (CALM.has(w.mode)) { if (!w.pending) w.pending = { t: reactT(w) * (kind === 'explosion' ? 0.5 : 1), x, z }; continue; }
     if (Math.random() < 0.3) hideFrom(w, x, z);
     else startFlee(w, x, z);
   }
 }
+// how long this person takes to react to danger; phones and chats make it worse
+const reactT = (w) => w.react + (w.texting || w.chatty || (w.fixed && (w.fixed.pose === 'phone' || w.fixed.pose === 'chat')) ? 0.45 : 0);
 export const panicNear = (x, z, radius) => scare(x, z, radius, 'gunfire');
 // A crash, a fistfight or someone down (no shooting): people stop, gather round and film it.
 const WATCH_LINES = { crash: ['Whoa!', 'Did you see that?!', 'Is everyone OK?', "I'm calling 911!", 'Oh my god!'], fight: ['Fight! Fight!', 'Break it up!', 'Ooooh!', 'Somebody stop them!', 'Get him!'], down: ['Is he OK?!', 'Call an ambulance!', 'Oh no...', 'Somebody help!'] };
@@ -362,14 +369,14 @@ export function incident(x, z, kind = 'crash') {
 function startFlee(w, x, z, short) {
   if (!short && Math.random() < 0.4 && w.mode !== 'flee') say(w, line('scream'));
   const was = w.mode;
-  w.mode = 'flee'; w.modeT = short ? 2 : 6 + Math.random() * 4; w.fx = x; w.fz = z;
+  w.mode = 'flee'; w.modeT = short ? 2 : 6 + Math.random() * 4; w.fx = x; w.fz = z; w.fleeSp = 0; w.freezeT = 0;
   w.fh = Math.atan2(w.x - x, w.z - z) + (Math.random() - 0.5) * 0.8;
   w.watch = null;
   // panic spreads: people nearby notice the screaming and run a moment later
   if (!short && was !== 'flee') for (const n of walkers) {
     if (n === w || n.dead || n.pending || !CALM.has(n.mode)) continue;
     const d = Math.hypot(n.x - w.x, n.z - w.z);
-    if (d < 11) n.pending = { t: 0.25 + d * 0.06 + Math.random() * 0.5, x, z };
+    if (d < 11) n.pending = { t: reactT(n) + d * 0.06 + Math.random() * 0.3, x, z };
   }
 }
 const CALM = new Set(['walk', 'link', 'fixed', 'watch', 'enter', 'tocar']);
@@ -388,14 +395,14 @@ function hideFrom(w, x, z) {
 }
 function goHostile(w, kind, join = true) {
   w.mode = 'hostile'; w.hostile = kind; w.modeT = 18; w.cd = kind === 'gun' ? 1.2 : 0.6; w.call = null; w.watch = null; w.combo = 0;
-  if (kind === 'melee' && w.bat === undefined) w.bat = Math.random() < 0.22;
+  if (kind === 'melee' && w.bat === undefined) w.bat = Math.random() < (w.gang ? 0.12 : 0.07); // few people carry a bat
   if (!join) return;
   // their friends (and the odd hothead nearby) pile in
   for (const n of walkers) {
     if (n === w || n.dead || n.mode === 'hostile' || n.gang !== w.gang) continue;
     const d = Math.hypot(n.x - w.x, n.z - w.z);
     if ((n.grp && n.grp === w.grp) || (w.gang && d < 30) || (n.temper === 'brawler' && d < 14 && Math.random() < 0.35)) {
-      n.enemy = w.enemy; setTimeout(() => { if (!n.dead && CALM.has(n.mode)) { say(n, line('fight')); goHostile(n, n.temper === 'gunman' || (w.gang && Math.random() < 0.4) ? 'gun' : 'melee', false); } }, 300 + Math.random() * 900);
+      n.enemy = w.enemy; setTimeout(() => { if (!n.dead && CALM.has(n.mode)) { say(n, line('fight')); goHostile(n, n.temper === 'gunman' || (w.gang && Math.random() < 0.15) ? 'gun' : 'melee', false); } }, 300 + Math.random() * 900);
     }
   }
 }
@@ -424,6 +431,7 @@ export function provoke(w) {
 }
 // After running off: walk again from the nearest sidewalk.
 function calmDown(w) {
+  w.pending = null; // whatever scared them before is old news
   const q = W.nearestEdge(w.x, w.z, 40, SIDEWALK);
   if (!q) { w.mode = 'gone'; w.modeT = 3; return; }
   const s = Math.max(2, Math.min(q.e.len - 2, q.s));
@@ -485,10 +493,11 @@ export function updateWalkers(dt, tSec, nowMs, cam) {
     } else if (freeModes.has(w.mode)) {
       w.modeT -= dt;
       if (w.mode === 'flee') {
-        const p = W.pushOutCircle(w.x + Math.sin(w.fh) * 6 * dt, w.z + Math.cos(w.fh) * 6 * dt, 0.4);
-        if (Math.hypot(p.x - w.x, p.z - w.z) < 6 * dt * 0.5) w.fh += 1.2;
+        const fs = w.fleeSp || 6; // fleeSp: a brisk step out of the way rather than a sprint
+        const p = W.pushOutCircle(w.x + Math.sin(w.fh) * fs * dt, w.z + Math.cos(w.fh) * fs * dt, 0.4);
+        if (Math.hypot(p.x - w.x, p.z - w.z) < fs * dt * 0.5) w.fh += 1.2;
         if (W.isLand(p.x, p.z)) { w.x = p.x; w.z = p.z; } else w.fh += Math.PI;
-        w.h = w.fh; speed = 7;
+        w.h = w.fh; speed = fs + 1;
         if (w.modeT <= 0) { if (w.grp) { w.mode = 'gone'; w.modeT = 20; } else calmDown(w); }
       } else if (w.mode === 'cower') {
         if (w.coverAt) {
@@ -520,18 +529,32 @@ export function updateWalkers(dt, tSec, nowMs, cam) {
         continue;
       }
     } else {
-      // jump out of the way of a car coming straight at you
+      // a car coming straight at you: after your own reaction time, dive clear if it's close or fast,
+      // otherwise most just step out of the way and some freeze up for a moment
       if (w.mode !== 'fixed' || w.fixed.pose !== 'sit') {
-        let dodged = false;
+        let car = null;
         for (const v of ctx.vehicles()) {
           const vs = Math.hypot(v.vx || 0, v.vz || 0);
           if (vs < 6) continue;
           const dx = w.x - v.x, dz = w.z - v.z;
-          if (Math.abs(dx) > 14 || Math.abs(dz) > 14) continue;
+          if (Math.abs(dx) > 22 || Math.abs(dz) > 22) continue;
           const along = (dx * v.vx + dz * v.vz) / vs, lat = (dx * v.vz - dz * v.vx) / vs;
-          if (along > 0 && along / vs < 1.4 && Math.abs(lat) < 2.2) { const side = lat >= 0 ? 1 : -1; startFlee(w, w.x - (v.vz / vs) * side * 5, w.z + (v.vx / vs) * side * 5, true); dodged = true; break; }
+          if (along > 0 && along / vs < 1.8 && Math.abs(lat) < 2.3) { car = { v, vs, lat, tt: along / vs }; break; }
         }
-        if (dodged) continue;
+        if (!car) w.carT = 0;
+        else if ((w.carT = (w.carT || 0) + dt) > reactT(w)) {
+          const { v, vs } = car, side = car.lat >= 0 ? 1 : -1, ax = w.x - (v.vz / vs) * side * 5, az = w.z + (v.vx / vs) * side * 5, r = Math.random();
+          w.carT = 0; w.freezeT = 0;
+          if (car.tt < 0.7 || vs > 17 || r < 0.2) startFlee(w, ax, az, true);
+          else if (r < 0.7 && !w.grp) { startFlee(w, ax, az, true); w.modeT = 0.9; w.fleeSp = 2.6; if (r < 0.35) say(w, pick(['Hey!', 'Whoa!', 'Watch it!'])); }
+          else { w.freezeT = 0.5 + Math.random() * 0.7; say(w, 'Whoa!'); }
+          if (w.mode === 'flee') continue;
+        }
+      }
+      if (w.freezeT > 0) { // frozen in the road, arms up over the head
+        w.freezeT -= dt; w.y = W.groundHeight(w.x, w.z);
+        drawWalker(w, cam, 0, { cower: true }, dt, nearR);
+        continue;
       }
       // someone nearby started screaming: run (or hide, or trip over your own feet)
       if (w.pending) {
@@ -630,6 +653,7 @@ export function updateWalkers(dt, tSec, nowMs, cam) {
         if (w.mode === 'walk') { const p = walkPose(w); w.x = p.x; w.z = p.z; w.h += angDiff(w.h, p.h) * Math.min(1, dt * 8); }
         speed = w.speed * hurry * (w.role === 'jogger' ? 1.3 : 1.45);
         if (w.chatty) pose = { chat: true };
+        if (w.texting) pose = { text: true };
         if (w.cane) pose = { cane: true };
         if (w.skate) pose = { skate: true };
       } else if (w.mode === 'link') {

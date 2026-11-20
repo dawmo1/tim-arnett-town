@@ -55,7 +55,11 @@ export function updateOccupants(cars, cam, dt) {
       seated.set(v, list);
     }
     used += list.length;
-    for (const o of list) animateCharacter(o.ch, dt, o.seat === 'D' ? { drive: !v.T.bike, sit: !!v.T.bike, steer: v.steerVis || 0, look: 0 } : { sit: true, chat: o.seat === 'P' && Math.random() < 0.002 ? true : undefined });
+    const ko = v.ko && v.npcDriver; // knocked out in a crash: slumped over toward the door
+    for (const o of list) {
+      animateCharacter(o.ch, dt, o.seat === 'D' ? (ko ? { sit: true } : { drive: !v.T.bike, sit: !!v.T.bike, steer: v.steerVis || 0, look: 0 }) : { sit: true, chat: o.seat === 'P' && Math.random() < 0.002 ? true : undefined });
+      if (o.seat === 'D') o.ch.g.rotation.set(ko ? 0.3 : 0, 0, ko ? -0.45 : 0);
+    }
   }
   for (const [v, list] of seated) {
     if (keep.has(v)) continue;
