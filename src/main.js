@@ -8,7 +8,9 @@ import { makeCharacter, animateCharacter, placeCharacter, randomLook, nameTag, m
 import { SKIN as SKIN_TONES, TOPS, BOTTOMS, HAIRS, HATS, CLOTH, HAIRC, SHOES, BEARDS, GLASSES, MASKS } from './people/looks.js';
 import { createAllVehicles, makeParked, makeVehicle, V, TYPES, initFarCars, farCarsBegin, farCarAdd, farCarsEnd, stepVehicle, collideVehicles, pushCharOut, circles, charVehicle, makeVehicleMesh, damageZone, applyDamageVisual, applyBump } from './vehicles.js';
 import { initTraffic, updateTraffic as tickTraffic, bumpTraffic, scareTraffic, updateSignals, traffic, patrolViewers } from './traffic.js';
-import { initWalkers, updateWalkers, walkers, panicNear, spawnFleeing, scare, provoke, setNpcContext, cartNear, revive } from './npc.js';
+import { initWalkers, updateWalkers, walkers, panicNear, spawnFleeing, scare, provoke, setNpcContext, cartNear, revive, incident } from './npc.js';
+import { joinTraffic } from './traffic.js';
+import { GANGS } from './gangs.js';
 import { initEmergency, updateEmergency, reportDown } from './emergency.js';
 import { initLandmarks, updateLandmarks, doors, closedCrossings, trainCars, bargeList } from './landmarks.js';
 import * as interior from './interiors.js';
@@ -208,6 +210,7 @@ initCarLights(scene);
 const vehicles = createAllVehicles(scene, []);
 initFarCars(scene);
 ui.drawMapBase();
+ui.setTurfs(GANGS);
 ui.buildWheel(WEAPONS, (i) => { selectWeapon(i); closeWheel(false); });
 ui.setWheelInfo((i) => { const w = WEAPONS[i]; if (!me.owned.has(i)) return `Buy at Arnett Arms · $${w.price}`; if (w.melee) return 'Melee'; const a = ammoOf(i); return w.grenade ? `${a.mag + a.res} grenades` : `${a.mag} / ${a.res} rounds`; });
 const vehById = new Map(vehicles.map((v) => [v.id, v]));
@@ -247,6 +250,7 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyN' && me.veh && !me.veh.T.bike) { const st = nextStation(); ui.flashPrompt(st.sub ? `📻 ${st.name} · ${st.sub}` : st.name); }
   if (e.code === 'KeyP') openPhone();
   if (e.code === 'KeyG' || e.code === 'KeyH') talk(e.code === 'KeyG');
+  if (e.code === 'KeyC' && playing && !me.veh && !me.dead && !typing) { me.crouch = !me.crouch; ui.flashPrompt(me.crouch ? 'Crouching (C to stand)' : 'Standing'); }
 });
 addEventListener('keyup', (e) => { keys.delete(e.code); if ((e.code === 'Tab' || e.code === 'KeyQ') && wheelOpen) closeWheel(true); });
 addEventListener('blur', () => { keys.clear(); mouseDown = false; });
@@ -596,11 +600,13 @@ function damageVehicle(v, dmg, hit) {
   if (v.hp <= -v.T.hp * 0.4 && !v.burnAt) { v.burnAt = net.now(); v.burnBy = net.uid; }
   writeVeh(v, true);
 }
+let lastIncident = 0;
 function crashFx(v, hit) {
   const [px, pz] = hit.cp, d = distCam(px, pz);
   if (hit.imp > 4) { fx.sparks(px, v.y + 0.6, pz, Math.min(24, Math.round(hit.imp * 1.2)), hit.nx, hit.nz); fx.soundCrunch(hit.imp / 18, d); }
   else if (hit.imp > 0.6) { fx.sparks(px, v.y + 0.5, pz, 2, hit.nx, hit.nz); fx.soundScrape(d); }
   if (hit.imp > 15) fx.glass(px, v.y + 1, pz, 8);
+  if (hit.imp > 12 && (!lastIncident || performance.now() - lastIncident > 8000)) { lastIncident = performance.now(); incident(px, pz, 'crash'); }
   if (v === me.veh && hit.imp > 8) shake = Math.max(shake, Math.min(1, hit.imp / 30));
 }
 // Hand out impulses that couldn't be applied here (other players' cars, host-run cops).
@@ -656,9 +662,9 @@ function explode(x, y, z, by, bu, origin) {
   }
   if (isHost) for (const u of police.cops.values()) { const d = copDist(u, x, y, z); if (d < R) police.damageCop(u.id, 150 * (1 - d / R)); }
 }
-function copDist(u, x, y, z) { const P = police.posOf(u); return Math.hypot(P.x - x, (u.kind < 2 ? u.v.y : u.y || 0) - y, P.z - z); }
+function copDist(u, x, y, z) { if (u.kind === 4) return 1e9; const P = police.posOf(u); return Math.hypot(P.x - x, (u.kind < 2 ? u.v.y : u.y || 0) - y, P.z - z); }
 // force: how hard the hit shoves them (bullets ~3, bat 7, cars and explosions much more)
-function hurtWalker(w, dmg, dx, dz, p, force = 3) {
+function hurtWalker(w, dmg, dx, dz, p, force = 3, byNpc = false) {
   if (w.dead) return;
   w.hp -= dmg;
   const hp = p || { x: w.x, y: (w.y || 0) + 1.2, z: w.z };
@@ -667,7 +673,7 @@ function hurtWalker(w, dmg, dx, dz, p, force = 3) {
   if (w.hp > 0) {
     if (force >= 6) knock(w, vel, false);
     else {
-      flinch(w); provoke(w);
+      flinch(w); if (!byNpc) provoke(w);
       // stagger away from the hit; a leg hit makes them limp, a body hit makes them clutch the wound
       const c = w.ch, ch_ = Math.cos(w.h), sh = Math.sin(w.h);
       c.hitT = 1; c.hitX = dx * ch_ - dz * sh; c.hitZ = dx * sh + dz * ch_;
@@ -678,8 +684,9 @@ function hurtWalker(w, dmg, dx, dz, p, force = 3) {
   else knock(w, vel, true);
   if (w.hp <= 0) {
     w.dead = { x: r1(w.x), z: r1(w.z), h: r2(w.h), t: net.now() };
+    if (force >= 6 || byNpc) setTimeout(() => incident(w.x, w.z, 'down'), 1500);
     setTimeout(() => { const p = w.ch.rag ? ragPos(w.ch) : w; fx.bloodPool(p.x, p.z, 1.4); }, 1300); // pool forms where the body comes to rest
-    report('kill', w.x, w.z);
+    if (!byNpc) report('kill', w.x, w.z);
     if (Math.random() < 0.75) dropCash(w.x, w.z, 5 + Math.floor(Math.random() * 40));
     reportDown(w);
     return true;
@@ -1004,7 +1011,16 @@ function fire(w) {
   if (w.name === 'Shotgun' || w.name === 'Rifle') shake = Math.max(shake, 0.12);
   if (a.mag <= 0 && a.res > 0) startReload();
   refreshWeaponHud();
-  panicNear(me.x, me.z, 30); startle(me.x, me.z, 30); scareTraffic(me.x, me.z, 60);
+  panicNear(me.x, me.z, 30); startle(me.x, me.z, 30); scareTraffic(me.x, me.z, 60); bailOut(me.x, me.z, 22);
+}
+// Gunfire next to a car stuck in traffic: some drivers jump out and run, leaving the door open.
+function bailOut(x, z, r) {
+  for (const v of [...vehicles]) {
+    if (v.mode !== 'traffic' || Math.abs(v.speed || 0) > 3 || v.T.bike || Math.hypot(v.x - x, v.z - z) > r || Math.random() > 0.35) continue;
+    freeTraffic(v, true); v.npcDriver = false; v.doorOpen = 1; v.doorCloseAt = 0;
+    const n = emptyCar(v), lx = Math.cos(v.h), lz = -Math.sin(v.h);
+    for (let i = 0; i < Math.max(1, n); i++) spawnFleeing(v.x + lx * (i % 2 ? -1.7 : 1.7), v.z + lz * (i % 2 ? -1.7 : 1.7), Math.atan2(v.x - x, v.z - z), 0);
+  }
 }
 // Where a bullet ends: holes and dust on walls and the ground, sparks off metal, and blood sprayed
 // onto the wall or the road behind whoever got hit.
@@ -1023,7 +1039,7 @@ function melee(w) {
   const fx_ = Math.sin(me.h), fz_ = Math.cos(me.h);
   const inFront = (x, z) => { const dx = x - me.x, dz = z - me.z, d = Math.hypot(dx, dz); return d < w.range && (dx * fx_ + dz * fz_) / (d || 1) > 0.35; };
   lastAttack = performance.now();
-  for (const wk of walkers) if (!wk.dead && inFront(wk.x, wk.z)) { const k = hurtWalker(wk, w.dmg, fx_, fz_, null, w.name === 'Bat' ? 7.5 : w.force || (Math.random() < 0.25 ? 6 : 3)); if (!k) report('assault', wk.x, wk.z); ui.hitMarker(k); fx.soundHit(); return; }
+  for (const wk of walkers) if (!wk.dead && inFront(wk.x, wk.z)) { const k = hurtWalker(wk, w.dmg, fx_, fz_, null, w.name === 'Bat' ? 7.5 : w.force || (Math.random() < 0.25 ? 6 : 3)); if (!k) report('assault', wk.x, wk.z); ui.hitMarker(k); fx.soundHit(); if (performance.now() - lastIncident > 6000) { lastIncident = performance.now(); incident(wk.x, wk.z, 'fight'); } return; }
   for (const u of police.cops.values()) if (u.kind === 2 && !u.dead && inFront(u.x, u.z)) { damageCopUnit(u, w.dmg); fx.soundHit(); return; }
   for (const r of remotes.values()) if (!r.dead && !r.veh && inFront(r.x, r.z)) {
     sendEvent('hit', { to: r.uid, dmg: w.dmg, by: me.name }); report('assault', r.x, r.z); fx.blood(r.x, r.y + 1.3, r.z, fx_, fz_); fx.soundHit(); return;
@@ -1354,9 +1370,45 @@ function ragdollUpdate(dt) {
   if (r.t <= 0) { me.rag = null; me.ch.body.rotation.set(0, 0, 0); me.ch.body.position.y = 0; me.vy = 0; me.h = me.ch.g.rotation.y; }
 }
 
+// Space in front of something: climb onto a low roof or wall top, or vault over a car / low wall.
+function tryClimb() {
+  const fx_ = Math.sin(me.h), fz_ = Math.cos(me.h);
+  // a parked car right in front: vault the hood
+  for (const v of vehicles) {
+    if (v.T.bike || v.T.boat || v.T.heli || Math.abs(v.x - me.x) > 4 || Math.abs(v.z - me.z) > 4 || v.T.hgt > 1.95) continue;
+    const ahead = { x: me.x + fx_ * 0.9, z: me.z + fz_ * 0.9 }, q = pushCharOut(ahead.x, ahead.z, 0.3, v);
+    if (Math.hypot(q.x - ahead.x, q.z - ahead.z) < 1e-3) continue;
+    const across = v.T.wid + 1.0, to = { x: me.x + fx_ * across, z: me.z + fz_ * across };
+    if (W.pushOutCircle(to.x, to.z, 0.4).hit) return false;
+    me.move = { kind: 'vault', t: 0, dur: 0.75, from: { x: me.x, y: me.y, z: me.z }, to: { x: to.x, y: W.groundHeight(to.x, to.z), z: to.z }, peak: v.y + v.T.hgt + 0.15 };
+    return true;
+  }
+  // a wall: is its top (a roof) within reach?
+  const t = W.rayBuildings(me.x, me.y + 0.5, me.z, fx_, 0, fz_, 1.1);
+  if (t > 1.05) return false;
+  const tx = me.x + fx_ * (t + 0.45), tz = me.z + fz_ * (t + 0.45), top = W.roofAt(tx, tz), rise = top - me.y;
+  if (!(rise > 0.6 && rise < 2.7)) return false;
+  me.move = { kind: rise < 1.3 ? 'vault' : 'climb', t: 0, dur: rise < 1.3 ? 0.6 : 1.1, from: { x: me.x, y: me.y, z: me.z }, to: { x: tx, y: top + 0.05, z: tz }, peak: top + 0.25 };
+  return true;
+}
 function footUpdate(dt, fwd, side) {
   const sprint = keys.has('ShiftLeft') || keys.has('ShiftRight');
-  const speed = me.swim ? 2.6 : aiming ? 2.6 : sprint ? 8 : 4.5;
+  // mid-climb / mid-vault: the move drives you, no steering
+  if (me.move) {
+    const m = me.move; m.t += dt;
+    const k = Math.min(1, m.t / m.dur), e = k * k * (3 - 2 * k);
+    me.x = m.from.x + (m.to.x - m.from.x) * (m.kind === 'climb' ? Math.max(0, (k - 0.55) / 0.45) : e);
+    me.z = m.from.z + (m.to.z - m.from.z) * (m.kind === 'climb' ? Math.max(0, (k - 0.55) / 0.45) : e);
+    me.y = m.kind === 'climb' ? m.from.y + (m.to.y - m.from.y) * Math.min(1, k / 0.6) : m.from.y + (m.to.y - m.from.y) * e + Math.sin(k * Math.PI) * Math.max(0.3, m.peak - Math.max(m.from.y, m.to.y));
+    me.vy = 0; me.moveSpeed = 0;
+    me.ch.g.position.set(me.x, me.y, me.z); me.ch.g.rotation.set(0, me.h, 0);
+    animateCharacter(me.ch, dt, m.kind === 'climb' ? { climb: k } : { vault: k });
+    if (k >= 1) { me.move = null; me.grounded = true; }
+    return;
+  }
+  const crouch = !!me.crouch && !me.swim;
+  const speed = me.swim ? 2.6 : aiming ? 2.6 : crouch ? 2.0 : sprint ? 8 : 4.5;
+  if (sprint && crouch && fwd) me.crouch = false;
   const rx = -Math.cos(camYaw), rz = Math.sin(camYaw);
   let mx = Math.sin(camYaw) * fwd + rx * side, mz = Math.cos(camYaw) * fwd + rz * side;
   const ml = Math.hypot(mx, mz);
@@ -1373,6 +1425,7 @@ function footUpdate(dt, fwd, side) {
   if (!interior.room && (W.offMap(me.x, me.z) || (W.isLand(me.x, me.z) && W.surfaceHeight(me.x, me.z, me.y) - me.y > (me.swim ? 1.9 : 0.7)))) { me.x = ox; me.z = oz; }
   const p = W.pushOutCircle(me.x, me.z, 0.4, me.y);
   me.x = p.x; me.z = p.z;
+  me.inCover = crouch && p.hit;
   const pushers = [...vehicles];
   for (const u of police.cops.values()) if (u.kind < 2) pushers.push(u.v);
   for (const v of pushers) {
@@ -1391,18 +1444,28 @@ function footUpdate(dt, fwd, side) {
     me.swim = false;
     const gh = interior.room ? interior.room.y : W.surfaceHeight(me.x, me.z, me.y); // roofs count when you're on them
     if (me.y <= gh + 0.05 && me.vy <= 0) { me.y = gh; me.vy = 0; me.grounded = true; } else me.grounded = false;
-    if (me.grounded && keys.has('Space')) { me.vy = 6.5; me.grounded = false; }
+    if (me.grounded && keys.has('Space') && !me.move) { if (!tryClimb()) { me.vy = 6.5; me.grounded = false; me.crouch = false; } }
   } else {
     if (me.y <= W.SWIM_Y) { me.y = W.SWIM_Y; me.vy = 0; me.swim = true; }
     me.grounded = false;
   }
   me.moveSpeed = ml > 0 ? speed : 0;
+  // footsteps: twice per walk cycle, a sound for the ground under you
+  if (me.grounded && ml > 0) {
+    const ph = Math.floor((me.ch.walk || 0) / Math.PI);
+    if (ph !== me.stepPh) {
+      me.stepPh = ph;
+      const cls = interior.room ? 'wood' : W.classAt(me.x, me.z), onRoof = W.buildingKindAt(me.x, me.z) >= 0 && me.y > W.groundHeight(me.x, me.z) + 1;
+      const kind = weather.snow > 0.4 && !interior.room ? 'snow' : weather.wet > 0.6 ? 'water' : onRoof ? 'metal' : cls === W.C.lawn || cls === W.C.park || cls === W.C.wood ? 'grass' : 'concrete';
+      fx.footstep(kind, sprint ? 1.3 : 1);
+    }
+  }
   me.ch.g.visible = true;
   me.ch.g.position.set(me.x, me.y, me.z);
   me.ch.g.rotation.set(0, me.h, 0);
   const wpn = WEAPONS[me.weapon];
   me.recoil = Math.max(0, (me.recoil || 0) - dt * 8);
-  animateCharacter(me.ch, dt, { speed: aimPose ? Math.min(me.moveSpeed, 3) : me.moveSpeed, aim: aimPose, swim: me.swim, swing: me.swing, weapon: me.swim ? 'none' : wk, wmodel: me.swim ? null : wpn.model, rifle: wpn.long, recoil: me.recoil, reload: me.reloadT > 0 ? 1 - me.reloadT / (wpn.name === 'Shotgun' ? 1.8 : 1.3) : 0, pitch: aimPose ? -camPitch * 57 : 0, carry: !aimPose && wpn.long });
+  animateCharacter(me.ch, dt, { crouch: crouch && !me.inCover && !aimPose, cover: me.inCover && !aimPose, speed: aimPose ? Math.min(me.moveSpeed, 3) : me.moveSpeed, aim: aimPose, swim: me.swim, swing: me.swing, weapon: me.swim ? 'none' : wk, wmodel: me.swim ? null : wpn.model, rifle: wpn.long, recoil: me.recoil, reload: me.reloadT > 0 ? 1 - me.reloadT / (wpn.name === 'Shotgun' ? 1.8 : 1.3) : 0, pitch: aimPose ? -camPitch * 57 : 0, carry: !aimPose && wpn.long });
 }
 
 function driveUpdate(dt, fwd, side) {
@@ -1411,6 +1474,9 @@ function driveUpdate(dt, fwd, side) {
   const shift = keys.has('ShiftLeft') || keys.has('ShiftRight');
   const imp = stepVehicle(v, { throttle: fwd > 0 ? 1 : 0, brake: fwd < 0 ? 1 : 0, steer: -side, handbrake: !v.T.heli && keys.has('Space'), nitro: shift && !v.T.heli, up: keys.has('Space'), down: shift }, dt);
   engineSound(v, fwd, dt);
+  // police spike strip: tyres burst (bulletproof tyres shrug it off)
+  if (!v.flat && !v.T.bulletproof && !v.T.boat && !v.T.heli && police.spikesHit(v)) { v.flat = true; fx.sparks(v.x, v.y + 0.3, v.z, 14); fx.soundBoom(30); ui.flashPrompt('Tyres blown!'); }
+  if (v.flat && Math.abs(v.speed) > 4 && Math.random() < dt * 8) fx.sparks(v.x - Math.sin(v.h) * v.T.len * 0.35, v.y + 0.1, v.z - Math.cos(v.h) * v.T.len * 0.35, 2);
   if (v.boosting) { fx.sparks(v.x - Math.sin(v.h) * v.T.len / 2, v.y + 0.4, v.z - Math.cos(v.h) * v.T.len / 2, 2, -Math.sin(v.h), -Math.cos(v.h)); if (!v.boostSnd) { fx.soundNitro(); v.boostSnd = true; } } else v.boostSnd = false;
   if (v.T.boat && Math.abs(v.speed) > 6 && Math.random() < 0.5) fx.smokePuff(v.x - Math.sin(v.h) * v.T.len / 2, -0.1, v.z - Math.cos(v.h) * v.T.len / 2, true, 0.6);
   const wallHit = v.hit;
@@ -1613,15 +1679,15 @@ function gunShopItems() {
 }
 // Arnett Auto: repairs, paint and wheels, performance, armor. Upgrades belong to that car.
 function modT(v) { if (!v.T.own) v.T = { ...v.T, own: true }; return v.T; }
-function rebuildCar(v) { scene.remove(v.mesh); v.mesh = makeVehicleMesh(v.T, v.color); scene.add(v.mesh); applyDamageVisual(v); if (v.rims) paintRims(v); v.headFor = ''; }
-function paintRims(v) { for (const w of v.mesh.userData.parts.wheels) w.children.forEach((c, i) => { if (i === 1) c.material = mat(v.rims); }); }
+function rebuildCar(v) { scene.remove(v.mesh); v.mesh = makeVehicleMesh(v.T, v.color, 0, v.ti); scene.add(v.mesh); applyDamageVisual(v); if (v.rims) paintRims(v); v.headFor = ''; }
+function paintRims(v) { const rim = new THREE.MeshStandardMaterial({ color: v.rims, metalness: 0.85, roughness: 0.25 }); for (const w of v.mesh.userData.parts.wheels) (w.userData.spin || w).traverse((c) => { if (c.isMesh && (c.material.name === 'rim' || c.userData.rim)) { c.material = rim; c.userData.rim = true; } }); }
 function bodyShop(v) { openShop('Arnett Auto', autoItems(v)); }
 function autoItems(v) {
   const done = (k) => v.mods && v.mods[k];
   const mod = (k, f) => () => { v.mods = v.mods || {}; v.mods[k] = true; f(modT(v)); ui.announce('UPGRADED', v.T.name); };
   const paint = (name, c) => ({ label: `Paint: ${name}`, sub: 'Fresh coat, same car', price: 100, buy: () => { v.color = c; rebuildCar(v); writeVeh(v, true); } });
   return [
-    { label: 'Repair', sub: 'Fix the body, engine and glass (the cops still know your face)', price: 150, ok: () => v.hp < v.T.hp || v.dz.f + v.dz.b + v.dz.l + v.dz.r > 0, buy: () => { v.hp = v.T.hp; v.dz = { f: 0, b: 0, l: 0, r: 0 }; v.burnAt = 0; rebuildCar(v); writeVeh(v, true); } },
+    { label: 'Repair', sub: 'Fix the body, engine and glass (the cops still know your face)', price: 150, ok: () => v.hp < v.T.hp || v.flat || v.dz.f + v.dz.b + v.dz.l + v.dz.r > 0, buy: () => { v.hp = v.T.hp; v.dz = { f: 0, b: 0, l: 0, r: 0 }; v.burnAt = 0; v.flat = false; v.brokenHead = v.brokenTail = false; rebuildCar(v); writeVeh(v, true); } },
     paint('Arnett Red', 0xc62828), paint('River Blue', 0x1565c0), paint('Midnight Black', 0x111214), paint('Pearl White', 0xf2f2f0), paint('Cornfield Gold', 0xe0a526), paint('Bluff Green', 0x2e7d32),
     { label: 'Wheels: chrome', sub: 'Shiny rims', price: 120, buy: () => { v.rims = 0xeceff1; paintRims(v); } },
     { label: 'Wheels: gold', sub: 'Flashy rims', price: 180, buy: () => { v.rims = 0xd4af37; paintRims(v); } },
@@ -1803,6 +1869,13 @@ setNpcContext({
   target: () => (playing && !me.dead ? { x: me.veh ? me.veh.x : me.x, y: me.veh ? me.veh.y : me.y, z: me.veh ? me.veh.z : me.z, dead: me.dead, inVeh: !!me.veh } : null),
   hitPlayer: (dmg, by, w) => damageMe(dmg, by, '', w && w.hostile === 'melee' && Math.random() < 0.2 ? { x: Math.sin(w.h) * 6, y: 2, z: Math.cos(w.h) * 6 } : null),
   vehicles: () => movingVehicles,
+  allVehicles: () => vehicles,
+  player: () => (playing ? { x: me.veh ? me.veh.x : me.x, z: me.veh ? me.veh.z : me.z, dead: me.dead, inVeh: !!me.veh, speed: me.moveSpeed || 0, vehSpeed: me.veh ? Math.abs(me.veh.speed) : 0, fancy: me.veh && (me.veh.T.limo || me.veh.T.name === 'Sports car' || me.veh.T.muscle), stars: wanted.stars, armed: WEAPONS[me.weapon].kind !== 'none' || WEAPONS[me.weapon].name === 'Knife', mask: MASKS[normLook(me.look)[18]], top: TOPS[normLook(me.look)[6]] } : null),
+  driveOff: (v) => { if (v.mode !== 'parked' || me.enter?.v === v) return false; const ok = joinTraffic(v); if (ok) { v.crew = null; writeVeh(v, true); } return ok; },
+  hurtNpc: (w, dmg, dx, dz, force) => hurtWalker(w, dmg, dx, dz, null, force, true),
+  dropCash: (x, z, n) => dropCash(x, z, n),
+  callIn: (x, z) => report('assault', x, z),
+  shove: (w) => { if (!me.veh && !me.dead) { me.vx += Math.sin(w.h) * 3; me.vz += Math.cos(w.h) * 3; me.x += Math.sin(w.h) * 0.4; me.z += Math.cos(w.h) * 0.4; me.ch.hitT = 0.7; me.ch.hitX = 0; me.ch.hitZ = -1; } },
   shot: (w, to) => { const from = { x: w.x + Math.sin(w.h) * 0.5, y: (w.y || 0) + 1.4, z: w.z + Math.cos(w.h) * 0.5 }; fx.tracer(from, to); fx.muzzleFlash(from); fx.soundShot('pistol', distCam(w.x, w.z)); },
 });
 initTraffic(scene, {
@@ -1977,7 +2050,10 @@ function updateWorldLife(dt, nowMs, t) {
     const shore = (wet / 5) * 0.5;
     let walls = 0; for (let k = 0; k < 6; k++) { const a = k * 1.047; if (W.rayBuildings(c.x, c.y, c.z, Math.sin(a), 0, Math.cos(a), 35) < 35) walls++; }
     fx.setEcho(walls / 6); // street canyons echo
-    fx.setAmbient({ hum: (1 - shore * 0.6) * (0.6 + 0.4 * weather.day), rain: weather.rain, waves: shore, crickets: n * (1 - weather.rain), birds: weather.day * (1 - weather.rain) * (1 - weather.night) });
+    let near = 0, crew = 0; for (const w of walkers) { if (w.dead) continue; const d = Math.hypot(w.x - c.x, w.z - c.z); if (d < 25) near++; if (d < 30 && w.role === 'worker') crew++; }
+    const cops = [...police.cops.values()].filter((u) => u.kind < 2 && !police.isDown(u)).length;
+    fx.setAmbient({ hum: (1 - shore * 0.6) * (0.6 + 0.4 * weather.day), rain: weather.rain, waves: shore, crickets: n * (1 - weather.rain), birds: weather.day * (1 - weather.rain) * (1 - weather.night),
+      crowd: Math.min(1, near / 14), wind: (weather.storm ? 1 : 0) + weather.snowing * 0.5 + (c.y > 30 ? 0.5 : 0), work: Math.min(1, crew / 2) * weather.day, sirens: cops > 0 ? 0 : 0.6 + n * 0.6 });
   }
 }
 

@@ -359,6 +359,7 @@ export function setAmbient(v) {
     am.connect(amg); amg.connect(pulse.gain); o.connect(pulse); pulse.connect(g); g.gain.value = 0; g.connect(out());
     o.start(); am.start();
     amb.crickets = g; amb.birdT = 0;
+    amb.crowd = loopNoise('bandpass', 700, 1.4); amb.wind = loopNoise('lowpass', 380, 0.7); amb.work = loopNoise('bandpass', 2300, 4);
   }
   const t = ac.currentTime;
   amb.hum.gain.setTargetAtTime(0.05 * v.hum, t, 0.5);
@@ -366,7 +367,31 @@ export function setAmbient(v) {
   // waves swell and fade
   amb.waves.gain.setTargetAtTime(0.09 * v.waves * (0.6 + 0.4 * Math.sin(t * 0.7)), t, 0.4);
   amb.crickets.gain.setTargetAtTime(0.006 * v.crickets, t, 0.8);
+  // crowd murmur, wind gusts in storms, a jackhammer/compressor near road crews
+  amb.crowd.gain.setTargetAtTime(0.045 * (v.crowd || 0) * (0.75 + 0.25 * Math.sin(t * 1.3)), t, 0.6);
+  amb.wind.gain.setTargetAtTime(0.11 * (v.wind || 0) * (0.5 + 0.5 * Math.sin(t * 0.37) * Math.sin(t * 0.91)), t, 0.4);
+  amb.work.gain.setTargetAtTime(0.03 * (v.work || 0) * (Math.sin(t * 9) > 0 ? 1 : 0.3), t, 0.05);
+  if ((v.sirens || 0) > 0 && Math.random() < 0.004 * v.sirens) farSiren();
   if (v.birds > 0.2 && Math.random() < 0.02 * v.birds) { const f = 2400 + Math.random() * 1800; tone('sine', f, 0.08, 0.025 * v.birds); tone('sine', f * 1.2, 0.07, 0.02 * v.birds, 0.09); }
+}
+// a siren somewhere across town (just a wailing tone, quiet)
+function farSiren() {
+  const o = ac.createOscillator(), g = ac.createGain(), t = ac.currentTime;
+  o.type = 'triangle'; o.frequency.setValueAtTime(650, t);
+  for (let k = 0; k < 6; k++) { o.frequency.linearRampToValueAtTime(900, t + k * 0.9 + 0.45); o.frequency.linearRampToValueAtTime(650, t + k * 0.9 + 0.9); }
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.012, t + 1); g.gain.exponentialRampToValueAtTime(0.0001, t + 5.4);
+  o.connect(g); g.connect(out()); o.start(t); o.stop(t + 5.5);
+}
+// footsteps: grass is soft, concrete taps, metal clangs, wood knocks, water splashes
+export function footstep(kind, loud = 1) {
+  if (!ac) return;
+  const v = 0.08 * loud;
+  if (kind === 'grass') burst(0.07, 900, v * 0.7);
+  else if (kind === 'metal') { burst(0.04, 3500, v * 0.6); tone('square', 520 + Math.random() * 120, 0.05, v * 0.12); }
+  else if (kind === 'wood') { burst(0.05, 1200, v * 0.7); tone('sine', 180 + Math.random() * 40, 0.06, v * 0.25); }
+  else if (kind === 'water') burst(0.12, 1800, v * 0.9);
+  else if (kind === 'snow') burst(0.09, 600, v * 0.8);
+  else burst(0.035, 2600 + Math.random() * 600, v * 0.75);
 }
 // WASTED: a low boom with a falling, detuned chord over it.
 export function soundWasted() {

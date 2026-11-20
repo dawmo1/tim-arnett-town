@@ -258,6 +258,15 @@ function drawRoute(g, route, pxPerM, from = 0) {
   g.strokeStyle = 'rgba(182, 120, 255, 0.95)'; g.lineWidth = 4.5 / pxPerM; g.lineCap = 'round'; g.lineJoin = 'round';
   g.beginPath(); g.moveTo(route[from][0], route[from][1]); for (let i = from + 1; i < route.length; i++) g.lineTo(route[i][0], route[i][1]); g.stroke();
 }
+// gang turf: faint coloured circles on both maps
+let turfs = [];
+export function setTurfs(list) { turfs = list; }
+function drawTurfs(c, lineW) {
+  for (const g of turfs) {
+    c.fillStyle = g.color + '22'; c.strokeStyle = g.color + '88'; c.lineWidth = lineW;
+    c.beginPath(); c.arc(g.x, g.z, g.r, 0, 7); c.fill(); c.stroke();
+  }
+}
 export function drawMinimap(view, me, blips, zoom = 1, cones = null, waypoint = null, route = null) {
   const Wd = el.minimap.width, Ht = el.minimap.height, cx = Wd / 2, cy = Ht * 0.6, k = zoom;
   const alpha = -Math.PI / 2 - Math.atan2(Math.cos(view.yaw), Math.sin(view.yaw));
@@ -276,6 +285,7 @@ export function drawMinimap(view, me, blips, zoom = 1, cones = null, waypoint = 
   mm.translate(cx, cy); mm.rotate(alpha); mm.scale(ppm, ppm); mm.translate(-view.x, -view.z);
   if (base) mm.drawImage(base, minX, minZ, base.width / BASE_S, base.height / BASE_S);
   drawVectors(mm, view.x, view.z, Math.hypot(Wd, Ht) / ppm * 0.75, ppm);
+  drawTurfs(mm, 2 / ppm);
   drawRoute(mm, route, ppm);
   mm.restore();
   if (cones) {
@@ -328,6 +338,7 @@ export function drawBigMap(me, blips, waypoint, route) {
   bm.translate(Wd / 2, Ht / 2); bm.scale(s, s); bm.translate(-big.cx, -big.cz);
   if (base) { bm.imageSmoothingEnabled = true; bm.drawImage(base, minX, minZ, base.width / BASE_S, base.height / BASE_S); }
   if (s > 0.45) drawVectors(bm, big.cx, big.cz, Math.hypot(Wd, Ht) / s * 0.55, s);
+  drawTurfs(bm, 2 / s);
   drawRoute(bm, route, s);
   bm.restore();
   const P = (x, z) => [Wd / 2 + (x - big.cx) * s, Ht / 2 + (z - big.cz) * s];

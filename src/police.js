@@ -1,8 +1,9 @@
 // Police. The host's computer runs every unit and shares them 5x a second; everyone else draws them.
-// Unit kinds: 0 patrol car, 1 roadblock car, 2 officer on foot, 3 helicopter.
+// Unit kinds: 0 patrol car, 1 roadblock car, 2 officer on foot, 3 helicopter, 4 spike strip.
+// Ids starting with 's' (SWAT van) or 'w' (SWAT officer) are the heavy squad at 4+ stars.
 import * as THREE from 'three';
 import * as W from './world.js';
-import { makeVehicle, stepVehicle, collideVehicles, circles, charVehicle, POLICE, farCarAdd } from './vehicles.js';
+import { makeVehicle, stepVehicle, collideVehicles, circles, charVehicle, POLICE, V, farCarAdd } from './vehicles.js';
 import { animateWheels } from './carmodel.js';
 import { makeCharacter, animateCharacter, placeCharacter, mat } from './character.js';
 import { ragdoll, ragPos } from './ragdoll.js';
@@ -17,11 +18,13 @@ const OFFICER_LOOKS = [[0xe0ac69, 0x1f3a93, 0x111111, 0x111111], [0x8d5524, 0x1f
 
 export function initPolice(s, c) { scene = s; ctx = c; }
 export const posOf = (u) => (u.kind < 2 ? u.v : u);
-export const isDown = (u) => (u.kind < 2 ? u.v.exploded || u.v.hp <= 0 : u.dead);
+export const isDown = (u) => (u.kind === 4 ? true : u.kind < 2 ? u.v.exploded || u.v.hp <= 0 : u.dead);
 
 // ---------- creation ----------
 function spawnCar(id, x, z, h, kind, target, existing = null) {
-  const v = existing || makeVehicle(id, POLICE, 0xffffff, { x, z, h });
+  const swat = id[0] === 's';
+  const v = existing || makeVehicle(id, swat ? V.VAN : POLICE, swat ? 0x15171b : 0xffffff, { x, z, h });
+  if (swat) { v.T = { ...v.T, siren: true, hp: 320 }; v.hp = 320; v.sirenOn = true; }
   v.mode = 'cop'; v.ag = null;
   v.mesh.userData.driverHead.visible = true;
   if (!existing) scene.add(v.mesh);
@@ -29,12 +32,36 @@ function spawnCar(id, x, z, h, kind, target, existing = null) {
   cops.set(id, u);
   return u;
 }
+let flankN = 0;
 function spawnOfficer(id, x, z, h, target, car) {
-  const ch = makeCharacter(OFFICER_LOOKS[Math.floor(Math.random() * OFFICER_LOOKS.length)], { hat: 'cop' });
+  const swat = id[0] === 'w';
+  const ch = makeCharacter(null, { role: swat ? 'swat' : 'police' });
   scene.add(ch.g);
-  const u = { id, kind: 2, ch, x, z, y: W.groundHeight(x, z), h, hp: 60, target, car, cd: 0.8 + Math.random(), seq: 0, shot: [0, 0, 0], dead: false, deadAt: 0, spd: 0, idle: 0 };
+  const u = { id, kind: 2, ch, x, z, y: W.groundHeight(x, z), h, hp: swat ? 120 : 60, target, car, cd: 0.8 + Math.random(), seq: 0, shot: [0, 0, 0], dead: false, deadAt: 0, spd: 0, idle: 0, swat, flank: [0, 1, -1][flankN++ % 3] };
   cops.set(id, u);
   return u;
+}
+// a spike strip laid across the road ahead of a roadblock
+let spikeMat = null;
+function spawnSpike(id, x, z, h, target) {
+  spikeMat = spikeMat || new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.5, metalness: 0.7 });
+  const g = new THREE.Group(), w = 7;
+  const bar = new THREE.Mesh(new THREE.BoxGeometry(w, 0.05, 0.35), spikeMat); bar.position.y = 0.03; g.add(bar);
+  for (let i = 0; i < 18; i++) { const s = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.12, 4), spikeMat); s.position.set(-w / 2 + (i + 0.5) * (w / 18), 0.1, (i % 2 - 0.5) * 0.18); g.add(s); }
+  g.position.set(x, W.groundHeight(x, z) + 0.02, z); g.rotation.y = h; scene.add(g);
+  const u = { id, kind: 4, mesh: g, x, z, h, w, target, life: 45, seq: 0, shot: [0, 0, 0] };
+  cops.set(id, u);
+  return u;
+}
+// cars crossing a strip burst their tyres (returns true once per strip per car)
+export function spikesHit(v) {
+  for (const u of cops.values()) {
+    if (u.kind !== 4) continue;
+    const dx = v.x - u.x, dz = v.z - u.z;
+    const along = dx * Math.cos(u.h) - dz * Math.sin(u.h), across = dx * Math.sin(u.h) + dz * Math.cos(u.h);
+    if (Math.abs(along) < u.w / 2 + 0.5 && Math.abs(across) < 0.6) return true;
+  }
+  return false;
 }
 function heliMesh() {
   const g = new THREE.Group();
@@ -112,13 +139,23 @@ export function hostUpdate(dt, players) {
         spawnHeli('h' + nextId++, hx, W.groundHeight(hx, hz) + (st ? 25 : 45), hz, p.uid);
         ctx.announce?.(p.uid, 'POLICE HELICOPTER INBOUND');
       }
-      if (p.stars >= 4) {
+      // SWAT van at 4+ stars
+      if (p.stars >= 4 && ![...cops.values()].some((u) => u.id[0] === 's' && u.target === p.uid && !isDown(u))) {
+        const q = stationSpot(cx, cz) || W.roadSpot(cx, cz, 140, 220);
+        if (q) { const id = 's' + nextId++; spawnCar(id, q.x, q.z, q.h, 0, p.uid); cops.get(id).aimT = 0; ctx.announce?.(p.uid, 'SWAT INBOUND'); }
+      }
+      if (p.stars >= 3) {
         rbTimer[p.uid] = (rbTimer[p.uid] ?? 3) - 1;
         if (rbTimer[p.uid] <= 0) {
           rbTimer[p.uid] = 25;
           const sp = Math.hypot(p.vx, p.vz) || 1, ax = p.x + (p.vx / sp) * 110, az = p.z + (p.vz / sp) * 110;
           const q = W.nearestEdge(ax, az, 60, (e) => e.cls !== 'service' && !e.bridge);
-          if (q) for (const dd of [-1, 1]) { const o = dd * q.e.width / 4; spawnCar('r' + nextId++, q.x - Math.cos(q.h) * o, q.z + Math.sin(q.h) * o, q.h + Math.PI / 2, 1, p.uid); }
+          if (q) {
+            for (const dd of [-1, 1]) { const o = dd * q.e.width / 4; spawnCar('r' + nextId++, q.x - Math.cos(q.h) * o, q.z + Math.sin(q.h) * o, q.h + Math.PI / 2, 1, p.uid); }
+            // spikes 12 m before the block, on the side the suspect is coming from
+            const tx = Math.sin(q.h), tz = Math.cos(q.h), toward = ((p.x - q.x) * tx + (p.z - q.z) * tz) > 0 ? 1 : -1;
+            spawnSpike('k' + nextId++, q.x + tx * 12 * toward, q.z + tz * 12 * toward, q.h, p.uid);
+          }
         }
       }
     }
@@ -137,6 +174,7 @@ export function hostUpdate(dt, players) {
     return { ...p, x: u.sweep.x, z: u.sweep.z, sweeping: true };
   };
   for (const u of [...cops.values()]) {
+    if (u.kind === 4) { u.life -= dt; if (u.life <= 0) remove(u.id); continue; }
     if (u.kind === 2) { officerStep(u, dt, now, findTarget(u)); continue; }
     if (u.kind === 3) { heliStep(u, dt, now, findTarget(u)); continue; }
     const v = u.v;
@@ -173,8 +211,10 @@ export function hostUpdate(dt, players) {
     // suspect on foot and we're close: stop and get out
     if (!p.inVeh && dist < 18 && Math.abs(v.speed) < 3 && u.deployCd <= 0 && (!p.sweeping || dist < 12)) {
       const lx = Math.cos(v.h), lz = -Math.sin(v.h);
-      for (const side of [1, -1]) {
-        const o = spawnOfficer('o' + nextId++, v.x + lx * side * 1.8, v.z + lz * side * 1.8, v.h, p.uid, u.id);
+      const swat = u.id[0] === 's';
+      for (const side of swat ? [1, -1, 1, -1] : [1, -1]) {
+        const back = u.deployed.length >= 2 ? -2.2 : 0;
+        const o = spawnOfficer((swat ? 'w' : 'o') + nextId++, v.x + lx * side * 1.8 - Math.sin(v.h) * back, v.z + lz * side * 1.8 - Math.cos(v.h) * back, v.h, p.uid, u.id);
         u.deployed.push(o.id);
       }
       u.recall = false; u.waitT = 0;
@@ -187,6 +227,11 @@ export function hostUpdate(dt, players) {
     if (u.path && dist > 30) {
       while (u.pi < u.path.length - 1 && Math.hypot(u.path[u.pi][0] - v.x, u.path[u.pi][1] - v.z) < 11) u.pi++;
       gx = u.path[u.pi][0]; gz = u.path[u.pi][1];
+    }
+    // chasing a car up close: go for its rear quarter to spin it out (PIT)
+    if (p.inVeh && dist < 16 && p.speed > 6) {
+      const sp = p.speed || 1, fx_ = (p.vx || 0) / sp, fz_ = (p.vz || 0) / sp, side = ((v.x - p.x) * fz_ - (v.z - p.z) * fx_) > 0 ? 1 : -1;
+      gx = p.x - fx_ * 1.2 + fz_ * side * 1.3; gz = p.z - fz_ * 1.2 - fx_ * side * 1.3;
     }
     const ad = angDiff(v.h, Math.atan2(gx - v.x, gz - v.z));
     let inp = { throttle: Math.abs(ad) > 0.7 && v.speed > 13 ? 0 : 1, brake: Math.abs(ad) > 0.9 && v.speed > 15 ? 0.6 : 0, steer: clamp(ad * 2, -1, 1), handbrake: Math.abs(ad) > 1.3 && v.speed > 12 };
@@ -247,13 +292,34 @@ function officerStep(u, dt, now, p) {
   if (goCar) { tx = car.v.x; tz = car.v.z; }
   else if (p) { tx = p.x; tz = p.z; u.idle = 0; }
   else { u.idle += dt; u.spd = 0; if (u.idle > 15) remove(u.id); return; }
-  const dx = tx - u.x, dz = tz - u.z, dist = Math.hypot(dx, dz);
+  let dx = tx - u.x, dz = tz - u.z, dist = Math.hypot(dx, dz);
+  const tdist = dist, tdx = dx, tdz = dz;
   if (goCar && dist < 2.4) { remove(u.id); return; } // got back in
+  // in a gunfight: get to cover (a car between you and the suspect) or work round their flank
+  u.coverT = (u.coverT || 0) - dt;
+  if (!goCar && p && !p.sweeping && dist < 34) {
+    if (u.coverT <= 0) {
+      u.coverT = 3 + Math.random() * 2; u.coverAt = null;
+      let best = 15;
+      for (const o of [...ctx.vehicles(), ...[...cops.values()].filter((c) => c.kind < 2).map((c) => c.v)]) {
+        const d = Math.hypot(o.x - u.x, o.z - u.z); if (d > best) continue;
+        const ox = o.x - p.x, oz = o.z - p.z, ol = Math.hypot(ox, oz) || 1;
+        if (ol < 6) continue;
+        best = d; u.coverAt = { x: o.x + (ox / ol) * (o.T.wid / 2 + 0.9), z: o.z + (oz / ol) * (o.T.wid / 2 + 0.9) };
+      }
+      if (!u.coverAt && u.flank) { const a = Math.atan2(u.x - p.x, u.z - p.z) + u.flank * 0.9; u.coverAt = { x: p.x + Math.sin(a) * 14, z: p.z + Math.cos(a) * 14, flank: true }; }
+    }
+    if (u.coverAt) { tx = u.coverAt.x; tz = u.coverAt.z; }
+  } else u.coverAt = null;
+  const cdx = tx - u.x, cdz = tz - u.z, cdist = Math.hypot(cdx, cdz);
   let move = 0;
   if (goCar) move = 5.5;
+  else if (u.coverAt) move = cdist > 0.8 ? 5.5 : 0;
   else if (dist > (p.sweeping ? 3 : 11)) move = p.sweeping ? 3.5 : 5.2;
   else if (dist < 5) move = -2;
-  u.h += angDiff(u.h, Math.atan2(dx, dz)) * Math.min(1, dt * 8);
+  u.inCover = !!(u.coverAt && !u.coverAt.flank && cdist < 1.2);
+  if (u.coverAt) { dx = cdx; dz = cdz; dist = cdist; }
+  u.h += angDiff(u.h, move > 0 && !u.inCover ? Math.atan2(dx, dz) : Math.atan2(tdx, tdz)) * Math.min(1, dt * 8);
   if (!u.agent && nav.navReady()) u.agent = nav.addAgent(u.x, u.z, 5.5);
   if (u.agent) {
     // path around buildings and other people
@@ -277,11 +343,12 @@ function officerStep(u, dt, now, p) {
   }
   u.y = W.groundHeight(u.x, u.z);
   u.cd -= dt;
-  const canShoot = !goCar && p && !p.sweeping && dist < 32 && W.lineOfSight(u.x, u.y + 1.4, u.z, p.x, (p.y || 0) + 1.2, p.z);
+  const canShoot = !goCar && p && !p.sweeping && tdist < 32 && W.lineOfSight(u.x, u.y + 1.4, u.z, p.x, (p.y || 0) + 1.2, p.z);
   u.aimT = canShoot ? (u.aimT || 0) + dt : 0;
   if (canShoot && u.cd <= 0 && u.aimT > 0.9) {
     u.cd = 1.2 + Math.random() * 0.8;
-    let acc = 0.15 + p.stars * 0.035;
+    let acc = (u.swat ? 0.22 : 0.15) + p.stars * 0.035;
+    if (u.inCover) acc *= 0.85;
     if (p.inVeh) acc *= 0.6;
     if (p.speed > 6) acc *= 0.6;
     shoot(u, { x: u.x, y: u.y + 1.4, z: u.z }, p, acc, 7 + Math.random() * 3);
@@ -325,6 +392,7 @@ export function applyRemote(obj) {
     if (!u) {
       if (kind < 2) u = spawnCar(id, a[0], a[1], a[2], kind, a[10]);
       else if (kind === 2) u = spawnOfficer(id, a[0], a[1], a[2], a[10], '');
+      else if (kind === 4) u = spawnSpike(id, a[0], a[1], a[2], a[10]);
       else u = spawnHeli(id, a[0], a[12], a[1], a[10]);
       u.seq = a[4];
     }
@@ -366,6 +434,7 @@ export function damageCop(id, dmg) {
 export function render(dt, isHost, t, cam = null, farDist = 1e9) {
   const flash = Math.floor(t * 6) % 2;
   for (const u of cops.values()) {
+    if (u.kind === 4) continue;
     if (u.kind < 2) {
       const v = u.v;
       if (!isHost && v.tgt) {
@@ -395,7 +464,7 @@ export function render(dt, isHost, t, cam = null, farDist = 1e9) {
       if (u.dead && !u.ragged) { u.ragged = true; const k = u.hitDir || { x: 0, z: 0 }; ragdoll(u.ch, { x: k.x * 4, y: 2, z: k.z * 4 }, { dead: true }); }
       if (u.ch.rag) { const rp = ragPos(u.ch); if (!isHost) { u.x = rp.x; u.z = rp.z; } continue; }
       placeCharacter(u.ch, u.x, u.y ?? W.groundHeight(u.x, u.z), u.z, u.h);
-      animateCharacter(u.ch, dt, { speed: u.spd || 0, aim: !u.dead, dead: u.dead, weapon: 'gun' });
+      animateCharacter(u.ch, dt, { speed: u.spd || 0, aim: !u.dead && !(u.inCover && (u.aimT || 0) < 0.5), dead: u.dead, weapon: 'gun', wmodel: u.swat ? 'rifle' : 'pistol', rifle: u.swat, cover: u.inCover && (u.aimT || 0) < 0.5 });
     } else {
       u.mesh.position.set(u.x, u.y, u.z);
       u.mesh.rotation.y = u.h;

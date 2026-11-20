@@ -64,6 +64,19 @@ function colorFor(ti, r) {
   return CAR_COLORS[Math.floor(r * CAR_COLORS.length)];
 }
 
+// A parked car whose owner just got in: pull out into the nearest lane and join the traffic.
+export function joinTraffic(v) {
+  const q = W.nearestEdge(v.x, v.z, 30, (e) => drivable(e));
+  if (!q) return false;
+  const e = q.e, dirs = []; if (e.lf > 0) dirs.push(1); if (e.lb > 0) dirs.push(-1); if (!dirs.length) return false;
+  const fwd = Math.cos(angDiff(v.h, q.h)) >= 0 ? 1 : -1;
+  const dir = dirs.includes(fwd) ? fwd : dirs[0], lane = lanesOf(e, dir) - 1;
+  const sAlong = dir > 0 ? q.s : e.len - q.s, off = laneOffset(e, dir, lane);
+  v.mode = 'traffic'; v.npcDriver = false; v.localSim = false;
+  v.ag = { e, dir, lane, s: Math.max(1, Math.min(e.len - 1, sAlong)), off: off * 1.6, offT: off, speed: 0, phase: 'edge', temper: 0.9, next: null, blockT: 0.6, honkT: 0, drunk: false };
+  traffic.push(v);
+  return true;
+}
 // ---------- spawning ----------
 const drivable = (e) => e.cls !== 'service' && e.cls !== 'motor' && e.len > 25;
 function trySpawn(fx, fz, R, cam, night, patrol = false) {

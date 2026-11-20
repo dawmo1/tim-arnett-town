@@ -57,8 +57,8 @@ function bx(g, c, sx, sy, sz, x, y, z, material) {
   m.scale.set(sx, sy, sz); m.position.set(x, y, z); m.castShadow = true; g.add(m); return m;
 }
 
-export function makeVehicleMesh(T, color, dirt = 0) {
-  const ti = TYPES.indexOf(T);
+export function makeVehicleMesh(T, color, dirt = 0, tiHint = -1) {
+  const ti = tiHint >= 0 ? tiHint : TYPES.findIndex((t) => t === T || t.name === T.name);
   const model = buildCarMesh(ti, color, { dirt });
   if (model) return model;
   curPaint = color;
@@ -263,7 +263,7 @@ function dirtFor(id, ti) {
 export function makeVehicle(id, ti, color, home) {
   const T = TYPES[ti];
   return {
-    id, ti, T, color, mesh: makeVehicleMesh(T, color, dirtFor(id, ti)),
+    id, ti, T, color, mesh: makeVehicleMesh(T, color, dirtFor(id, ti), ti),
     x: home.x, z: home.z, h: home.h, y: W.groundHeight(home.x, home.z), vx: 0, vz: 0, w: 0, speed: 0,
     hp: T.hp, driver: '', mode: 'parked', burnAt: 0, burnBy: '', exploded: false, sinkT: 0,
     home, tgt: null, lastWrite: 0, localSim: false, loop: null, slot: 0, charred: false, tilt: 0,
@@ -526,6 +526,7 @@ export function stepVehicle(v, inp, dt) {
   const alive = v.hp > 0 && v.sinkT === 0;
   const grounded = !(v.air > 0);
   if (alive && grounded && inp.throttle > 0) vf += T.acc * inp.throttle * dt * (vf < 0 ? 2.5 : 1) * (boosting ? 1.6 : 1);
+  if (v.flat) { vf = Math.min(vf, T.max * 0.45); vr *= 1 + dt * 0.8; }
   if (alive && grounded && inp.brake > 0) { if (vf > 0.5) vf -= T.acc * 2.4 * (T.brakeMul || 1) * dt; else vf = Math.max(-T.max * 0.35, vf - T.acc * 0.7 * dt); }
   if (grounded) {
     vf -= vf * ((inp.throttle || inp.brake) && alive ? 0.12 : 0.7) * dt;

@@ -205,6 +205,13 @@ export function animate(ch, dt, st) {
     } else if (st.dance) {
       const b = t * 7; P.root[1] -= 0.06 + Math.abs(Math.sin(b)) * 0.06; set(P, 'hips', 0, Math.sin(b / 2) * 25, Math.sin(b) * 8);
       armsUp(P, 'L', -60 + Math.sin(b) * 60, 0, 40, -60); armsUp(P, 'R', -60 - Math.sin(b) * 60, 0, 40, -60); add(P, 'thighL', -20 * Math.max(0, Math.sin(b))); add(P, 'shinL', 30 * Math.max(0, Math.sin(b)));
+    } else if (st.sweep) { // pushing a broom
+      const k = Math.sin(t * 2.2); armsUp(P, 'R', -35 + k * 15, 0, -15, -40); armsUp(P, 'L', -55 + k * 15, 0, -25, -60); set(P, 'spine', 22, -k * 10); set(P, 'head', -8);
+    } else if (st.wash) { // wiping a car in circles
+      const a = t * 3.2; armsUp(P, 'R', -70 + Math.sin(a) * 18, 0, 10 + Math.cos(a) * 18, -30); set(P, 'spine', 18, 10); set(P, 'head', 6);
+    } else if (st.stretch) { // runner's lunge
+      P.root[1] -= 0.25; set(P, 'thighL', -70); set(P, 'shinL', 75); set(P, 'thighR', 40); set(P, 'shinR', 10); set(P, 'footR', 30);
+      set(P, 'spine', 12 + Math.sin(t * 1.5) * 4); armsUp(P, 'L', -40, 0, 10, -30); armsUp(P, 'R', -40, 0, 10, -30);
     } else if (st.clap) {
       const c = Math.abs(Math.sin(t * 9)); armsUp(P, 'L', -60, 0, -30 + 20 * c, -70); armsUp(P, 'R', -60, 0, -30 + 20 * c, -70);
     } else if (st.beckon || st.wave) {
