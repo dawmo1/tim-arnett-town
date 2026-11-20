@@ -173,6 +173,49 @@ function graffitiAtlas() {
   }
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
 }
+// Weather on the city's surfaces: wet roads go dark and glossy with puddles that mirror the sky and
+// headlights; snow settles on anything facing up (roofs, lawns, and a thinner, slushy layer on roads).
+export const WX = { wet: { value: 0 }, snow: { value: 0 }, puddles: { value: null } };
+function puddleTex() {
+  const n = 256, c = document.createElement('canvas'); c.width = c.height = n;
+  const g = c.getContext('2d'), r = rng(91);
+  g.fillStyle = '#000'; g.fillRect(0, 0, n, n);
+  g.filter = 'blur(6px)';
+  for (let k = 0; k < 70; k++) {
+    const x = r() * n, y = r() * n, rad = 6 + r() * 22;
+    for (const [ox, oy] of [[0, 0], [n, 0], [-n, 0], [0, n], [0, -n]]) { g.fillStyle = `rgba(255,255,255,${0.5 + r() * 0.5})`; g.beginPath(); g.ellipse(x + ox, y + oy, rad * (1 + r()), rad, r() * 3, 0, 7); g.fill(); }
+  }
+  const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.NoColorSpace; return t;
+}
+function weatherPatch(m, kind) {
+  const prev = m.onBeforeCompile, prevKey = m.customProgramCacheKey ? m.customProgramCacheKey() : '';
+  m.onBeforeCompile = (sh, r) => {
+    if (prev) prev.call(m, sh, r);
+    sh.uniforms.wxWet = WX.wet; sh.uniforms.wxSnow = WX.snow; sh.uniforms.wxPud = WX.puddles;
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vWxN; varying vec2 vWxP;')
+      .replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>\nvWxN = normalize(mat3(modelMatrix) * objectNormal);')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWxP = (modelMatrix * vec4(position, 1.0)).xz;');
+    const road = kind === 'road', walk = kind === 'walk';
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform float wxWet; uniform float wxSnow; uniform sampler2D wxPud; varying vec3 vWxN; varying vec2 vWxP;')
+      .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+        {
+          float up = smoothstep(0.55, 0.9, normalize(vWxN).y);
+          ${road || walk ? `
+          float pud = texture2D(wxPud, vWxP * 0.045).r;
+          float wk = wxWet * (1.0 - wxSnow) * (${road ? '0.6 + 0.4 * pud' : '0.45 + 0.3 * pud'});
+          roughnessFactor = mix(roughnessFactor, ${road ? '0.06' : '0.22'}, wk);
+          diffuseColor.rgb *= 1.0 - ${road ? '0.5' : '0.3'} * wk;` : kind === 'ground' ? `
+          diffuseColor.rgb *= 1.0 - 0.22 * wxWet * (1.0 - wxSnow);` : ''}
+          float sn = wxSnow * up * ${road ? '(0.55 + 0.25 * texture2D(wxPud, vWxP * 0.11).r)' : kind === 'roof' ? '1.0' : '0.95'};
+          diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.9, 0.93, 0.98), sn);
+          roughnessFactor = mix(roughnessFactor, 0.75, sn);
+        }`);
+  };
+  m.customProgramCacheKey = () => prevKey + 'wx-' + kind;
+  return m;
+}
 export const M = {};
 export function initMaterials() {
   if (M.building) return M;
@@ -188,5 +231,7 @@ export function initMaterials() {
   M.water = new THREE.MeshStandardMaterial({ color: 0x3f6f7a, roughness: 0.12, metalness: 0.1, transparent: true, opacity: 0.93 });
   M.far = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 });
   M.farBox = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, emissive: 0xffc070, emissiveIntensity: 0 });
+  WX.puddles.value = puddleTex();
+  weatherPatch(M.building, 'roof'); weatherPatch(M.terrain, 'ground'); weatherPatch(M.road, 'road'); weatherPatch(M.walk, 'walk'); weatherPatch(M.far, 'ground'); weatherPatch(M.farBox, 'roof');
   return M;
 }

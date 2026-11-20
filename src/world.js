@@ -15,7 +15,7 @@ export const places = {};
 export async function initWorld(scene) {
   await loadData();
   initStream(scene);
-  env.buildings = M.building; env.signs = M.signs; env.ground = M.terrain; env.roads = M.road; env.water = M.water; env.lampMat = M.lamp; env.farBox = M.farBox;
+  env.buildings = M.building; env.signs = M.signs; env.ground = M.terrain; env.roads = M.road; env.water = M.water; env.lampMat = M.lamp; env.poolMat = M.lpool; env.farBox = M.farBox;
   places.hospitals = D.index.hospitals; places.police = D.index.police; places.fire = D.index.fire;
   places.menu = { x: -40, z: 120 }; // looking over the riverfront downtown
 }

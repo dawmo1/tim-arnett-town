@@ -2,13 +2,15 @@
 // One game day = 24 real minutes. Weather changes every 6 minutes.
 import * as THREE from 'three';
 import { env } from './world.js';
+import { WX } from './city/mats.js';
 
 export const DAY_SECONDS = 24 * 60;
 export const sky = {
-  hour: 12, day: 1, night: 0, dusk: 0, wet: 0, rain: 0, cloud: 0, storm: false, flash: 0, weather: 'clear', grip: 1,
+  hour: 12, day: 1, night: 0, dusk: 0, wet: 0, rain: 0, cloud: 0, storm: false, flash: 0, weather: 'clear', grip: 1, fog: 0, snow: 0, snowing: 0,
   sunDir: new THREE.Vector3(0.45, 0.85, 0.25),
 };
-let R, stars, rain, rainPos, moon;
+let R, stars, rain, rainPos, moon, snowP, snowPos;
+const SNOW_N = 1600, SNOW_BOX = 70;
 const RAIN_N = 1400, RAIN_BOX = 60;
 const C = (h) => new THREE.Color(h);
 const SKY = { // night is a deep blue, not black, so you can still see the street
@@ -18,7 +20,7 @@ const SKY = { // night is a deep blue, not black, so you can still see the stree
   night: { top: C(0x060d24), bot: C(0x22325a) },
   storm: { top: C(0x4a5260), bot: C(0x7d8794) },
 };
-const WEATHERS = ['clear', 'clear', 'clear', 'cloudy', 'cloudy', 'rain', 'rain', 'storm'];
+const WEATHERS = ['clear', 'clear', 'clear', 'cloudy', 'cloudy', 'rain', 'rain', 'storm', 'fog', 'clear', 'cloudy', 'snow'];
 const hash = (n) => { let x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
 export function weatherAt(nowMs) { return WEATHERS[Math.floor(hash(Math.floor(nowMs / 1000 / 360)) * WEATHERS.length)]; }
 
@@ -66,6 +68,15 @@ export function initDayNight(refs) {
   rain = new THREE.LineSegments(rg, new THREE.LineBasicMaterial({ color: 0xaecbe6, transparent: true, opacity: 0.55, depthWrite: false }));
   rain.frustumCulled = false; rain.visible = false;
   R.scene.add(rain);
+  // snowflakes: soft round points drifting down
+  snowPos = new Float32Array(SNOW_N * 3);
+  for (let i = 0; i < SNOW_N; i++) snowPos.set([(Math.random() - 0.5) * SNOW_BOX, Math.random() * 30, (Math.random() - 0.5) * SNOW_BOX], i * 3);
+  const sgeo = new THREE.BufferGeometry(); sgeo.setAttribute('position', new THREE.BufferAttribute(snowPos, 3));
+  const fc = document.createElement('canvas'); fc.width = fc.height = 32; const fg = fc.getContext('2d'), gr = fg.createRadialGradient(16, 16, 0, 16, 16, 16);
+  gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.5, 'rgba(255,255,255,.6)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); fg.fillStyle = gr; fg.fillRect(0, 0, 32, 32);
+  snowP = new THREE.Points(sgeo, new THREE.PointsMaterial({ map: new THREE.CanvasTexture(fc), size: 0.16, transparent: true, depthWrite: false, opacity: 0.9 }));
+  snowP.frustumCulled = false; snowP.visible = false;
+  R.scene.add(snowP);
 }
 function resetDrop(i, cx, cz, y) {
   const x = cx + (Math.random() - 0.5) * RAIN_BOX, z = cz + (Math.random() - 0.5) * RAIN_BOX;
@@ -86,14 +97,23 @@ export function updateDayNight(dt, nowMs, cam) {
   sky.sunDir.set(Math.cos(ang) * 0.9, Math.max(0.05, sunY), 0.35).normalize();
 
   // weather eases toward the current period's type
-  sky.weather = weatherAt(nowMs);
+  sky.weather = sky.force || weatherAt(nowMs);
   const wantRain = sky.weather === 'rain' ? 0.7 : sky.weather === 'storm' ? 1 : 0;
-  const wantCloud = sky.weather === 'cloudy' ? 0.5 : wantRain ? 0.85 : 0;
+  const wantSnow = sky.weather === 'snow' ? 1 : 0;
+  const wantCloud = sky.weather === 'cloudy' ? 0.5 : wantRain || wantSnow ? 0.85 : sky.weather === 'fog' ? 0.6 : 0;
+  // fog: thick in the morning when the weather calls for it, a light haze off the river at dawn otherwise
+  const morning = sm(4, 6, sky.hour) * (1 - sm(9.5, 12, sky.hour));
+  const wantFog = sky.weather === 'fog' ? 0.35 + 0.65 * morning : morning * 0.25 + wantSnow * 0.25;
   sky.rain += (wantRain - sky.rain) * Math.min(1, dt * 0.08);
+  sky.snowing += (wantSnow - sky.snowing) * Math.min(1, dt * 0.08);
   sky.cloud += (wantCloud - sky.cloud) * Math.min(1, dt * 0.08);
+  sky.fog += (wantFog - sky.fog) * Math.min(1, dt * 0.06);
   sky.wet = Math.min(1, Math.max(sky.rain > 0.15 ? sky.wet + dt * 0.05 : sky.wet - dt * 0.01, 0));
+  // snow settles while it's snowing (about two minutes to cover the town) and melts slowly after
+  sky.snow = Math.min(1, Math.max(sky.snowing > 0.3 ? sky.snow + dt * 0.008 : sky.snow - dt * 0.0035, 0));
   sky.storm = sky.weather === 'storm' && sky.rain > 0.5;
-  sky.grip = 1 - 0.35 * sky.wet;
+  sky.grip = 1 - 0.35 * sky.wet * (1 - sky.snow) - 0.5 * sky.snow;
+  WX.wet.value = sky.wet; WX.snow.value = sky.snow;
 
   let thunder = null;
   if (sky.storm && Math.random() < dt * 0.07) { sky.flash = 1; thunder = 0.4 + Math.random() * 3; }
@@ -103,11 +123,24 @@ export function updateDayNight(dt, nowMs, cam) {
   const top = tmp.copy(SKY.day.top).lerp(SKY.dusk.top, sky.dusk).lerp(SKY.night.top, sky.night).lerp(SKY.storm.top, sky.cloud * sky.day * 0.8);
   const bot = tmp2.copy(SKY.day.bot).lerp(SKY.dusk.bot, sky.dusk).lerp(SKY.night.bot, sky.night).lerp(SKY.storm.bot, sky.cloud * sky.day * 0.8);
   if (sky.flash > 0) { top.lerp(C(0xdde6ff), sky.flash * 0.7); bot.lerp(C(0xdde6ff), sky.flash * 0.7); }
-  R.skyMat.uniforms.top.value.copy(top);
-  R.skyMat.uniforms.bottom.value.copy(bot);
+  const fogCol = C(0xc9d2d8).lerp(C(0x1a2236), sky.night).lerp(C(0xe9b48f), sky.dusk * 0.4);
+  top.lerp(fogCol, sky.fog * 0.75); bot.lerp(fogCol, sky.fog * 0.9);
+  const U = R.skyMat.uniforms;
+  U.top.value.copy(top);
+  U.bottom.value.copy(bot);
+  if (U.sunDir) {
+    U.sunDir.value.copy(sky.sunDir); U.time.value = (nowMs / 1000) % 20000; // keep it small: float precision
+    U.sunCol.value.copy(C(0xfff1d6).lerp(C(0xff7a2e), sky.dusk));
+    U.sunVis.value = sky.day * (1 - sky.cloud * 0.85) * (1 - sky.fog * 0.8) * (sky.night > 0.5 ? 0 : 1);
+    U.dusk.value = sky.dusk * (1 - sky.cloud * 0.6);
+    U.cloud.value = sky.cloud;
+    U.cloudCol.value.copy(C(0xffffff).lerp(C(0x8c939c), sky.cloud * 0.7).lerp(C(0xffb48a), sky.dusk * 0.6).lerp(C(0x2a3350), sky.night));
+  }
   R.scene.fog.color.copy(bot);
   R.scene.background.copy(bot);
-  R.scene.fog.near = view.near * (1 - 0.6 * sky.rain); R.scene.fog.far = view.far * (1 - 0.55 * sky.rain);
+  const fogK = 1 - 0.55 * sky.rain - 0.3 * sky.snowing;
+  const fk = Math.pow(sky.fog, 0.6);
+  R.scene.fog.near = (view.near * (1 - 0.6 * sky.rain)) * (1 - fk) + 4 * fk; R.scene.fog.far = (view.far * fogK) * (1 - fk) + 130 * fk;
 
   // lights
   // the same light is the sun by day and the moon by night (cool, soft, still casting shadows)
@@ -130,8 +163,6 @@ export function updateDayNight(dt, nowMs, cam) {
   if (env.water) env.water.color.copy(C(0x4d7378).lerp(C(0x0b2230), n * 0.85).lerp(C(0x56676a), sky.cloud * 0.4));
   if (env.farBox) env.farBox.emissiveIntensity = n * 0.35;
   if (env.signs) env.signs.emissiveIntensity = n * 1.2;
-  if (env.roads) env.roads.color.setScalar(1 - 0.35 * sky.wet);
-  if (env.ground) env.ground.color.setScalar(1 - 0.28 * sky.wet);
 
   stars.material.opacity = Math.max(0, n - sky.cloud) * 0.9;
   stars.position.set(cam.x, 0, cam.z);
@@ -154,6 +185,21 @@ export function updateDayNight(dt, nowMs, cam) {
       if (rainPos[o + 1] < cam.y - 8 || Math.abs(rainPos[o] - cam.x) > RAIN_BOX / 2 + 4 || Math.abs(rainPos[o + 2] - cam.z) > RAIN_BOX / 2 + 4) resetDrop(i, cam.x, cam.z, cam.y + 10 + Math.random() * 15);
     }
     rain.geometry.attributes.position.needsUpdate = true;
+  }
+  // snowflakes around the camera
+  snowP.visible = sky.snowing > 0.05;
+  if (snowP.visible) {
+    const count = Math.floor(SNOW_N * sky.snowing), t = nowMs / 1000;
+    snowP.geometry.setDrawRange(0, count);
+    for (let i = 0; i < count; i++) {
+      const o = i * 3;
+      snowPos[o + 1] -= (1.2 + (i % 7) * 0.12) * dt;
+      snowPos[o] += Math.sin(t * 0.8 + i) * 0.5 * dt; snowPos[o + 2] += Math.cos(t * 0.6 + i * 1.3) * 0.5 * dt;
+      if (snowPos[o + 1] < cam.y - 6 || Math.abs(snowPos[o] - cam.x) > SNOW_BOX / 2 || Math.abs(snowPos[o + 2] - cam.z) > SNOW_BOX / 2) {
+        snowPos[o] = cam.x + (Math.random() - 0.5) * SNOW_BOX; snowPos[o + 1] = cam.y + 6 + Math.random() * 18; snowPos[o + 2] = cam.z + (Math.random() - 0.5) * SNOW_BOX;
+      }
+    }
+    snowP.geometry.attributes.position.needsUpdate = true;
   }
   return thunder;
 }

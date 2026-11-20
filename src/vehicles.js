@@ -36,25 +36,6 @@ export const TYPES = [
 ];
 export const V = { SEDAN: 0, SPORTS: 1, TRUCK: 2, VAN: 3, BIKE: 4, SCOOTER: 5, POLICE: 6, BUS: 7, BOAT: 8, HELI: 9, HATCH: 10, SUV: 11, PICKUP: 12, MINIVAN: 13, MUSCLE: 14, CONVERTIBLE: 15, LIMO: 16, MONSTER: 17, TAXI: 18, GARBAGE: 19, TOW: 20, AMBULANCE: 21, FIRE: 22 };
 export const BUS = 7, BOAT = 8, HELI = 9;
-// Shared glow materials: their opacity follows the night (set once per frame in main).
-export const glowMats = {
-  head: new THREE.MeshBasicMaterial({ color: 0xfff2c8, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }),
-  beam: new THREE.MeshBasicMaterial({ color: 0xfff2c8, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }),
-  tail: new THREE.MeshBasicMaterial({ color: 0xff2a2a, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }),
-};
-const glowPlane = new THREE.PlaneGeometry(0.7, 0.4);
-const beamGeo = new THREE.ConeGeometry(3, 16, 12, 1, true).rotateX(-Math.PI / 2).translate(0, 0, 8);
-function addGlow(g, T) {
-  const gl = new THREE.Group(); gl.visible = false; g.add(gl);
-  const fz = T.len / 2 + 0.05, y = T.bike ? 0.95 : 0.3 + T.hgt * 0.35;
-  const xs = T.bike ? [0] : [T.wid / 2 - 0.3, -T.wid / 2 + 0.3];
-  for (const x of xs) {
-    const h = new THREE.Mesh(glowPlane, glowMats.head); h.position.set(x, y, fz); gl.add(h);
-    const t = new THREE.Mesh(glowPlane, glowMats.tail); t.position.set(x, y, -fz); t.rotation.y = Math.PI; gl.add(t);
-  }
-  const beam = new THREE.Mesh(beamGeo, glowMats.beam); beam.position.set(0, y - 0.1, fz); gl.add(beam);
-  g.userData.glow = gl;
-}
 export const POLICE = 6;
 // real-world car colours: lots of white, black, silver and grey, some blue and red, the odd bright one
 export const CAR_COLORS = [0xf2f2f0, 0xf2f2f0, 0xe8e8e6, 0x1c1d20, 0x1c1d20, 0x9ea3a8, 0xb9bcbf, 0x6b7076, 0x4a4f55, 0x2f4a6d, 0x1f3550, 0x8e1c1c, 0xb02a2a, 0xc9b99a, 0x3f5a3c, 0x6e2b3a, 0xd9762b, 0xe3c33b, 0x2f8fd0, 0x4fae6e];
@@ -62,12 +43,21 @@ export const CAR_COLORS = [0xf2f2f0, 0xf2f2f0, 0xe8e8e6, 0x1c1d20, 0x1c1d20, 0x9
 const box = new THREE.BoxGeometry(1, 1, 1);
 const wheelGeo = new THREE.CylinderGeometry(0.36, 0.36, 0.26, 10);
 wheelGeo.rotateZ(Math.PI / 2);
+// glossy car paint (reflects the sky through the environment map)
+const paints = new Map();
+let curPaint = -1;
+export function paintMat(c) {
+  let m = paints.get(c);
+  if (!m) { m = new THREE.MeshStandardMaterial({ color: c, roughness: 0.28, metalness: 0.45, envMapIntensity: 1.3 }); paints.set(c, m); }
+  return m;
+}
 function bx(g, c, sx, sy, sz, x, y, z, material) {
-  const m = new THREE.Mesh(box, material || mat(c));
+  const m = new THREE.Mesh(box, material || (c === curPaint ? paintMat(c) : mat(c)));
   m.scale.set(sx, sy, sz); m.position.set(x, y, z); m.castShadow = true; g.add(m); return m;
 }
 
 export function makeVehicleMesh(T, color) {
+  curPaint = color;
   const g = new THREE.Group();
   const body = new THREE.Group(); g.add(body);
   const L = T.len, Wd = T.wid;
@@ -215,7 +205,6 @@ export function makeVehicleMesh(T, color) {
   // merge the static boxes that share a material (a car is a few draw calls, not twenty-five)
   const keep = new Set([parts.hood, parts.bumpF, parts.trunk, parts.bumpR, parts.doorR, g.userData.driverHead].filter(Boolean));
   for (const grp of [body, parts.frontG, parts.rearG]) if (grp) mergeStatic(grp, keep);
-  addGlow(g, T);
   g.userData.body = body;
   g.userData.parts = parts;
   return g;

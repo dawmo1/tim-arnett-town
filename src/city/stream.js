@@ -1,6 +1,7 @@
 // Streams Davenport around the player: fetches tile data, builds a tile per frame (no hitches),
 // unloads far tiles, and draws a cheap version of the rest of the city out to the horizon.
 import * as THREE from 'three';
+import { makeStreakMesh } from '../carlights.js';
 import { D, TILE, WATER_Y, tiles, fetchTile, isFetching, inRange, tileKey, terrainHeight } from './data.js';
 import { addBoxes, removeBoxes, makeBox } from './collide.js';
 import { buildTile } from './tile.js';
@@ -121,6 +122,12 @@ function makeInstanced() {
   inst.arm = mk(new THREE.BoxGeometry(0.1, 0.1, 2.2).translate(0, 0, 1.1), poleMat, false);
   M.lamp = M.lamp || new THREE.MeshBasicMaterial({ color: 0xfff3c4 });
   inst.lamp = mk(new THREE.BoxGeometry(0.5, 0.16, 0.8), M.lamp, false);
+  // at night each streetlight throws a warm pool on the ground; in the wet it also reflects as a streak
+  { const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d'), gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.5, 'rgba(255,255,255,.4)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+    M.lpool = new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), color: 0xffd9a0, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -8 }); }
+  inst.lpool = mk(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), M.lpool, false);
+  inst.lstreak = makeStreakMesh(16, 0xffc98a); scene.add(inst.lstreak);
   inst.bag = mk(new THREE.IcosahedronGeometry(0.4, 0).scale(1, 0.75, 1).translate(0, 0.28, 0), new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.35 }), true);
   inst.dumpster = mk(new THREE.BoxGeometry(1.9, 1.3, 1.1).translate(0, 0.65, 0), new THREE.MeshStandardMaterial({ color: 0x2e5d3a, roughness: 0.7, metalness: 0.3 }), true);
 }
@@ -157,14 +164,16 @@ function rebuildInstances() {
   });
   trunk.count = T.length; leafy.count = nl; cone.count = nc; round.count = nr;
   for (const m of [trunk, leafy, cone, round]) { m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true; }
-  const L = all.lights, pole = ensure('pole', L.length), arm = ensure('arm', L.length), lamp = ensure('lamp', L.length);
+  const L = all.lights, pole = ensure('pole', L.length), arm = ensure('arm', L.length), lamp = ensure('lamp', L.length), lpool = ensure('lpool', L.length), lstreak = ensure('lstreak', L.length);
   L.forEach((l, i) => {
     o.rotation.set(0, l.h, 0); o.position.set(l.x, l.y, l.z); o.scale.set(1, 7.5, 1); o.updateMatrix(); pole.setMatrixAt(i, o.matrix);
     o.position.set(l.x, l.y + 7.4, l.z); o.scale.set(1, 1, 1); o.updateMatrix(); arm.setMatrixAt(i, o.matrix);
     o.position.set(l.x + Math.sin(l.h) * 2.1, l.y + 7.3, l.z + Math.cos(l.h) * 2.1); o.updateMatrix(); lamp.setMatrixAt(i, o.matrix);
+    o.position.set(l.x + Math.sin(l.h) * 2.4, l.y + 0.07, l.z + Math.cos(l.h) * 2.4); o.scale.set(13, 1, 13); o.updateMatrix(); lpool.setMatrixAt(i, o.matrix);
+    o.rotation.set(0, 0, 0); o.scale.set(1.3, 1, 11); o.updateMatrix(); lstreak.setMatrixAt(i, o.matrix);
   });
-  pole.count = arm.count = lamp.count = L.length;
-  for (const m of [pole, arm, lamp]) m.instanceMatrix.needsUpdate = true;
+  pole.count = arm.count = lamp.count = lpool.count = lstreak.count = L.length;
+  for (const m of [pole, arm, lamp, lpool, lstreak]) m.instanceMatrix.needsUpdate = true;
 }
 
 // ---------- the streaming loop ----------

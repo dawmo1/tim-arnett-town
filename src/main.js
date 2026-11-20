@@ -15,7 +15,7 @@ import { initEvents, updateEvents, eventBlips } from './events.js';
 import { say, line } from './npc.js';
 import { initDayNight, updateDayNight, sky as weather, clockText, view as fogView } from './daynight.js';
 import { initLife, updateLife, startle, updateAnimals } from './life.js';
-import { glowMats } from './vehicles.js';
+import { initCarLights, updateCarLights, setLightQuality, wetUniform } from './carlights.js';
 import { initPhysics, updateRagdolls, ragdoll, release, ragPos, syncPhysics } from './ragdoll.js';
 import { initNav, updateNav } from './nav.js';
 import { knock, flinch } from './npc.js';
@@ -59,9 +59,32 @@ scene.fog = new THREE.Fog(0xa8def2, 260, 1100);
 { // gradient sky dome + sun
   const sky = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 12), new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false, fog: false,
-    uniforms: { top: { value: new THREE.Color(0x2f8fe0) }, bottom: { value: new THREE.Color(0xa8def2) } },
-    vertexShader: 'varying float h; void main(){ h = normalize(position).y; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
-    fragmentShader: 'uniform vec3 top; uniform vec3 bottom; varying float h; void main(){ gl_FragColor = vec4(mix(bottom, top, clamp(pow(max(h, 0.0), 0.6), 0.0, 1.0)), 1.0); }',
+    // gradient + sun disk and glow + sunset band toward the sun + drifting clouds
+    uniforms: { top: { value: new THREE.Color(0x2f8fe0) }, bottom: { value: new THREE.Color(0xa8def2) }, sunDir: { value: new THREE.Vector3(0, 1, 0) }, sunCol: { value: new THREE.Color(0xffffff) },
+      cloud: { value: 0 }, cloudCol: { value: new THREE.Color(0xffffff) }, time: { value: 0 }, sunVis: { value: 1 }, dusk: { value: 0 }, clouds: { value: 1 } },
+    vertexShader: 'varying vec3 vD; void main(){ vD = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: `
+      uniform vec3 top, bottom, sunDir, sunCol, cloudCol; uniform float cloud, time, sunVis, dusk, clouds; varying vec3 vD;
+      float h2(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+      float n2(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+        return mix(mix(h2(i), h2(i + vec2(1, 0)), f.x), mix(h2(i + vec2(0, 1)), h2(i + vec2(1, 1)), f.x), f.y); }
+      void main(){
+        vec3 d = normalize(vD); float h = d.y;
+        vec3 col = mix(bottom, top, clamp(pow(max(h, 0.0), 0.55), 0.0, 1.0));
+        float sd = max(dot(d, normalize(sunDir)), 0.0);
+        // sunset: warm band hugging the horizon on the sun's side
+        col += sunCol * dusk * pow(sd, 6.0) * (1.0 - smoothstep(0.0, 0.35, h)) * 0.8;
+        col += sunCol * sunVis * (pow(sd, 400.0) * 6.0 + pow(sd, 24.0) * 0.35);
+        if (clouds > 0.5 && h > 0.0) {
+          vec2 uv = d.xz / (h + 0.12) * 1.6 + vec2(time * 0.006, time * 0.002);
+          float c = n2(uv) * 0.55 + n2(uv * 2.3 + 7.0) * 0.3 + n2(uv * 5.1 + 3.0) * 0.15;
+          float cov = mix(0.62, 0.28, cloud);
+          float a = smoothstep(cov, cov + 0.22, c) * smoothstep(0.0, 0.18, h) * (0.55 + 0.45 * cloud);
+          vec3 cc = cloudCol * (0.85 + 0.25 * c) + sunCol * pow(sd, 8.0) * 0.4 * sunVis;
+          col = mix(col, cc, a);
+        }
+        gl_FragColor = vec4(col, 1.0);
+      }`,
   }));
   sky.renderOrder = -1;
   scene.userData.sky = sky;
@@ -105,6 +128,8 @@ function applyQuality(q) {
   if (sun.shadow.mapSize.x !== size) { sun.shadow.mapSize.set(size, size); sun.shadow.map?.dispose(); sun.shadow.map = null; }
   scene.traverse((o) => { if (o.material && o.material.needsUpdate !== undefined && o.receiveShadow) o.material.needsUpdate = true; });
   bloom.enabled = q !== 'low';
+  setLightQuality(q);
+  scene.userData.sky.material.uniforms.clouds.value = q === 'low' ? 0 : 1;
   // view distance + how much of the city is built in full detail
   camera.far = q === 'low' ? 900 : q === 'medium' ? 1500 : 2200; camera.updateProjectionMatrix();
   scene.userData.sky.scale.setScalar(camera.far * 0.9);
@@ -167,9 +192,7 @@ const enginesReady = Promise.all([
   initPhysics().catch((e) => console.warn('physics unavailable', e)),
   initNav().catch((e) => console.warn('navigation unavailable', e)),
 ]);
-// your own car gets a real headlight at night
-const headlight = new THREE.SpotLight(0xfff2c8, 0, 55, 0.55, 0.6, 1.2);
-scene.add(headlight, headlight.target);
+initCarLights(scene);
 const vehicles = createAllVehicles(scene, []);
 initFarCars(scene);
 ui.drawMapBase();
@@ -210,7 +233,6 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyE') { const d = doorNear(); if (d) useDoor(d); else if (!useStore()) toggleVehicle(); }
   if (e.code === 'KeyR') startReload();
   if (e.code === 'KeyN' && me.veh && !me.veh.T.bike) { const st = nextStation(); ui.flashPrompt(st.sub ? `📻 ${st.name} · ${st.sub}` : st.name); }
-  if (/^Digit[0-9]$/.test(e.code)) { const n = +e.code.slice(5); selectWeapon(n === 0 ? 9 : n - 1); }
   if (e.code === 'KeyP') openPhone();
   if (e.code === 'KeyG' || e.code === 'KeyH') talk(e.code === 'KeyG');
 });
@@ -242,7 +264,6 @@ addEventListener('mousedown', (e) => {
 });
 addEventListener('mouseup', (e) => { if (e.button === 0) mouseDown = false; if (e.button === 2) { aiming = false; me.lockOn = null; } });
 addEventListener('contextmenu', (e) => { if (playing) e.preventDefault(); });
-addEventListener('wheel', (e) => { if (locked) selectWeapon((me.weapon + (e.deltaY > 0 ? 1 : -1) + WEAPONS.length) % WEAPONS.length); });
 function openChat() {
   typing = true; keys.clear(); mouseDown = false;
   ui.el.chatInput.hidden = false;
@@ -664,7 +685,8 @@ function knockMe(vel, getUp = 2.2) {
 }
 function die() {
   closeWheel(false);
-  me.hp = 0; me.dead = true; me.deadT = 5;
+  me.hp = 0; me.dead = true; me.deadT = 5; me.deadAt = performance.now();
+  fx.soundWasted();
   if (me.veh) ejectMe();
   cancelEnter();
   const imp = me.lastImpulse || { x: (Math.random() - 0.5) * 3, y: 1, z: (Math.random() - 0.5) * 3 };
@@ -1200,12 +1222,12 @@ function updatePlayer(dt) {
     // ragdolled: the body is physics-driven; we just follow it
     const p = ragPos(me.ch); me.x = p.x; me.z = p.z; me.y = W.isLand(p.x, p.z) ? W.groundHeight(p.x, p.z) : W.SWIM_Y;
     me.ch.g.visible = true; me.moveSpeed = 0;
-    if (me.dead) { me.deadT -= dt; if (me.deadT <= 0) beginRespawn(); }
+    if (me.dead && performance.now() - me.deadAt > 5200) beginRespawn();
     me.vx = (me.x - px) / dt; me.vz = (me.z - pz) / dt;
     return;
   }
   if (me.dead) {
-    me.deadT -= dt;
+    me.deadT = 5 - (performance.now() - me.deadAt) / 1000;
     animateCharacter(me.ch, dt, { dead: true });
     me.ch.g.visible = true;
     placeCharacter(me.ch, me.x, me.y, me.z, me.h);
@@ -1608,7 +1630,7 @@ function openShop(title, items) {
 function closeShop() { shopOpen = false; paused = false; document.getElementById('shop').hidden = true; lockMouse(); }
 document.getElementById('shopClose').addEventListener('click', closeShop);
 
-let deathSpin = 0;
+let deathSpin = 0, camLag = null;
 function updateCamera(dt) {
   const spd = me.veh ? Math.abs(me.veh.speed) : 0;
   const aimZoom = aiming && !me.dead && WEAPONS[me.weapon].kind === 'gun';
@@ -1624,18 +1646,25 @@ function updateCamera(dt) {
     }
   }
   if (Math.abs(camera.fov - fov) > 0.1) { camera.fov += (fov - camera.fov) * Math.min(1, dt * 3); camera.updateProjectionMatrix(); }
-  if (me.dead) { deathSpin += dt; camYaw += dt * 0.5; camPitch += (0.6 - camPitch) * Math.min(1, dt * 2); }
-  const tx = me.veh ? me.veh.x : me.x, tz = me.veh ? me.veh.z : me.z;
-  const ty = me.veh ? me.veh.y + 1.7 : me.swim ? W.WATER_Y - 0.15 : me.y + 1.6;
+  if (me.dead) { deathSpin += dt; camYaw += dt * 0.35; camPitch += (1.0 - camPitch) * Math.min(1, dt * 1.2); }
+  // the chase cam trails the car a little (springy), so turns and speed read clearly
+  let tx = me.veh ? me.veh.x : me.x, tz = me.veh ? me.veh.z : me.z;
+  const ty = me.veh ? me.veh.y + 1.7 : me.swim ? W.WATER_Y - 0.15 : me.y + 1.6 + (aimZoom ? 0.08 : 0);
+  if (me.veh && !me.veh.T.heli) {
+    if (!camLag || Math.hypot(camLag.x - tx, camLag.z - tz) > 20) camLag = { x: tx, z: tz };
+    const k = 1 - Math.exp(-dt * 9);
+    camLag.x += (tx - camLag.x) * k; camLag.z += (tz - camLag.z) * k;
+    tx = camLag.x; tz = camLag.z;
+  } else camLag = null;
   // hold C to look behind you while driving
   if (me.veh && keys.has('KeyC')) camYaw = me.veh.h + Math.PI + (me.lookBack ? 0 : 0) , me.lookBack = true;
   else if (me.lookBack) { me.lookBack = false; if (me.veh) camYaw = me.veh.h; }
   if (me.veh && !me.lookBack && performance.now() - lastMouse > 1200 && Math.abs(me.veh.speed) > 3) {
-    camYaw += angDiff(camYaw, me.veh.speed > 0 ? me.veh.h : me.veh.h + Math.PI) * Math.min(1, dt * 2.5);
+    camYaw += angDiff(camYaw, me.veh.speed > 0 ? me.veh.h : me.veh.h + Math.PI) * Math.min(1, dt * (1.6 + Math.min(2.4, Math.abs(me.veh.speed) * 0.08)));
   }
-  const dist = me.veh ? (me.veh.T.heli ? 16 : 5 + me.veh.T.len + spd * 0.04) : me.dead ? 6 + deathSpin * 1.5 : aimZoom ? 2.9 : 4.2;
+  const dist = me.veh ? (me.veh.T.heli ? 16 : 4.6 + me.veh.T.len + Math.min(4, spd * 0.09)) : me.dead ? 5 + deathSpin * 4 : aimZoom ? 2.3 : 4.2;
   const cp = Math.cos(camPitch), dx = Math.sin(camYaw) * cp, dy = -Math.sin(camPitch), dz = Math.cos(camYaw) * cp;
-  const sh = me.veh ? 0 : aimZoom ? 1.05 : 0.55, ax = tx - Math.cos(camYaw) * sh, az = tz + Math.sin(camYaw) * sh;
+  const sh = me.veh ? 0 : aimZoom ? 0.85 : 0.55, ax = tx - Math.cos(camYaw) * sh, az = tz + Math.sin(camYaw) * sh;
   const back = W.rayBuildings(ax, ty, az, -dx, -dy, -dz, dist);
   const d = Math.max(0.8, Math.min(dist, back - 0.3));
   const camX = ax - dx * d, camZ = az - dz * d;
@@ -1716,7 +1745,7 @@ initEvents({
   vehicles: () => vehicles,
   add: (v) => { scene.add(v.mesh); vehicles.push(v); vehById.set(v.id, v); },
   reward: (amount, text) => { addCash(amount); ui.announce('GOOD SAMARITAN', `${text} · +$${amount}`, '#7cf29a'); fx.soundCash(); },
-  alarm: (v) => { let n = 0; const iv = setInterval(() => { fx.soundHorn(distCam(v.x, v.z)); if (++n > 6) clearInterval(iv); }, 600); },
+  alarm: (v) => { v.alarmUntil = performance.now() / 1000 + 4.5; let n = 0; const iv = setInterval(() => { fx.soundHorn(distCam(v.x, v.z)); if (++n > 6) clearInterval(iv); }, 600); },
 });
 initLandmarks(scene, {
   onCasino: (door, face) => stores.push({ name: 'The Arnett Belle', kind: 'casino', x: door.x, z: door.z, face, cooldown: 0, progress: 0 }),
@@ -1807,21 +1836,41 @@ function updateHud(dt, t) {
   }
 }
 
+// Every car's lamps: headlights when it's dark or raining, brake/reverse/turn signals, light bars.
+const lampList = [];
+function updateLamps(n, t) {
+  wetUniform.value = weather.wet * (1 - weather.snow) * (0.25 + 0.75 * n);
+  const on = n > 0.05 || weather.rain > 0.3 || weather.fog > 0.3;
+  const chase = wanted.stars > 0 || [...remotes.values()].some((r) => r.stars > 0);
+  lampList.length = 0;
+  const fwd = (keys.has('KeyS') || keys.has('ArrowDown'));
+  for (const v of vehicles) {
+    const mine = v === me.veh, driven = mine || !!v.driver || v.mode === 'traffic' || v.mode === 'service' || v.npcDriver;
+    const hazard = (v.alarmUntil || 0) > t;
+    if (!driven && !hazard) continue;
+    let braking = v.braking, reversing = false;
+    if (mine) { braking = (fwd && v.speed > 0.5) || keys.has('Space') || Math.abs(v.speed) < 0.3; reversing = v.speed < -0.4; }
+    else if (v.driver) { braking = Math.abs(v.speed || 0) < 0.3; }
+    lampList.push({ v, on: on && driven, braking: driven && braking, reversing, signal: hazard ? 2 : v.mode === 'traffic' ? v.signal : 0, bar: !!(v.T.siren && v.sirenOn) });
+  }
+  for (const u of police.cops.values()) if (u.kind < 2 && !police.isDown(u)) lampList.push({ v: u.v, on, braking: Math.abs(u.v.speed || 0) < 0.5, reversing: (u.v.speed || 0) < -0.4, signal: 0, bar: chase });
+  updateCarLights(lampList, camera.position, Math.max(n, weather.rain * 0.5, weather.fog * 0.5), me.veh, t);
+}
+
 // Sky, weather, lights, wildlife and ambience. Runs in the menu too.
 function updateWorldLife(dt, nowMs, t) {
   const thunder = updateDayNight(dt, nowMs, camera.position);
   if (thunder) setTimeout(() => fx.soundThunder(0.6 + Math.random() * 0.4), thunder * 1000);
   const n = weather.night;
-  glowMats.head.opacity = n * 0.9; glowMats.beam.opacity = n * 0.07; glowMats.tail.opacity = n * 0.8;
-  const lightsOn = n > 0.05 || weather.rain > 0.3;
-  for (const v of vehicles) { const g = v.mesh.userData.glow; if (g) g.visible = lightsOn && !v.exploded && v.hp > 0 && (v.mode === 'traffic' || v.mode === 'service' || !!v.driver); }
-  for (const u of police.cops.values()) if (u.kind < 2) { const g = u.v.mesh.userData.glow; if (g) g.visible = lightsOn && !police.isDown(u); }
-  if (me.veh && n > 0.15 && me.veh.hp > 0) {
-    const v = me.veh, fx_ = Math.sin(v.h), fz_ = Math.cos(v.h);
-    headlight.intensity = 60 * n;
-    headlight.position.set(v.x + fx_ * (v.T.len / 2), v.y + 1, v.z + fz_ * (v.T.len / 2));
-    headlight.target.position.set(v.x + fx_ * 25, v.y, v.z + fz_ * 25);
-  } else headlight.intensity = 0;
+  updateLamps(n, t);
+  // tires through puddles throw spray
+  if (weather.wet > 0.4 && weather.snow < 0.5) for (const v of vehicles) {
+    const sp = Math.abs(v.speed || 0);
+    if (sp < 7 || v.T.boat || v.T.heli || v.air || Math.random() > sp * 0.012) continue;
+    const dx = v.x - camera.position.x, dz = v.z - camera.position.z; if (dx * dx + dz * dz > 60 * 60) continue;
+    const side = Math.random() < 0.5 ? 1 : -1, bx_ = Math.cos(v.h) * side * v.T.wid * 0.45, bz_ = -Math.sin(v.h) * side * v.T.wid * 0.45;
+    fx.splash(v.x + bx_ - Math.sin(v.h) * v.T.len * 0.35, v.y, v.z + bz_ - Math.cos(v.h) * v.T.len * 0.35, v.vx || 0, v.vz || 0, 3);
+  }
   const threats = [];
   if (playing && !me.dead) threats.push({ x: me.x, z: me.z, r: me.veh ? 4 : 3.2 });
   for (const r of remotes.values()) threats.push({ x: r.x, z: r.z, r: 3.2 });
@@ -1839,6 +1888,7 @@ function updateWorldLife(dt, nowMs, t) {
 let movingVehicles = [], physT = 0;
 function update(dt, t) {
   if (wheelOpen && remotes.size === 0) dt *= 0.3; // slow motion while choosing a weapon (solo only)
+  if (me.dead && remotes.size === 0) { const k = (performance.now() - me.deadAt) / 1000; dt *= k < 3 ? 0.28 : Math.min(1, 0.28 + (k - 3) * 0.5); }
   const nowMs = net.now(), tSec = nowMs / 1000;
   movingVehicles = vehicles.filter((v) => Math.abs(v.vx || 0) + Math.abs(v.vz || 0) > 5 && !v.sinkT);
   for (const u of police.cops.values()) if (u.kind < 2 && Math.abs(u.v.vx || 0) + Math.abs(u.v.vz || 0) > 5) movingVehicles.push(u.v);

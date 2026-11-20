@@ -57,6 +57,15 @@ export function sparks(x, y, z, n = 10, dx = 0, dz = 0) {
     parts.push({ m, vx: dx * 4 + (Math.random() - 0.5) * 9, vy: 1 + Math.random() * 4, vz: dz * 4 + (Math.random() - 0.5) * 9, life: 0.35 + Math.random() * 0.3, kind: 'spark' });
   }
 }
+const dropMat = new THREE.MeshBasicMaterial({ color: 0xc8d6e0, transparent: true, opacity: 0.55, depthWrite: false });
+// Spray thrown up by a tire through a puddle.
+export function splash(x, y, z, vx, vz, n = 4) {
+  for (let i = 0; i < n && parts.length < 300; i++) {
+    const m = new THREE.Mesh(box, dropMat); m.scale.setScalar(0.06 + Math.random() * 0.06);
+    m.position.set(x, y + 0.1, z); scene.add(m);
+    parts.push({ m, vx: vx * 0.3 + (Math.random() - 0.5) * 3, vy: 1.5 + Math.random() * 2.5, vz: vz * 0.3 + (Math.random() - 0.5) * 3, life: 0.6, kind: 'spark' });
+  }
+}
 export function glass(x, y, z, n = 12) {
   for (let i = 0; i < n && parts.length < 300; i++) {
     const m = new THREE.Mesh(box, glassMat); const s = 0.04 + Math.random() * 0.08; m.scale.set(s, 0.01, s);
@@ -275,6 +284,18 @@ export function setAmbient(v) {
   amb.waves.gain.setTargetAtTime(0.09 * v.waves * (0.6 + 0.4 * Math.sin(t * 0.7)), t, 0.4);
   amb.crickets.gain.setTargetAtTime(0.006 * v.crickets, t, 0.8);
   if (v.birds > 0.2 && Math.random() < 0.02 * v.birds) { const f = 2400 + Math.random() * 1800; tone('sine', f, 0.08, 0.025 * v.birds); tone('sine', f * 1.2, 0.07, 0.02 * v.birds, 0.09); }
+}
+// WASTED: a low boom with a falling, detuned chord over it.
+export function soundWasted() {
+  if (!ac) return;
+  burst(1.6, 220, 0.9);
+  for (const [f, d] of [[196, 0], [233, 0.02], [147, 0.04]]) {
+    const o = ac.createOscillator(), g = ac.createGain(), t = ac.currentTime + 0.05 + d;
+    o.type = 'sawtooth'; o.frequency.setValueAtTime(f, t); o.frequency.exponentialRampToValueAtTime(f * 0.5, t + 2.4);
+    const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 900;
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.09, t + 0.15); g.gain.exponentialRampToValueAtTime(0.001, t + 2.6);
+    o.connect(lp); lp.connect(g); g.connect(out()); o.start(t); o.stop(t + 2.7);
+  }
 }
 export function soundStunt() { [523, 659, 784, 1046].forEach((f, i) => tone('triangle', f, 0.18, 0.15, i * 0.08)); }
 export function soundWanted() { tone('sawtooth', 220, 0.25, 0.08); tone('sawtooth', 330, 0.25, 0.08, 0.12); }

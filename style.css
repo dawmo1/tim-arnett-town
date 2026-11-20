@@ -17,7 +17,8 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; background: #22325a; font-family: var(--body); color: var(--text); }
 #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; transition: filter .8s; }
-#game.dead { filter: grayscale(1) contrast(1.1) brightness(.75); }
+#game { transition: filter 2.2s ease-in; }
+#game.dead { filter: grayscale(1) contrast(1.15) brightness(.7); }
 [hidden] { display: none !important; }
 button { font: inherit; }
 
@@ -45,7 +46,8 @@ button { font: inherit; }
 #helpbox kbd { display: inline-block; min-width: 20px; padding: 0 5px; border-radius: 3px; background: rgba(255,255,255,.9); color: var(--ink); font: 800 12px/18px var(--body); text-align: center; text-shadow: none; }
 
 #topright { position: absolute; top: 16px; right: 18px; display: grid; justify-items: end; gap: 6px; }
-#cash { font: 400 30px var(--display); color: var(--cash); letter-spacing: 1px; }
+#cash { font: 400 34px var(--display); color: #f2f7ef; letter-spacing: 1px; -webkit-text-stroke: 1.2px #0b1a0b; paint-order: stroke fill; text-shadow: 0 2px 4px rgba(0,0,0,.6); }
+#cash::first-letter { color: #78d36a; }
 #cash.bump { animation: bump .5s; }
 @keyframes bump { 30% { transform: scale(1.15); } }
 #weaponBox { display: flex; align-items: center; gap: 12px; padding: 6px 12px 6px 40px; background: linear-gradient(90deg, transparent, var(--panel) 40%); border-radius: 2px; }
@@ -59,7 +61,7 @@ button { font: inherit; }
 @keyframes blink { 50% { opacity: .2; } }
 
 #feed { position: absolute; left: 18px; bottom: 268px; list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; width: 300px; }
-#feed li { background: var(--panel); border-left: 3px solid var(--accent); padding: 6px 10px; font-size: 13px; text-shadow: none; animation: slide .3s ease-out; }
+#feed li { background: var(--panel); border-left: 3px solid #c8202a; padding: 6px 10px; font-size: 13px; text-shadow: none; animation: slide .3s ease-out; }
 @keyframes slide { from { transform: translateX(-20px); opacity: 0; } }
 
 #chat { position: absolute; left: 336px; bottom: 18px; width: min(420px, 36vw); }
@@ -70,9 +72,10 @@ button { font: inherit; }
 
 #bottomleft { position: absolute; left: 18px; bottom: 18px; width: 300px; display: grid; gap: 5px; }
 #clock { justify-self: start; font-weight: 800; font-size: 12px; letter-spacing: 1px; background: var(--panel); padding: 3px 8px; font-variant-numeric: tabular-nums; text-shadow: none; }
-#minimap { width: 300px; height: 190px; border-radius: 4px; box-shadow: 0 0 0 2px rgba(0,0,0,.55), 0 6px 18px rgba(0,0,0,.35); display: block; }
-#bars { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
-.bar { height: 7px; background: rgba(0,0,0,.55); overflow: hidden; }
+#minimap { width: 300px; height: 190px; border-radius: 12px; box-shadow: 0 0 0 3px rgba(10,14,18,.75), 0 8px 22px rgba(0,0,0,.4); display: block; }
+#bars { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; padding: 3px; background: rgba(10,14,18,.75); border-radius: 0 0 8px 8px; margin-top: -2px; }
+.bar { height: 8px; background: rgba(255,255,255,.08); overflow: hidden; border-radius: 2px; }
+.bar.hp { background: rgba(89,201,106,.22); } .bar.armor { background: rgba(74,163,255,.22); }
 #hpfill { height: 100%; width: 100%; background: var(--health); transition: width .2s; }
 #armorfill { height: 100%; width: 0; background: var(--armor); transition: width .2s; }
 
@@ -126,8 +129,9 @@ button { font: inherit; }
 @keyframes hurt { from { box-shadow: inset 0 0 160px 50px rgba(190,0,0,.6); } to { box-shadow: inset 0 0 120px 30px rgba(190,0,0,0); } }
 
 #dead { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; gap: 10px; }
-#dead .band { background: linear-gradient(90deg, transparent, rgba(0,0,0,.7) 20%, rgba(0,0,0,.7) 80%, transparent); padding: 6px 80px; }
-#dead span { font: 400 clamp(48px, 9vw, 110px) var(--display); color: var(--alert); letter-spacing: 4px; text-shadow: 0 4px 12px #000; }
+#dead .band { background: linear-gradient(90deg, transparent, rgba(0,0,0,.55) 25%, rgba(0,0,0,.55) 75%, transparent); padding: 4px 18vw; animation: wasted .5s cubic-bezier(.2,1.4,.4,1) 1.5s both; }
+@keyframes wasted { from { opacity: 0; transform: scale(1.8); } to { opacity: 1; transform: none; } }
+#dead span { font: 400 clamp(56px, 11vw, 140px) var(--display); color: #c8202a; letter-spacing: 6px; text-shadow: 0 0 2px #000, 0 4px 14px rgba(0,0,0,.8); }
 #dead small { font-weight: 600; letter-spacing: 2px; text-transform: uppercase; color: var(--muted); }
 
 /* ---------- pause menu & map ---------- */

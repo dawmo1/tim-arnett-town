@@ -13,7 +13,7 @@ Everyone who types the same **room code** ends up in the same game. You can also
 | WASD | Move / drive |
 | Mouse | Look and aim (click the game first) |
 | Click | Attack / shoot |
-| Hold Tab or Q | Weapon wheel (move the mouse, release to equip). 1–0 or scroll also work |
+| Hold Tab or Q | Weapon wheel: move the mouse, release to equip. It is the only way to switch weapons |
 | Right click | Aim (zooms in and locks onto nearby targets; the sniper zooms further) |
 | R | Reload |
 | Shift | Sprint. Driving: nitro. Helicopter: descend (Space climbs) |

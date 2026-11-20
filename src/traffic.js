@@ -280,6 +280,9 @@ export function updateTraffic(dt, focus, cam, obs, sirens, tSec, opts) {
     }
     v.vx = dt > 0 ? (x - v.x) / dt : 0; v.vz = dt > 0 ? (z - v.z) / dt : 0;
     if (Math.hypot(v.vx, v.vz) > 40) { v.vx = Math.sin(h) * ag.speed; v.vz = Math.cos(h) * ag.speed; } // first frame / teleport
+    // lamps: brake lights when slowing or stopped, turn signal before a turn
+    v.braking = ag.speed < 0.4 || ag.speed < (v.speed || 0) - dt * 1.2;
+    v.signal = ag.next && !ag.next.uturn && Math.abs(ag.next.turn) > 0.5 && (ag.phase === 'turn' || ag.e.len - ag.s < 35) ? Math.sign(ag.next.turn) : ag.passT > 0 ? -1 : 0;
     v.x = x; v.z = z; v.h += angDiff(v.h, h) * Math.min(1, dt * 10); v.speed = ag.speed;
     v.y = W.groundHeight(x, z);
     alignToGround(v, dt);
