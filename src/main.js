@@ -30,12 +30,12 @@ import * as police from './police.js';
 import * as fx from './fx.js';
 import * as ui from './ui.js';
 import { net, connect, joinRoom, sendState, setVehicle, removeVehicle, setCops, sendEvent, sendChat, hostUid, setLook as netSetLook } from './net.js';
-import { clamp, angDiff, rayOBB, raySphere } from './util.js';
+import { clamp, angDiff, rayOBB, raySphere, fmtDist } from './util.js';
 import { wanted, crime, updateWanted as tickWanted, resetWanted, cones, initWanted } from './wanted.js';
 import { eco, initEconomy, addCash, spend, goalDone, checkCountGoals, GOALS, storeNear, dropCash, updateEconomy, stores } from './economy.js';
 import { updateRadio, nextStation, currentStation } from './radio.js';
 
-// price: cost at Arnett Arms (0 = you start with it); mag/ammoPack: magazine size and rounds per purchase
+// Everyone owns every weapon (price is unused). mag/ammoPack: magazine size and rounds per purchase; ammoPrice: cost of one ammoPack
 const WEAPONS = [
   { name: 'Fists', melee: true, dmg: 12, range: 1.8, rate: 2.5, kind: 'none', price: 0 },
   { name: 'Bat', melee: true, dmg: 30, range: 2.4, rate: 1.6, kind: 'bat', price: 60 },
@@ -194,33 +194,41 @@ initSettingsUi();
 // It covers the whole screen, so half-built streets never show. fade: just black + spinner (respawns).
 const TIPS = ['Hold Tab for the weapon wheel.', 'Press M for the map, click it to set a GPS route.', "Stores, Arnett Arms, Tim's Threads and the casino have doors: press E.", 'Hide in a shop or a parking ramp to shake the cops faster.', 'P calls the mechanic: he drops a car off near you.', 'Hold C while driving to look behind you.', 'G says hi. H insults people. Some swing back.', "Freight trains don't stop. Neither do barges.", 'Re-elect Mayor Tim Arnett.'];
 const loader = document.getElementById('loader'), slidesEl = loader.querySelector('.slides');
-const ART = 7;
-let artI = 5, artK = 0, artTimer = 0, loaderOut = 0;
+// the four pictures play in order, and each visit starts on the next one (index.html shows the first)
+const ART = 4;
+let artI = +(slidesEl.firstElementChild?.dataset.art || 0), artK = 0, artShown = 0, artTimer = 0, loaderOut = 0;
+const artWait = [];
 function nextArt() {
-  artI = (artI + 1 + Math.floor(Math.random() * (ART - 1))) % ART;
+  artI = (artI + 1) % ART;
+  try { localStorage.setItem('tat-art', artI); } catch { /* private mode */ }
   const url = `assets/load/art${artI + 1}.jpg`, img = new Image();
   img.src = url; img.alt = '';
   img.decode().catch(() => {}).then(() => {
     if (loader.hidden || loader.classList.contains('fade')) return;
     const sl = document.createElement('div');
-    sl.className = 'slide ' + (artK++ % 2 ? 'a' : 'b') + (img.naturalWidth / img.naturalHeight < 1.15 ? ' tall' : '');
+    sl.className = 'slide ' + (artK++ % 2 ? 'a' : 'b');
     const fill = document.createElement('div'); fill.className = 'fill'; fill.style.backgroundImage = `url(${url})`;
     sl.append(fill, img); slidesEl.append(sl);
     requestAnimationFrame(() => requestAnimationFrame(() => sl.classList.add('on')));
     const old = [...slidesEl.children].slice(0, -1);
     setTimeout(() => old.forEach((o) => o.remove()), 1600);
+    artShown++;
+    for (let i = artWait.length - 1; i >= 0; i--) if (artShown >= artWait[i].n) { artWait[i].r(); artWait.splice(i, 1); }
   });
 }
+// resolves after n more pictures have come up (so even a fast load shows a few)
+const morePictures = (n) => new Promise((r) => artWait.push({ n: artShown + n, r }));
+// mode: 'art' (pictures, tip, spinner), 'fade' (black + spinner, for respawns), 'menu' (pictures behind the main menu)
 // resolves once the screen is fully covered
-function loading(on, label = '', fade = false) {
+function loading(on, label = '', mode = 'art') {
   clearInterval(artTimer); clearTimeout(loaderOut);
   if (!on) { loader.classList.add('out'); loaderOut = setTimeout(() => { loader.hidden = true; }, 650); return Promise.resolve(); }
   const wasHidden = loader.hidden || loader.classList.contains('out');
-  loader.classList.toggle('fade', fade);
+  loader.classList.toggle('fade', mode === 'fade'); loader.classList.toggle('menu', mode === 'menu');
   const tip = loader.querySelector('.tip'); tip.textContent = TIPS[Math.floor(Math.random() * TIPS.length)];
   if (label) { const sm = document.createElement('small'); sm.textContent = label; tip.prepend(sm); }
   loadProgress(0);
-  if (!fade) artTimer = setInterval(nextArt, 7500);
+  if (mode !== 'fade') artTimer = setInterval(nextArt, mode === 'menu' ? 7000 : 3000);
   if (!wasHidden) return Promise.resolve();
   loader.classList.add('out'); loader.hidden = false;
   requestAnimationFrame(() => requestAnimationFrame(() => loader.classList.remove('out')));
@@ -241,7 +249,7 @@ await Promise.all([modelsReady, W.prefetch(W.places.menu.x, W.places.menu.z, 320
 initCharacters(activeQuality);
 fx.setCasingGeometry(geometryOf('weapons', 'casing'));
 await W.preload(W.places.menu.x, W.places.menu.z, 320, (p) => { pCity = p; loadBar(); });
-playBtn.disabled = false; playBtn.textContent = 'Play';
+playBtn.disabled = false; playBtn.textContent = 'Story Mode';
 const firstSpawn = W.randomSpawn(); // picked now so its streets can download while you're in the menu
 fx.initFx(scene);
 initWalkers(scene);
@@ -263,7 +271,7 @@ await Promise.race([document.fonts.load('16px "Pricedown Bl"'), new Promise((r) 
 ui.drawMapBase();
 ui.setTurfs(GANGS);
 ui.buildWheel(WEAPONS, (i) => { selectWeapon(i); closeWheel(false); });
-ui.setWheelInfo((i) => { const w = WEAPONS[i]; if (!me.owned.has(i)) return `Buy at Arnett Arms · $${w.price}`; if (w.melee) return 'Melee'; const a = ammoOf(i); return w.grenade ? `${a.mag + a.res} grenades` : `${a.mag} / ${a.res} rounds`; });
+ui.setWheelInfo((i) => { const w = WEAPONS[i]; if (w.melee) return 'Melee'; const a = ammoOf(i); return w.grenade ? `${a.mag + a.res} grenades` : `${a.mag} / ${a.res} rounds`; });
 const vehById = new Map(vehicles.map((v) => [v.id, v]));
 const remotes = new Map();
 const grenades = [];
@@ -272,7 +280,7 @@ const me = {
   name: '', look: null, ch: null, x: 0, y: 0, z: 0, h: 0, vy: 0, vx: 0, vz: 0, hp: 100, dead: false, deadT: 0,
   stars: 0, unseen: 0, weapon: 2, cd: 0, swing: 0, veh: null, swim: false, grounded: true, moveSpeed: 0,
   shotSeq: 0, shot: [0, 0, 0], hitCd: 0, lastBy: '', lastByUid: '',
-  armor: 0, owned: new Set([0, 2]), ammo: { 2: { mag: 12, res: 48 } }, reloadT: 0, aimT: 0, lockOn: null,
+  armor: 0, owned: new Set(WEAPONS.keys()), ammo: startAmmo(), reloadT: 0, aimT: 0, lockOn: null,
 };
 let aiming = false;
 let playing = false, isHost = true, shake = 0, lastAttack = -1e9;
@@ -409,13 +417,13 @@ function gpsText(x, z) {
         const q = W.nearestEdge(R[i][0] + (bx / lb) * Math.min(12, lb), R[i][1] + (bz / lb) * Math.min(12, lb), 10);
         const onto = q && q.e.name ? ` onto ${q.e.name}` : '';
         const dir = Math.abs(turn) > 2.4 ? 'Make a U-turn' : turn > 0 ? 'Turn right' : 'Turn left';
-        msg = `<b>${turn > 0 ? '↱' : '↰'}</b>${dist < 25 ? 'Now' : `In ${Math.round(dist / 10) * 10} m`} · ${dir}${onto}`;
+        msg = `<b>${turn > 0 ? '↱' : '↰'}</b>${dist < 25 ? 'Now' : `In ${fmtDist(dist)}`} · ${dir}${onto}`;
         break;
       }
     }
     dist += lb;
   }
-  if (!msg) msg = `<b>⚑</b>${dist < 60 ? 'Arriving at your waypoint' : `Waypoint in ${dist > 1000 ? (dist / 1000).toFixed(1) + ' km' : Math.round(dist / 10) * 10 + ' m'}`}`;
+  if (!msg) msg = `<b>⚑</b>${dist < 60 ? 'Arriving at your waypoint' : `Waypoint in ${fmtDist(dist)}`}`;
   gpsEl.innerHTML = msg; gpsEl.hidden = false;
 }
 function mapBlips() {
@@ -432,7 +440,9 @@ function storeList(all) {
   for (const s of stores) {
     if (s.kind === 'guns') out.push({ x: s.x, z: s.z, color: '#e5484d', size: 6, shape: 'square', label: '⌖', name: 'Arnett Arms' });
     else if (s.kind === 'body') out.push({ x: s.x, z: s.z, color: '#4aa3ff', size: 6, shape: 'square', label: '✦', name: 'Arnett Auto' });
-    else if (s.kind === 'rob' && all) out.push({ x: s.x, z: s.z, color: '#8fe38a', size: 4.5, label: '$', name: s.name });
+    // robbable: the minimap shows the ones within 400 m (more would pile up on its edge); grey while the till is empty
+    else if (s.kind === 'rob' && (all || Math.hypot(s.x - me.x, s.z - me.z) < 400)) out.push({ x: s.x, z: s.z, color: s.cooldown > 0 ? '#7a7f87' : '#2fbf4a', size: 6, label: '$', name: s.cooldown > 0 ? `${s.name} (robbed)` : `${s.name} · rob it` });
+    else if (s.kind === 'casino') out.push({ x: s.x, z: s.z, color: s.cooldown > 0 ? '#7a7f87' : '#d4a017', size: 6.5, shape: 'square', label: '$', name: 'The Arnett Belle casino' });
   }
   return out;
 }
@@ -440,11 +450,16 @@ function drawPauseMap() { ui.drawBigMap(me, mapBlips(), waypoint, gpsRoute); }
 
 function lockMouse() { try { const p = canvas.requestPointerLock?.(); p?.catch?.(() => {}); } catch { /* not allowed here */ } }
 function selectWeapon(i) {
-  const w = WEAPONS[i];
-  if (!me.owned.has(i)) { ui.flashPrompt(`${w.name}: buy it at Arnett Arms ($${w.price})`); return; }
+  me.owned.add(i); // everything is unlocked
   me.weapon = i; me.reloadT = 0; refreshWeaponHud();
 }
 function ammoOf(i) { return me.ammo[i] || (me.ammo[i] = { mag: 0, res: 0 }); }
+// starting ammo: a full mag + one ammoPack per gun, 3 grenades / Molotovs
+function startAmmo() {
+  const a = {};
+  WEAPONS.forEach((w, i) => { if (!w.melee) a[i] = w.grenade ? { mag: 1, res: 2 } : { mag: w.mag, res: w.ammoPack }; });
+  return a;
+}
 function refreshWeaponHud() {
   const w = WEAPONS[me.weapon], a = ammoOf(me.weapon);
   ui.setWeapon(w.name, w.melee ? '' : w.grenade ? `× ${a.mag + a.res}` : me.reloadT > 0 ? 'Reloading…' : `${a.mag} / ${a.res}`);
@@ -456,6 +471,9 @@ function startReload() {
 }
 // Right-click aim: snap onto the nearest threat (or person) roughly where you're looking.
 function findLockTarget() {
+  // in a shop the only target is the clerk (rooms sit underground, so lineOfSight below would refuse it)
+  const R = interior.room;
+  if (R) return R.clerk && Math.abs(angDiff(camYaw, Math.atan2(R.clerk.x - me.x, R.clerk.z - me.z))) < 0.7 ? { ref: R.clerk, kind: 'person' } : null;
   let best = null, bs = 0.26;
   const consider = (x, y, z, ref, kind) => {
     const dx = x - me.x, dz = z - me.z, d = Math.hypot(dx, dz);
@@ -478,7 +496,7 @@ function lockPos(t) {
 function openWheel() {
   if (wheelOpen || me.dead) return;
   wheelOpen = true; wheelSel = me.weapon; wheelX = wheelY = 0; mouseDown = false;
-  ui.wheelHighlight(wheelSel, WEAPONS[wheelSel]); ui.setWheelLocked(me.owned, WEAPONS.map((w) => w.price)); ui.showWheel(true);
+  ui.wheelHighlight(wheelSel, WEAPONS[wheelSel]); ui.showWheel(true);
 }
 function closeWheel(apply) {
   if (!wheelOpen) return;
@@ -497,6 +515,27 @@ const connecting = connect().then((ok) => {
   netStatus.textContent = ok ? 'Multiplayer is on. Friends who enter the same room code join your game.' : net.error;
 });
 for (const inp of [nameInput, roomInput]) inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') playBtn.click(); });
+// ---------- main menu: Story Mode / Controls / Settings / Credits, by mouse or arrow keys ----------
+const mmItems = [...document.querySelectorAll('.mmList button')], mmPanel = document.getElementById('mmPanel');
+const borrowed = []; // the pause menu lends its Controls and Settings panels; they go back when you start
+function mmShow(which) {
+  for (const b of borrowed.splice(0)) b.home.append(b.el);
+  mmPanel.hidden = !which;
+  if (!which) return;
+  const src = which === 'credits' ? document.getElementById('mmCredits') : document.querySelector(`[data-panel="${which}"]`);
+  mmPanel.querySelector('h2').textContent = which;
+  const body = mmPanel.querySelector('.mmBody');
+  for (const el of [...src.children]) { borrowed.push({ el, home: src }); body.append(el); }
+}
+function mmSelect(i) { mmItems.forEach((b, k) => b.classList.toggle('on', k === i)); mmShow(mmItems[i].dataset.mm || null); }
+mmItems.forEach((b, i) => { b.addEventListener('mouseenter', () => mmSelect(i)); b.addEventListener('focus', () => mmSelect(i)); if (b.dataset.mm) b.addEventListener('click', () => mmSelect(i)); });
+addEventListener('keydown', (e) => {
+  if (ui.el.menu.hidden || playing) return;
+  const i = Math.max(0, mmItems.findIndex((b) => b.classList.contains('on')));
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); mmItems[(i + (e.key === 'ArrowDown' ? 1 : mmItems.length - 1)) % mmItems.length].focus(); }
+  else if (e.key === 'Enter' && e.target.tagName !== 'INPUT' && e.target !== mmItems[i]) { e.preventDefault(); mmItems[i].click(); }
+  else if (e.key === 'Escape') mmItems[0].focus();
+});
 playBtn.addEventListener('click', async () => {
   playBtn.disabled = true; playBtn.textContent = 'Joining…';
   const name = nameInput.value.trim().slice(0, 16) || 'Player' + Math.floor(100 + Math.random() * 900);
@@ -506,17 +545,20 @@ playBtn.addEventListener('click', async () => {
   await enginesReady;
   // drop in somewhere random in the city (load the streets around you first)
   const sp = firstSpawn;
+  mmShow(null);
   await loading(true, W.areaAt(sp.x, sp.z)[0]);
+  const pics = morePictures(2); // even a fast load shows a few pictures
   ui.el.menu.hidden = true;
   await W.preload(sp.x, sp.z, 260, loadProgress);
   manageParked(0, sp.x, sp.z, true);
   me.name = name; me.look = randomLook();
   try { await joinRoom(room, name, me.look); }
-  catch (e) { console.error(e); netStatus.textContent = "Couldn't join the room: " + (e.code || e.message); playBtn.disabled = false; playBtn.textContent = 'Play'; ui.el.menu.hidden = false; loading(false); return; }
+  catch (e) { console.error(e); netStatus.textContent = "Couldn't join the room: " + (e.code || e.message); playBtn.disabled = false; playBtn.textContent = 'Story Mode'; ui.el.menu.hidden = false; loading(true, '', 'menu'); return; }
   history.replaceState(null, '', '#' + room);
   me.ch = makeCharacter(me.look);
   scene.add(me.ch.g);
   respawn(true, sp);
+  await pics;
   ui.el.menu.hidden = true; ui.el.hud.hidden = false;
   playing = true;
   setTimeout(() => loading(false), 250); // a few frames to settle behind the cover
@@ -812,7 +854,7 @@ async function beginRespawn() {
   if (respawning) return;
   respawning = true;
   const sp = W.hospitalSpawn(me.x, me.z);
-  await loading(true, '', true); // WASTED fades to black
+  await loading(true, '', 'fade'); // WASTED fades to black
   ui.el.dead.hidden = true;
   await W.preload(sp.x, sp.z, 200, loadProgress);
   manageParked(0, sp.x, sp.z, true);
@@ -1056,7 +1098,7 @@ function fire(w) {
   if (w.melee) { me.swing = 1; me.h = camYaw; melee(w); return; }
   const a = ammoOf(me.weapon);
   if (me.reloadT > 0) return;
-  if (a.mag <= 0) { if (a.res > 0) startReload(); else { fx.soundClick(); ui.flashPrompt('Out of ammo. Buy more at Arnett Arms.'); } return; }
+  if (a.mag <= 0) { if (a.res > 0) startReload(); else { fx.soundClick(); ui.flashPrompt('Out of ammo. Buy more at Arnett Arms (red ⌖ on the map) or a corner store.'); } return; }
   a.mag--;
   if (w.grenade) { if (a.mag <= 0 && a.res > 0) { a.mag = 1; a.res--; } throwGrenade(w.molotov ? 'molotov' : 'nade'); refreshWeaponHud(); return; }
   if (w.rocket) { if (a.mag <= 0 && a.res > 0) startReload(); fireRocket(); refreshWeaponHud(); return; }
@@ -1675,35 +1717,39 @@ function updateWantedLevel(dt) {
   if (wanted.stars === 0) peakStars = 0;
   updateRobbery(dt);
 }
-// Robbing: inside, point a gun at the clerk (or the casino cashier) and keep it there.
+// Robbing: inside, point a gun at the clerk (or the casino cashier) and keep it there while they fill the bag.
 // Corner stores: the clerk hits the silent alarm partway through. The casino calls it in at once.
 function updateRobbery(dt) {
   robberyPrompt = '';
   const R = interior.room;
   if (!R || !R.clerk || (R.kind !== 'rob' && R.kind !== 'casino')) return;
-  const st = R.store, w = WEAPONS[me.weapon], c = R.clerk;
-  if (st.cooldown > 0) { R.held = false; if (aiming) robberyPrompt = R.kind === 'casino' ? 'The cage is empty. Come back later.' : 'The till is empty. Come back later.'; return; }
-  const facing = Math.abs(angDiff(camYaw, Math.atan2(c.x - me.x, c.z - me.z))) < 0.35 && Math.hypot(c.x - me.x, c.z - me.z) < 16;
-  R.held = aiming && w.kind === 'gun' && facing;
-  if (!R.held) { st.progress = Math.max(0, (st.progress || 0) - dt * 0.15); if (st.progress > 0) robberyPrompt = `Keep aiming at the ${R.kind === 'casino' ? 'cashier' : 'clerk'}`; return; }
-  st.progress = (st.progress || 0) + dt / (R.kind === 'casino' ? 14 : 8);
-  if (!st.alarm && (R.kind === 'casino' || st.progress > 0.35)) {
+  const st = R.store, w = WEAPONS[me.weapon], c = R.clerk, casino = R.kind === 'casino', who = casino ? 'cashier' : 'clerk', till = casino ? 'cage' : 'till';
+  const facing = aiming && Math.abs(angDiff(camYaw, Math.atan2(c.x - me.x, c.z - me.z))) < 0.35, close = Math.hypot(c.x - me.x, c.z - me.z) < 16;
+  R.held = facing && close && w.kind === 'gun' && !(st.cooldown > 0);
+  if (!R.held && (interior.nearExit(me.x, me.z) || canBuyAtCounter())) return; // let "E: Leave" / "E: Buy ammo" show
+  if (st.cooldown > 0) { const s = Math.ceil(st.cooldown); robberyPrompt = `The ${till} is empty. Come back in ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; return; }
+  if (!R.held) {
+    st.progress = Math.max(0, (st.progress || 0) - dt * 0.15);
+    robberyPrompt = facing && w.kind !== 'gun' ? `The ${who} laughs at your ${w.name.toLowerCase()}. Point a gun.` : facing ? `Get closer to the ${who}` : st.progress > 0 ? `Keep aiming at the ${who}!` : `Aim a gun at the ${who} (hold right click) to rob ${st.name}`;
+    return;
+  }
+  st.progress = (st.progress || 0) + dt / (casino ? 14 : 8);
+  if (!st.alarm && (casino || st.progress > 0.35)) {
     st.alarm = true; st.alarmed = true;
-    crime(R.kind === 'casino' ? 'casino' : 'robbery', st.x, me.outside ? me.outside.y : me.y, st.z);
-    ui.help(R.kind === 'casino' ? 'Casino security called it in. The whole department is coming.' : 'The clerk hit the silent alarm. Grab the cash and get out!', 4);
+    crime(casino ? 'casino' : 'robbery', st.x, me.outside ? me.outside.y : me.y, st.z);
+    ui.help(casino ? 'Casino security called it in. The whole department is coming.' : 'The clerk hit the silent alarm. Grab the cash and get out!', 4);
   }
   const bars = Math.round(Math.min(1, st.progress) * 10);
-  robberyPrompt = `Robbing ${st.name}  ${'▮'.repeat(bars)}${'▯'.repeat(10 - bars)}`;
+  robberyPrompt = `${st.progress < 0.5 ? `The ${who} is emptying the ${till}` : `The ${who} is filling your bag`}, keep aiming  ${'▮'.repeat(bars)}${'▯'.repeat(10 - bars)}`;
   if (st.progress >= 1) {
-    const take = R.kind === 'casino' ? 2500 + Math.floor(Math.random() * 2000) : 150 + Math.floor(Math.random() * 300);
-    st.progress = 0; st.cooldown = R.kind === 'casino' ? 900 : 300; st.alarm = false; R.held = false;
-    addCash(take);
-    if (R.kind === 'casino') goalDone('casino'); else { eco.robbed++; checkCountGoals(); }
-    ui.announce(R.kind === 'casino' ? 'CASINO ROBBED' : 'STORE ROBBED', `${st.name} · +$${take}`, '#8fe38a');
+    const take = casino ? 2500 + Math.floor(Math.random() * 2000) : 150 + Math.floor(Math.random() * 300);
+    st.progress = 0; st.cooldown = casino ? 900 : 300; st.alarm = false; R.held = false;
+    addCash(take, `robbed ${st.name}`);
+    if (casino) goalDone('casino'); else { eco.robbed++; checkCountGoals(); }
+    ui.announce(casino ? 'CASINO ROBBED' : 'STORE ROBBED', `${st.name} · +$${take}`, '#8fe38a');
     fx.soundCash();
   }
 }
-const storesRobbing = new Set();
 
 // Shops you walk (or drive) into with E. Returns true if a shop opened.
 function storeAt(x, z, r) { const c = !me.veh && cartNear(x, z, 3.5); return c ? { kind: 'food', name: 'Hot dog cart', x: c.x, z: c.z } : storeNear(x, z, r); }
@@ -1714,12 +1760,13 @@ function enterRoom(st) {
     const p = interior.enter(st, me.outside.y);
     me.x = p.x; me.y = p.y; me.z = p.z; me.vy = 0; me.h = 0; camYaw = 0;
     fadeEl.style.opacity = '0';
+    if (st.kind === 'rob' || st.kind === 'casino') ui.help(`<b>Robbery:</b> hold right click to aim a gun at the ${st.kind === 'casino' ? 'cashier' : 'clerk'} and keep it on them until the bag is full. The alarm brings the cops.`, 7);
   }, 350);
 }
 function leaveRoom() {
   fadeEl.style.opacity = '1';
   setTimeout(() => {
-    if (interior.room) interior.room.store.alarmed = false;
+    if (interior.room) Object.assign(interior.room.store, { alarmed: false, alarm: false, progress: 0 }); // walking out drops the robbery
     interior.leave();
     const o = me.outside || { x: me.x, z: me.z, y: W.groundHeight(me.x, me.z), h: 0 };
     me.x = o.x + Math.sin(o.h) * 1.2; me.z = o.z + Math.cos(o.h) * 1.2; me.y = o.y; me.vy = 0; me.h = o.h; camYaw = o.h; me.outside = null;
@@ -1730,7 +1777,8 @@ function useStore() {
   if (me.dead || me.enter) return false;
   if (interior.room) {
     if (interior.nearExit(me.x, me.z)) { leaveRoom(); return true; }
-    if (interior.nearCounter(me.x, me.z) && interior.room.kind === 'guns') { openShop('Arnett Arms', gunShopItems()); return true; }
+    if (interior.nearCounter(me.x, me.z) && interior.room.kind === 'guns') { openShop('Arnett Arms', gunShopItems(), gunShopItems); return true; }
+    if (canBuyAtCounter()) { const basic = () => gunShopItems(true); openShop(interior.room.store.name, basic(), basic); return true; }
     if (interior.nearCounter(me.x, me.z) && interior.room.kind === 'clothes') { openShop(interior.room.store.name, clothingItems()); return true; }
     return true;
   }
@@ -1743,14 +1791,24 @@ function useStore() {
   if (st.kind === 'meds') { openShop('Hospital Pharmacy', [{ label: 'Patch me up', sub: 'Full health', price: 60, ok: () => me.hp < 100, buy: () => { me.hp = 100; } }]); return true; }
   return false;
 }
-function gunShopItems() {
+// corner stores and gas stations sell basic rounds at the counter while you aren't robbing them
+const BASIC_AMMO = ['Pistol', 'SMG', 'Shotgun'];
+function canBuyAtCounter() {
+  const R = interior.room;
+  return !!R && R.kind === 'rob' && !!R.clerk && interior.nearCounter(me.x, me.z) && !aiming && !(R.store.progress > 0) && !R.store.alarmed;
+}
+// Everyone owns every weapon, so the shop sells ammo packs and discounted full loadouts (Arnett Arms only, with armor).
+function gunShopItems(basic = false) {
   const items = [];
   WEAPONS.forEach((w, i) => {
-    if (i === 0) return;
-    if (!me.owned.has(i)) items.push({ label: w.name, sub: w.melee ? 'Melee weapon' : `Comes with ${w.ammoPack} ${w.grenade ? 'grenades' : 'rounds'}`, price: w.price, buy: () => { me.owned.add(i); if (!w.melee) { const a = ammoOf(i); if (w.grenade) { a.mag = 1; a.res = w.ammoPack - 1; } else { a.mag = w.mag; a.res = w.ammoPack - w.mag; } } selectWeapon(i); } });
-    else if (!w.melee) items.push({ label: `${w.name} ammo`, sub: `+${w.ammoPack} ${w.grenade ? 'grenades' : 'rounds'}`, price: w.ammoPrice, buy: () => { ammoOf(i).res += w.ammoPack; refreshWeaponHud(); } });
+    if (w.melee || (basic && !BASIC_AMMO.includes(w.name))) return;
+    const a = ammoOf(i), unit = w.grenade ? 'grenades' : 'rounds', have = w.grenade ? a.mag + a.res : a.res;
+    items.push({ label: w.grenade ? `${w.name}s` : `${w.name} ammo`, sub: `+${w.ammoPack} ${unit} · you have ${have}`, price: w.ammoPrice, buy: () => { a.res += w.ammoPack; refreshWeaponHud(); } });
+    if (basic) return;
+    const price = Math.round((w.ammoPrice * 2.5) / 10) * 10;
+    items.push({ label: `${w.name} loadout`, sub: `${w.grenade ? '' : 'Full mag '}+${w.ammoPack * 3} ${unit} (save $${w.ammoPrice * 3 - price})`, price, buy: () => { me.owned.add(i); a.mag = w.mag; a.res += w.ammoPack * 3; refreshWeaponHud(); } });
   });
-  items.push({ label: 'Body armor', sub: 'Soaks up most incoming damage', price: 250, ok: () => me.armor < 100, buy: () => { me.armor = 100; } });
+  if (!basic) items.push({ label: 'Body armor', sub: 'Soaks up most incoming damage', price: 250, ok: () => me.armor < 100, buy: () => { me.armor = 100; } });
   return items;
 }
 // Arnett Auto: repairs, paint and wheels, performance, armor. Upgrades belong to that car.
@@ -1831,7 +1889,7 @@ function deliverCar(ti, label) {
   setTimeout(() => { v.keep = false; }, 120000);
 }
 let shopOpen = false;
-function openShop(title, items) {
+function openShop(title, items, rebuild) { // rebuild: () => items, re-run after each purchase so counts stay current
   shopOpen = true; paused = true; keys.clear(); mouseDown = false;
   document.exitPointerLock?.();
   const el = document.getElementById('shop'), list = document.getElementById('shopItems');
@@ -1840,9 +1898,10 @@ function openShop(title, items) {
     list.innerHTML = '';
     for (const it of items) {
       const li = document.createElement('li'), b = document.createElement('button');
-      b.innerHTML = `<span>${it.label}<small>${it.sub || ''}</small></span><span class="price">$${it.price}</span>`;
-      b.disabled = eco.cash < it.price || (it.ok && !it.ok());
-      b.addEventListener('click', () => { if (spend(it.price)) { it.buy(); fx.soundCash(); ui.setCash(eco.cash); if (title === 'Arnett Arms') items = gunShopItems(); render(); } });
+      const broke = eco.cash < it.price;
+      b.innerHTML = `<span>${it.label}<small>${it.sub || ''}${broke ? ` · not enough cash (need $${it.price - eco.cash} more)` : ''}</small></span><span class="price">$${it.price}</span>`;
+      b.disabled = broke || (it.ok && !it.ok());
+      b.addEventListener('click', () => { if (spend(it.price)) { it.buy(); fx.soundCash(); ui.setCash(eco.cash); if (rebuild) items = rebuild(); render(); } });
       li.append(b); list.append(li);
     }
   };
@@ -2041,7 +2100,7 @@ function updateHud(dt, t) {
   let prompt = robberyPrompt;
   if (!me.dead && !prompt) {
     const st = storeAt(me.veh ? me.veh.x : me.x, me.veh ? me.veh.z : me.z, me.veh ? 7 : 3.2);
-    if (interior.room) prompt = interior.nearExit(me.x, me.z) ? 'E: Leave' : interior.nearCounter(me.x, me.z) && interior.room.kind === 'guns' ? 'E: Buy weapons' : interior.nearCounter(me.x, me.z) && interior.room.kind === 'clothes' ? 'E: Try on clothes' : interior.room.clerk && (interior.room.kind === 'rob' || interior.room.kind === 'casino') && !robberyPrompt ? `Aim a gun at the ${interior.room.kind === 'casino' ? 'cashier' : 'clerk'} (right click) to rob ${interior.room.store.name}` : '';
+    if (interior.room) prompt = interior.nearExit(me.x, me.z) ? 'E: Leave' : interior.nearCounter(me.x, me.z) && interior.room.kind === 'guns' ? 'E: Buy ammo & loadouts' : interior.nearCounter(me.x, me.z) && interior.room.kind === 'clothes' ? 'E: Try on clothes' : canBuyAtCounter() ? 'E: Buy ammo · or aim a gun at the clerk to rob' :interior.room.clerk && (interior.room.kind === 'rob' || interior.room.kind === 'casino') && !robberyPrompt ? `Aim a gun at the ${interior.room.kind === 'casino' ? 'cashier' : 'clerk'} (right click) to rob ${interior.room.store.name}` : '';
     else if (st && st.kind === 'food') prompt = 'E: Buy a hot dog ($8, +30 health)';
     else if (st && (st.kind === 'guns' || st.kind === 'clothes' || st.kind === 'rob' || st.kind === 'casino') && !me.veh) prompt = `E: Go into ${st.name}`;
     else if (st && st.kind === 'meds' && !me.veh) prompt = 'E: Pharmacy (heal $60)';
@@ -2219,7 +2278,7 @@ function frame(now) {
 }
 requestAnimationFrame(frame);
 // let a few frames render (and shaders compile) behind the loading screen, then show the menu
-setTimeout(() => loading(false), 400);
+setTimeout(() => { loading(true, '', 'menu'); ui.el.menu.hidden = false; playBtn.focus(); }, 400);
 // meanwhile, download the streets where you'll start
 W.prefetch(firstSpawn.x, firstSpawn.z, 260);
 

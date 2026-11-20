@@ -23,20 +23,23 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #22325a; fon
 button { font: inherit; }
 
 /* ---------- menu ---------- */
-#menu { position: fixed; inset: 0; display: grid; place-items: center; padding: 16px; background: linear-gradient(180deg, rgba(5, 9, 16, .2), rgba(5, 9, 16, .75)); }
-.card { width: min(420px, 100%); background: var(--panel-strong); border: 1px solid var(--line); border-radius: 6px; padding: 28px; box-shadow: 0 30px 80px rgba(0,0,0,.45); display: grid; gap: 8px; backdrop-filter: blur(6px); }
-.card h1 { font: 400 52px/0.95 var(--display); letter-spacing: 1px; margin: 0; text-transform: uppercase; }
-.card h1 span { color: var(--accent); display: block; }
-.tag { margin: 6px 0 14px; color: var(--muted); }
-.card label { font-weight: 800; font-size: 12px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted); margin-top: 6px; }
-.card label small { font-weight: 400; letter-spacing: 0; text-transform: none; }
-.card input { font: 600 18px var(--body); padding: 11px 12px; color: var(--text); background: rgba(255,255,255,.06); border: 1px solid var(--line); border-radius: 4px; }
-#roomInput { text-transform: uppercase; letter-spacing: 4px; }
-.card input:focus { outline: none; border-color: var(--accent); }
-#playBtn { margin-top: 14px; font: 400 26px var(--display); letter-spacing: 2px; padding: 12px; border: 0; border-radius: 4px; background: var(--accent); color: var(--ink); cursor: pointer; text-transform: uppercase; }
-#playBtn:hover { filter: brightness(1.08); }
-#playBtn:disabled { opacity: .7; cursor: progress; }
-#playBtn:focus-visible, #resumeBtn:focus-visible, #pauseTabs button:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+/* ---------- main menu (GTA V style): the loading art keeps drifting behind a list of options ---------- */
+#menu { position: fixed; inset: 0; z-index: 70; background: linear-gradient(90deg, rgba(0,0,0,.72) 0%, rgba(0,0,0,.35) 38%, rgba(0,0,0,0) 62%); }
+.mmList { position: absolute; left: 6vw; top: 50%; transform: translateY(-50%); display: grid; gap: 6px; width: min(380px, 80vw); }
+.mmList button { font: 400 30px/1 var(--display); text-align: left; text-transform: uppercase; letter-spacing: 1px; color: #fff; background: rgba(0,0,0,.62); border: 0; padding: 14px 20px 12px; cursor: pointer; transition: background .12s, color .12s, padding .12s; }
+.mmList button.on { background: #fff; color: #000; padding-left: 28px; }
+.mmList button:disabled { color: rgba(255,255,255,.55); cursor: progress; }
+.mmList button.on:disabled { color: rgba(0,0,0,.5); }
+#mmPanel { position: absolute; left: calc(6vw + min(380px, 80vw) + 18px); top: 50%; transform: translateY(-50%); width: min(460px, calc(88vw - min(380px, 80vw) - 18px)); max-height: 76vh; overflow: auto; background: rgba(0,0,0,.72); padding: 18px 22px; }
+#mmPanel h2 { margin: 0 0 12px; font: 400 26px var(--display); text-transform: uppercase; border-bottom: 2px solid #fff; padding-bottom: 6px; }
+#mmPanel p { margin: 0 0 10px; color: #dfe5ea; }
+#mmPanel a { color: #fff; }
+.mmKeys { position: absolute; right: 2.6vw; bottom: 3vh; display: flex; gap: 18px; color: #fff; font-size: 16px; text-shadow: 0 1px 3px #000; }
+.mmKeys kbd { display: inline-block; min-width: 24px; padding: 1px 6px; margin-right: 6px; border-radius: 4px; background: #fff; color: #000; font: inherit; text-align: center; text-shadow: none; }
+#loader.menu .spin, #loader.menu .bar, #loader.menu .tip { display: none; }
+#loader.menu .shade { background: linear-gradient(to top, rgba(0,0,0,.6), rgba(0,0,0,0) 30%); }
+@media (max-width: 760px) { .mmList { top: 38%; left: 16px; right: 16px; width: auto; } #mmPanel { left: 16px; right: 16px; width: auto; top: auto; bottom: 64px; transform: none; max-height: 44vh; } .mmKeys { display: none; } }
+#resumeBtn:focus-visible, .mmList button:focus-visible, #pauseTabs button:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
 #netStatus { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
 
 /* ---------- hud ---------- */
@@ -111,12 +114,9 @@ button { font: inherit; }
 .slice > path { fill: rgba(10, 14, 20, .78); stroke: rgba(255,255,255,.12); stroke-width: .6; transition: fill .12s; }
 .slice .icon { fill: #fff; transition: fill .12s; }
 .slice .num { fill: rgba(255,255,255,.55); font: 800 7px var(--body); text-anchor: middle; }
-.slice .price { fill: var(--cash); font: 800 6.5px var(--body); text-anchor: middle; }
 .slice.sel > path { fill: rgba(255,255,255,.94); }
 .slice.sel .icon { fill: var(--ink); }
 .slice.sel .num { fill: rgba(0,0,0,.5); }
-.slice.locked .icon { opacity: .45; }
-.slice.locked.sel > path { fill: rgba(255,255,255,.55); }
 #wheel .hub { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 40%; text-align: center; pointer-events: none; }
 #wheelName { font: 400 clamp(18px, 3.4vmin, 28px) var(--display); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 4px; }
 .ammoLine { margin: 0 0 8px; font-weight: 800; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }

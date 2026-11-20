@@ -16,7 +16,14 @@
 <body>
   <canvas id="game"></canvas>
   <div id="loader">
-    <div class="slides"><div class="slide on"><div class="fill" style="background-image:url(assets/load/art6.jpg)"></div><img src="assets/load/art6.jpg" alt=""></div></div>
+    <div class="slides"></div>
+    <script>
+      // first picture right away (before the game code loads), and a different one every visit
+      (() => { let i = 0; try { i = (+localStorage.getItem('tat-art') + 1) % 4 || 0; localStorage.setItem('tat-art', i); } catch { i = Math.floor(Math.random() * 4); }
+        const u = `assets/load/art${i + 1}.jpg`, s = document.createElement('div'); s.className = 'slide on'; s.dataset.art = i;
+        s.innerHTML = `<div class="fill" style="background-image:url(${u})"></div><img src="${u}" alt="">`;
+        document.currentScript.previousElementSibling.append(s); })();
+    </script>
     <div class="shade"></div>
     <div class="logo" aria-label="Tim Arnett Town V"><div class="v">V</div><div class="words"><b>tim</b><b>arnett</b><b>town</b></div></div>
     <p class="tip"></p>
@@ -133,14 +140,23 @@
     </div>
   </div>
 
-  <div id="menu">
-    <div class="card">
-      <h1>Tim Arnett <span>Town</span></h1>
-      <!-- name and room code come back when multiplayer is set up -->
-      <div hidden><input id="nameInput" maxlength="16" autocomplete="off"><input id="roomInput" maxlength="6" autocomplete="off"><p id="netStatus"></p></div>
-      <button id="playBtn">Play</button>
-      <p class="credit">Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors</p>
+  <div id="menu" hidden>
+    <nav class="mmList" aria-label="Main menu">
+      <button id="playBtn" class="on">Story Mode</button>
+      <button data-mm="controls">Controls</button>
+      <button data-mm="settings">Settings</button>
+      <button data-mm="credits">Credits</button>
+    </nav>
+    <div id="mmPanel" hidden><h2></h2><div class="mmBody"></div></div>
+    <div id="mmCredits" hidden>
+      <p>Davenport, Iowa, at full size, built from OpenStreetMap.</p>
+      <p>Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors (ODbL). Elevation from AWS Open Data Terrain Tiles.</p>
+      <p>Models built in Blender. Font: Pricedown by Typodermic Fonts.</p>
+      <p>Tim Arnett is not actually the mayor. Yet.</p>
     </div>
+    <div class="mmKeys"><span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span><span><kbd>Enter</kbd> Select</span><span><kbd>Esc</kbd> Back</span></div>
+    <!-- name and room code come back when multiplayer is set up -->
+    <div hidden><input id="nameInput" maxlength="16" autocomplete="off"><input id="roomInput" maxlength="6" autocomplete="off"><p id="netStatus"></p></div>
   </div>
 
   <script type="module" src="src/main.js"></script>

@@ -1,4 +1,5 @@
 import * as W from './world.js';
+import { FT, fmtSpeed } from './util.js';
 
 const $ = (id) => document.getElementById(id);
 export const el = {
@@ -127,12 +128,12 @@ export function setClock(time, wx, night) { el.clock.textContent = `${time} · $
 export function setSpeedo(v, station = '', nitro = 0) {
   if (!v) { el.speedo.hidden = true; return; }
   el.speedo.hidden = false;
-  const alt = v.T.heli ? `<span>Altitude ${Math.round(v.alt ?? v.y)} m</span>` : '';
+  const alt = v.T.heli ? `<span>Altitude ${Math.round((v.alt ?? v.y) * FT)} ft</span>` : '';
   const nb = !v.T.bike && !v.T.heli ? `<div id="nitro" title="Nitro"><i style="width:${Math.round(nitro * 100)}%"></i></div>` : '';
   // damage meter: green when healthy, red when it's about to give up
   const hp = Math.max(0, Math.min(1, v.hp / v.T.hp)), hc = hp > 0.6 ? '#7cf29a' : hp > 0.3 ? '#ffc94a' : '#ff5e5b';
   const dm = `<div id="vdmg" title="Damage"><i style="width:${Math.round(hp * 100)}%;background:${hc}"></i></div>`;
-  el.speedo.innerHTML = `<b>${Math.round(Math.abs(v.speed) * 3.6)}</b><small>km/h</small><span>${v.T.name}${station ? ' · ' + station : ''}</span>${alt}${nb}${dm}`;
+  el.speedo.innerHTML = `<b>${fmtSpeed(v.speed)}</b><small>mph</small><span>${v.T.name}${station ? ' · ' + station : ''}</span>${alt}${nb}${dm}`;
 }
 let hitT = 0;
 export function hitMarker(kill) {
@@ -170,13 +171,10 @@ export function buildWheel(weapons, onPick) {
     const num = document.createElementNS(SVGNS, 'text');
     num.setAttribute('x', (Math.cos(mid) * 90).toFixed(1)); num.setAttribute('y', (Math.sin(mid) * 90 + 2).toFixed(1));
     num.textContent = i + 1; num.classList.add('num'); g.append(num);
-    const price = document.createElementNS(SVGNS, 'text');
-    price.setAttribute('x', ix.toFixed(1)); price.setAttribute('y', (iy + 19).toFixed(1));
-    price.classList.add('price'); g.append(price);
     g.addEventListener('pointerenter', () => wheelHighlight(i, weapons[i]));
     g.addEventListener('click', () => onPick(i));
     svg.append(g);
-    return { g, price };
+    return { g };
   });
   ring.prepend(svg);
 }
@@ -195,9 +193,6 @@ export function wheelHighlight(i, w) {
 export function wheelIndex(dx, dy, n) {
   const a = Math.atan2(dy, dx) + Math.PI / 2;
   return ((Math.round(a / ((Math.PI * 2) / n)) % n) + n) % n;
-}
-export function setWheelLocked(owned, prices) {
-  slices.forEach((s, i) => { const locked = !owned.has(i); s.g.classList.toggle('locked', locked); s.price.textContent = locked ? `$${prices[i]}` : ''; });
 }
 
 // ---------- maps ----------

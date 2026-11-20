@@ -3,6 +3,11 @@ import * as THREE from 'three';
 export const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 export const lerp = (a, b, t) => a + (b - a) * t;
 
+// The game runs in metres and m/s; the player only ever sees US units.
+export const FT = 3.28084, MPH = 2.23694;
+export const fmtDist = (m) => (m < 320 ? `${Math.round((m * FT) / 50) * 50} ft` : `${(m / 1609.344).toFixed(1)} mi`);
+export const fmtSpeed = (ms) => `${Math.round(Math.abs(ms) * MPH)}`; // mph, caller adds the label
+
 // Seeded random (mulberry32) so every player builds the exact same island.
 export function rng(seed) {
   let a = seed >>> 0;
