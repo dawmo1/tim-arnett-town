@@ -15,6 +15,7 @@ import { initEvents, updateEvents, eventBlips } from './events.js';
 import { say, line } from './npc.js';
 import { initDayNight, updateDayNight, sky as weather, clockText, view as fogView } from './daynight.js';
 import { initLife, updateLife, startle, updateAnimals } from './life.js';
+import { loadAssets } from './assets.js';
 import { initCarLights, updateCarLights, setLightQuality, wetUniform } from './carlights.js';
 import { initPhysics, updateRagdolls, ragdoll, release, ragPos, syncPhysics } from './ragdoll.js';
 import { initNav, updateNav } from './nav.js';
@@ -175,7 +176,9 @@ initSettingsUi();
 
 // ---------- load Davenport (the menu waits for the city around the riverfront) ----------
 const playBtn = document.getElementById('playBtn');
-playBtn.disabled = true; playBtn.textContent = 'Loading Davenport…';
+playBtn.disabled = true; playBtn.textContent = 'Loading models…';
+await loadAssets((p) => { playBtn.textContent = `Loading models… ${Math.round(p * 100)}%`; });
+playBtn.textContent = 'Loading Davenport…';
 await W.initWorld(scene);
 await W.preload(W.places.menu.x, W.places.menu.z, 320, (p) => { playBtn.textContent = `Loading Davenport… ${Math.round(p * 100)}%`; });
 playBtn.disabled = false; playBtn.textContent = 'Play';
