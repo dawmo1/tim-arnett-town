@@ -683,7 +683,7 @@ export function updateWalkers(dt, tSec, nowMs, cam) {
         if (f.lines && Math.random() < dt * 0.12) say(w, pick(f.lines), 2.5);
       }
     }
-    w.y = W.groundHeight(w.x, w.z);
+    w.y = w.floorY ?? W.groundHeight(w.x, w.z); // floorY: bar regulars stand on the bar's floor (venues.js)
     drawWalker(w, cam, speed, pose, dt, nearR);
   }
   farBody.count = farHead.count = farN;

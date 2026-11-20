@@ -46,10 +46,11 @@ export const isFetching = (key) => pending.has(key);
 // Lots kept clear for the walk-in stores: economy.js sets `plan` (run once, before the first tile arrives) to
 // return [{x, z, fx, fz, hw, hd}] rectangles (centre, unit vector into the lot, half width, half depth).
 // A building touching a lot is dropped from its tile's data, so its mesh, walls, roof and footprint all go.
-export const lots = { plan: null, list: null };
+// landmarks.js pushes the Blender landmarks' footprints into `extra` (same shape) at import time.
+export const lots = { plan: null, list: null, extra: [] };
 const inPoly = (x, z, p) => { let c = false; for (let i = 0, j = p.length - 2; i < p.length; j = i, i += 2) if ((p[i + 1] > z) !== (p[j + 1] > z) && x < ((p[j] - p[i]) * (z - p[i + 1])) / (p[j + 1] - p[i + 1]) + p[i]) c = !c; return c; };
 function clearLots(b, ox, oz) {
-  if (!lots.list && lots.plan) lots.list = lots.plan();
+  if (!lots.list) lots.list = [...(lots.plan ? lots.plan() : []), ...lots.extra];
   const near = (lots.list || []).filter((L) => Math.abs(L.x - ox - TILE / 2) < TILE / 2 + 30 && Math.abs(L.z - oz - TILE / 2) < TILE / 2 + 30);
   if (!near.length) return b;
   // shortcut: tests corners + edge midpoints of the building and corners + centre of the lot, so a thin wall crossing a lot without touching any of them survives

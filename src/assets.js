@@ -21,6 +21,13 @@ export async function loadAssets(onProgress) {
     }, undefined, (err) => { console.warn('asset failed', a.file, err); done += a.kb || 100; res(); });
   })));
 }
+// Models fetched on demand (landmarks near you), not behind the loading screen. Resolves to the gltf, or null.
+const lazy = new Map();
+export function loadLazy(file) {
+  if (!lazy.has(file)) lazy.set(file, new Promise((res) => loader.load(`assets/models/${file}`, res, undefined, (err) => { console.warn('asset failed', file, err); lazy.delete(file); res(null); })));
+  return lazy.get(file);
+}
+export const dropLazy = (file) => lazy.delete(file);
 export const hasAsset = (name) => store.has(name);
 export const gltf = (name) => store.get(name);
 // a fresh copy of a model (skinned meshes get their own skeleton)

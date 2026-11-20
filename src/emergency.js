@@ -19,12 +19,12 @@ export function initEmergency(s, c) { scene = s; ctx = c; }
 export function reportDown(w) { if (!downs.some((d) => d.w === w)) downs.push({ w, age: 0 }); }
 
 function spawnUnit(kind, tx, tz, target) {
-  const bases = kind === 'amb' ? W.places.hospitals : W.places.fire;
+  const bases = kind === 'amb' ? W.places.hospitals : kind === 'cop' ? W.places.police : W.places.fire;
   const base = (bases || []).filter((b) => Math.hypot(b.x - tx, b.z - tz) < 900).sort((a, b) => Math.hypot(a.x - tx, a.z - tz) - Math.hypot(b.x - tx, b.z - tz))[0];
   // fires can't wait: a truck already out on the streets nearby takes the call
-  const sp = (base && kind === 'amb' && W.roadNear(base.x, base.z, tx, tz)) || (kind === 'fire' ? W.roadSpot(tx, tz, 90, 140) : W.roadSpot(tx, tz, 170, 260));
+  const sp = (base && kind !== 'fire' && W.roadNear(base.x, base.z, tx, tz)) || (kind === 'fire' ? W.roadSpot(tx, tz, 90, 140) : W.roadSpot(tx, tz, 170, 260));
   if (!sp) return null;
-  const v = makeVehicle(ctx.newId ? ctx.newId('e') : 'e' + nextId++, kind === 'amb' ? V.AMBULANCE : V.FIRE, kind === 'amb' ? 0xf4f4f4 : 0xc62828, sp);
+  const v = makeVehicle(ctx.newId ? ctx.newId('e') : 'e' + nextId++, kind === 'amb' ? V.AMBULANCE : kind === 'cop' ? V.POLICE : V.FIRE, kind === 'fire' ? 0xc62828 : kind === 'cop' ? 0xffffff : 0xf4f4f4, sp);
   v.mode = 'service'; v.npcDriver = true; v.sirenOn = true;
   ctx.add(v);
   const u = { kind, v, target, state: 'drive', pathT: 0, path: null, pi: 0, crew: [], t: 0, stuck: 0 };
@@ -60,6 +60,7 @@ function crewOut(u, n, look) {
 }
 const medicLook = () => roleLook('medic');
 const fireLook = () => roleLook('fire');
+const copLook = () => roleLook('police');
 // walk crew member c toward (x, z); true when there
 function walkTo(c, x, z, dt, near = 0.9) {
   const dx = x - c.x, dz = z - c.z, d = Math.hypot(dx, dz);
@@ -105,7 +106,7 @@ export function updateEmergency(dt, focus, cam, tSec) {
       const dist = drive(u, tx, tz, dt, u.kind === 'amb' ? 10 : 12);
       const done = u.kind === 'fire' ? !tgt.burnAt || tgt.exploded : !tgt.dead && !(tgt.ch && tgt.ch.rag);
       if (done || u.t > 90) { u.state = 'leave'; u.t = 0; continue; }
-      if (dist < (u.kind === 'amb' ? 16 : 18) && Math.abs(v.speed) < 1.5) { u.state = 'work'; u.t = 0; v.sirenOn = false; crewOut(u, 2, u.kind === 'amb' ? medicLook : fireLook); }
+      if (dist < (u.kind === 'amb' ? 16 : 18) && Math.abs(v.speed) < 1.5) { u.state = 'work'; u.t = 0; v.sirenOn = false; crewOut(u, 2, u.kind === 'amb' ? medicLook : u.kind === 'cop' ? copLook : fireLook); }
     } else if (u.state === 'work') {
       stepVehicle(v, { handbrake: true }, dt);
       let all = true;
@@ -122,7 +123,7 @@ export function updateEmergency(dt, focus, cam, tSec) {
       }
       const workT = u.crew.length ? Math.min(...u.crew.map((c) => c.work || 0)) : 0;
       if (all && workT > (u.kind === 'amb' ? 5 : 2.5)) {
-        if (u.kind === 'amb') ctx.revive(tgt); else ctx.extinguish(tgt);
+        if (tgt.call) tgt.call(); else if (u.kind === 'amb') ctx.revive(tgt); else ctx.extinguish(tgt);
         u.state = 'return'; u.t = 0;
       }
       if (u.kind === 'fire' && (tgt.exploded || !tgt.burnAt) && u.state === 'work') { u.state = 'return'; u.t = 0; }
@@ -147,3 +148,5 @@ export function updateEmergency(dt, focus, cam, tSec) {
   }
 }
 export const emergencyUnits = units;
+// Phone 911 calls (phone.js): kind 'amb' | 'fire' | 'cop'; t = { x, z, dead: true, burnAt: 1, call() } runs call() once the crew has been there a moment.
+export function dispatch(kind, t) { return !!spawnUnit(kind, t.x, t.z, kind === 'amb' ? { w: t } : t); }

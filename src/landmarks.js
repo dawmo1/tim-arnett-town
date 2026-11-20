@@ -7,20 +7,21 @@
 // Trains and barges run on the shared clock, so every player sees them in the same place.
 import * as THREE from 'three';
 import * as W from './world.js';
-import { G, D, pointOnEdge, terrainHeight, WATER_Y } from './city/data.js';
+import { G, D, pointOnEdge, terrainHeight, WATER_Y, lots } from './city/data.js';
 import { addBoxes, makeBox } from './city/collide.js';
 import { mat } from './character.js';
 import { textTexture } from './util.js';
+import { loadLazy, dropLazy } from './assets.js';
 
 let scene, ctx;
 const night = [];  // [material, max emissive] lit at night
 const built = new Set();
-let ferris = null, wheelT = 0, fountain = null, skyMat = null;
+let ferris = null, wheelT = 0, fountain = null;
 export const doors = []; // {x, y, z, to: {x, y, z, h}, label}
 
 export function initLandmarks(s, c) {
   scene = s; ctx = c;
-  initTrain(); initRiver(); initBillboards();
+  initTrain(); initRiver(); initBillboards(); initModels();
   W.onStream('built', (t) => tryBuild(t));
   for (const rec of W.builtTiles.values()) tryBuild(rec.t);
 }
@@ -36,11 +37,8 @@ function tryBuild(t) {
     ...D.index.bridgeEnds.map((be, i) => ['bridge' + i, () => near(t, be.x, be.z) && buildBridgeEnd(be, i)]),
     ['skybridge', () => near(t, 225, 390) && buildSkybridge()],
     ['ballpark', () => near(t, -372, 559) && buildBallpark(-372, 559)],
-    ['bandshell', () => near(t, -179, 529) && buildBandshell(-179, 529)],
     ['fountain', () => near(t, 197, -2183) && buildFountain(197, -2183)],
     ['casino', () => near(t, 520, 330) && buildCasino(520)],
-    ['adler', () => near(t, 338, 87) && buildBlade(338, 87, ['ADLER'], '#ff5252')],
-    ['blackhawk', () => near(t, 455, 101) && buildRoofSign(455, 101, 'HOTEL BLACKHAWK', '#ff1744')],
     ['northpark', () => near(t, 290, -4413) && buildRoofSign(290, -4413, 'NORTHPARK', '#ffffff', 22)],
     ['helipad', () => near(t, 150, 120) && buildHelipad()],
     ['marina', () => near(t, 2605, -561) && buildMarina(2605, -561)],
@@ -50,6 +48,72 @@ function tryBuild(t) {
 }
 // first water when walking from (x, z) in direction (dx, dz)
 function waterFrom(x, z, dx, dz, max = 800) { for (let d = 0; d < max; d += 4) if (!W.isLand(x + dx * d, z + dz * d)) return { x: x + dx * d, z: z + dz * d }; return null; }
+
+// ---------- Blender landmarks (assets/src/landmarks.py -> assets/models/landmarks/<file>.glb) ----------
+// Each model is built around its anchor (game x/z), base at y, facing as in the city. The OSM buildings
+// under `clear` ([cx, cz, half x, half z]) are dropped from the tile data (city/data.js lots), `solid`
+// ([cx, cz, half x, half z, height, base above y]) are its walls. Models stream in within LOAD m and out past DROP m.
+const MODELS = [
+  { file: 'blackhawk', x: 451.6, z: 96.5, y: 7.5, clear: [[451.6, 96.5, 21, 18]], solid: [[451.6, 96.5, 24.5, 22.3, 50]] },
+  { file: 'adler', x: 342.4, z: 91.2, y: 8.6, clear: [[342.4, 91.2, 18, 16.5]], solid: [[342.4, 91.2, 19.7, 18.7, 27]] },
+  { file: 'figge', x: 109, z: 340, y: 3.4, clear: [[109, 340, 46, 18]], solid: [[109, 340, 46, 18, 25]] },
+  { file: 'banktower', x: 141, z: 164.7, y: 8.0, clear: [[141, 164.7, 13.5, 21]], solid: [[141, 164.7, 15.2, 22.9, 82]] },
+  { file: 'putnam', x: 189.5, z: 215.7, y: 6.3, clear: [[189.5, 215.7, 8.5, 20.5]], solid: [[189.5, 215.7, 10.2, 22.1, 49]] },
+  { file: 'cityhall', x: 81.5, z: -27.5, y: 12.6, clear: [[81.7, -27.5, 21, 15]], solid: [[81.7, -27.5, 22.9, 17.2, 52]] },
+  { file: 'bandshell', x: -180, z: 530, y: 2.7, clear: [[-180, 530, 3, 6]], solid: [[-187.5, 530, 1.6, 4, 5]] }, // Bix bandshell, opens east to the lawn
+  { file: 'ballpark', x: -400, z: 520, y: 3.0, clear: [[-431, 530, 3, 10], [-414, 545, 3, 8]], solid: [[-436, 527, 6, 24, 14], [-415, 489, 15, 7, 14], [-356, 490, 30, 7, 14]] }, // Modern Woodmen Park grandstand
+  { file: 'ambrose', x: -287, z: -1693, y: 45.7, clear: [[-287, -1693, 3, 3]], solid: [[-286.6, -1688, 42.5, 12, 24], [-261, -1702, 17, 7, 16]] },
+  { file: 'conservatory', x: 196, z: -2394, y: 37.4, clear: [[196, -2394, 15, 8]], solid: [[173, -2394, 14, 12, 8], [200, -2394, 12, 12, 15], [221.5, -2394, 8.5, 8, 8]] },
+  { file: 'northpark', x: 132, z: -4257, y: 36.9, h: -0.277, clear: [], solid: [[130.6, -4252.2, 15, 5, 17]] }, // the mall's south entrance (the mall is OSM)
+  { file: 'rivercenter', x: 461, z: 172, y: 5.1, clear: [[461, 172, 40, 20], [513, 157, 8, 12]], solid: [[452.5, 172, 50.5, 30, 20], [513, 157, 10, 14, 20], [421, 130, 2.2, 11.6, 4.2, 6]] },
+];
+const LOAD = 700, DROP = 900;
+for (const L of MODELS) for (const [x, z, hw, hd] of L.clear) lots.extra.push({ x, z, fx: 0, fz: 1, hw, hd });
+let LM = null; // the four shared landmark materials, swapped in by name
+function lmMats() {
+  if (LM) return LM;
+  const base = { vertexColors: true, flatShading: true };
+  const lit = new THREE.MeshStandardMaterial({ ...base, roughness: 0.25, emissive: 0xffc77a, emissiveIntensity: 0 });
+  const neon = new THREE.MeshStandardMaterial({ ...base, roughness: 0.5, emissive: 0xffffff, emissiveIntensity: 0 });
+  neon.onBeforeCompile = (sh) => { sh.fragmentShader = sh.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n\ttotalEmissiveRadiance *= vColor.rgb;'); };
+  night.push([lit, 1.2], [neon, 2.5]);
+  LM = { lm_body: new THREE.MeshStandardMaterial({ ...base, roughness: 0.85 }), lm_glass: new THREE.MeshStandardMaterial({ ...base, roughness: 0.12 }), lm_lit: lit, lm_neon: neon };
+  return LM;
+}
+function initModels() {
+  for (const L of MODELS) {
+    const ux = Math.cos(L.h || 0), uz = -Math.sin(L.h || 0);
+    addBoxes('lm-' + L.file, L.solid.map(([x, z, hx, hz, h, up = 0]) => (up ? makeBox(x, z, ux, uz, hx, hz, L.y + up, h) : makeBox(x, z, ux, uz, hx, hz, L.y - 3, h + 3))));
+  }
+}
+// L.h: heading (rotation.y); L.len: stretch a 100 m bridge module to this length; L.load: own load radius.
+function placeModel(L, g) {
+  const M = lmMats(), root = new THREE.Group(), lod = new THREE.LOD(), sc = g.scene.clone();
+  root.position.set(L.x, L.y, L.z); root.rotation.y = L.h || 0; if (L.len) root.scale.z = L.len / 100; root.add(lod);
+  sc.traverse((o) => { if (o.isMesh) { o.material = M[o.material.name] || M.lm_body; o.castShadow = o.receiveShadow = /_lod0/.test(o.name) || /_lod0/.test(o.parent?.name); } });
+  for (const o of [...sc.children]) {
+    if (o.name.endsWith('_lod0')) lod.addLevel(o, 0);
+    else if (o.name.endsWith('_lod1')) lod.addLevel(o, 260);
+    else root.add(o); // moving parts
+  }
+  scene.add(root); L.obj = root;
+  L.onLoad?.(root);
+}
+let modelT = 0;
+function updateModels(dt, focus) {
+  if ((modelT -= dt) > 0 || !focus) return; modelT = 0.5;
+  for (const L of MODELS) {
+    const d = Math.hypot(L.x - focus.x, L.z - focus.z), file = `landmarks/${L.file}.glb`, load = L.load || LOAD;
+    if (d < load && !L.obj && !L.loading) {
+      L.loading = true;
+      loadLazy(file).then((g) => { L.loading = false; if (g && !L.obj) placeModel(L, g); });
+    } else if (d > load + DROP - LOAD && L.obj) {
+      scene.remove(L.obj); L.obj = null; L.onUnload?.();
+      // bridge modules share one file: free it when the last copy goes
+      if (!MODELS.some((o) => o.file === L.file && (o.obj || o.loading))) loadLazy(file).then((g) => { g?.scene.traverse((o) => o.geometry?.dispose()); dropLazy(file); });
+    }
+  }
+}
 
 // ---------- bridges to Illinois: the structure (arches for Centennial, truss for Government) + ROAD CLOSED ----------
 function buildBridgeEnd(be, i) {
@@ -63,17 +127,13 @@ function bridgeDeckY(be) {
   return e.length ? Math.max(...e.map((b) => Math.max(G.nodes.y[b.a], G.nodes.y[b.b]))) : terrainHeight(be.x, be.z) + 9;
 }
 function buildTruss(be) {
-  const deckY = bridgeDeckY(be), hx = Math.sin(be.h), hz = Math.cos(be.h), nx = -hz, nz = hx;
+  const deckY = bridgeDeckY(be), hx = Math.sin(be.h), hz = Math.cos(be.h);
   const shore = waterFrom(be.x - hx * 300, be.z - hz * 300, hx, hz, 400) || { x: be.x - hx * 80, z: be.z - hz * 80 };
-  const total = Math.hypot(be.x - shore.x, be.z - shore.z) + 420, steel = mat(0x4e5b31), g = new THREE.Group(); scene.add(g);
+  const total = Math.hypot(be.x - shore.x, be.z - shore.z) + 420, g = new THREE.Group(); scene.add(g);
   const deck = new THREE.Mesh(new THREE.BoxGeometry(10, 0.8, 420), mat(0xa9a59c)); deck.position.set(be.x + hx * 210, deckY - 0.4, be.z + hz * 210); deck.rotation.y = be.h; g.add(deck);
-  for (let s = 0; s < total; s += 12) for (const side of [-1, 1]) {
-    const x = shore.x + hx * s + nx * side * 5.5, z = shore.z + hz * s + nz * side * 5.5;
-    const post = new THREE.Mesh(new THREE.BoxGeometry(0.5, 9, 0.5), steel); post.position.set(x, deckY + 4.5, z); g.add(post);
-    const diag = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.35, 15), steel); diag.position.set(x + hx * 6, deckY + 4.5, z + hz * 6); diag.rotation.y = be.h; diag.rotateX(Math.atan2(9, 12) * (Math.floor(s / 12) % 2 ? 1 : -1)); g.add(diag);
-    const top = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 12), steel); top.position.set(x + hx * 6, deckY + 9, z + hz * 6); top.rotation.y = be.h; g.add(top);
-  }
-  for (let s = 0; s < total; s += 90) { const p = new THREE.Mesh(new THREE.BoxGeometry(12, deckY + 4, 4), mat(0xbdbab3)); p.position.set(shore.x + hx * s, (deckY - 4) / 2, shore.z + hz * s); p.rotation.y = be.h; g.add(p); }
+  // the swing span over the lock by the Iowa shore, then 60 m truss panels (landmarks/govswing.glb, govtruss.glb)
+  MODELS.push({ file: 'govswing', x: shore.x, z: shore.z, y: deckY, h: be.h, load: 1500 });
+  for (let s = 102; s < total; s += 60) MODELS.push({ file: 'govtruss', x: shore.x + hx * s, z: shore.z + hz * s, y: deckY, h: be.h, load: 1500 });
 }
 function buildBarrier(be, i) {
   const deckY = bridgeDeckY(be), hx = Math.sin(be.h), hz = Math.cos(be.h);
@@ -88,50 +148,24 @@ function buildBarrier(be, i) {
 }
 function buildCentennial(be) {
   const deckY = bridgeDeckY(be);
-  const hx = Math.sin(be.h), hz = Math.cos(be.h), nx = -hz, nz = hx;
+  const hx = Math.sin(be.h), hz = Math.cos(be.h);
   // the rest of the bridge to Rock Island (looks only; the barrier stops you)
   const shore = waterFrom(be.x - hx * 500, be.z - hz * 500, hx, hz, 700) || { x: be.x - hx * 120, z: be.z - hz * 120 };
   const ext = 820, g = new THREE.Group(); scene.add(g);
-  const steel = mat(0x5f7d8c), concrete = mat(0xbdbab3);
   const L0 = Math.hypot(be.x - shore.x, be.z - shore.z), total = L0 + ext;
-  const deck = new THREE.Mesh(new THREE.BoxGeometry(14, 0.8, ext), concrete);
+  const deck = new THREE.Mesh(new THREE.BoxGeometry(14, 0.8, ext), mat(0xbdbab3));
   deck.position.set(be.x + hx * ext / 2, deckY - 0.4, be.z + hz * ext / 2); deck.rotation.y = be.h; g.add(deck);
+  // five tied steel arches (assets: landmarks/centennial.glb, one 100 m span stretched to fit)
   const spans = 5, sl = total / spans;
-  for (let k = 0; k <= spans; k++) { // piers down to the river bed
-    const px = shore.x + hx * sl * k, pz = shore.z + hz * sl * k;
-    const p = new THREE.Mesh(new THREE.BoxGeometry(16, deckY + 4, 5), concrete); p.position.set(px, (deckY - 4) / 2, pz); p.rotation.y = be.h; g.add(p);
-  }
-  for (let k = 0; k < spans; k++) for (const side of [-1, 1]) { // two arch ribs per span, with hangers
-    let prev = null;
-    for (let i = 0; i <= 16; i++) {
-      const f = i / 16, s = sl * (k + f), y = deckY + Math.sin(f * Math.PI) * 20;
-      const x = shore.x + hx * s + nx * side * 7.5, z = shore.z + hz * s + nz * side * 7.5;
-      if (prev) {
-        const dx = x - prev[0], dy = y - prev[1], dz = z - prev[2], l = Math.hypot(dx, dy, dz);
-        const seg = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.2, l + 0.2), steel); seg.position.set((x + prev[0]) / 2, (y + prev[1]) / 2, (z + prev[2]) / 2); seg.lookAt(x, y, z); g.add(seg);
-        const hg = new THREE.Mesh(new THREE.BoxGeometry(0.15, y - deckY, 0.15), steel); hg.position.set(x, (y + deckY) / 2, z); g.add(hg);
-      }
-      prev = [x, y, z];
-    }
-  }
-  for (let s = -L0; s < ext; s += 20) for (const side of [-1, 1]) { // rails
-    const r = new THREE.Mesh(new THREE.BoxGeometry(0.3, 1, 20), steel); r.position.set(be.x + hx * (s + 10) + nx * side * 6.8, deckY + 0.5, be.z + hz * (s + 10) + nz * side * 6.8); r.rotation.y = be.h; g.add(r);
-  }
+  for (let k = 0; k < spans; k++) MODELS.push({ file: 'centennial', x: shore.x + hx * sl * k, z: shore.z + hz * sl * k, y: deckY, h: be.h, len: sl, load: 1500 });
   return true;
 }
 const flashers = [];
 
 // ---------- Skybridge: the glass footbridge over River Drive, lit up at night ----------
-function buildSkybridge() {
-  const x = 225, z0 = 310, z1 = 471, y = Math.max(terrainHeight(x, z0), terrainHeight(x, z1)) + 7;
-  const g = group(x, y, (z0 + z1) / 2);
-  skyMat = new THREE.MeshStandardMaterial({ color: 0x8fb6c9, roughness: 0.15, metalness: 0.3, transparent: true, opacity: 0.6, emissive: 0x7c4dff, emissiveIntensity: 0 });
-  box(g, 0, 5, 4, z1 - z0, 0, 2, 0, skyMat);
-  box(g, 0xd0d0d0, 5.4, 0.5, z1 - z0, 0, -0.1, 0); box(g, 0xd0d0d0, 5.4, 0.3, z1 - z0, 0, 4.1, 0);
-  const pylon = box(g, 0xeeeeee, 1.2, 34, 1.2, 4, 10, 0);
-  for (let k = -4; k <= 4; k++) if (k) { const cz = k * 16, len = Math.hypot(cz, 26), c = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, len), mat(0xdddddd)); c.position.set(3.2, 14, cz / 2); c.lookAt(3.2, 27, 0); g.add(c); }
-  for (const zz of [z0, z1]) { const p = new THREE.Mesh(new THREE.BoxGeometry(5, y - terrainHeight(x, zz) + 1, 5), mat(0xcfcfcf)); p.position.set(0, -(y - terrainHeight(x, zz)) / 2, zz - (z0 + z1) / 2); g.add(p); }
-  void pylon;
+function buildSkybridge() { // glass tube over River Drive with lift towers (landmarks/skybridge.glb, 161 m along +z)
+  const x = 225, z0 = 310, z1 = 471, y = Math.max(terrainHeight(x, z0), terrainHeight(x, z1));
+  MODELS.push({ file: 'skybridge', x, z: z0, y });
   return true;
 }
 
@@ -159,14 +193,6 @@ function buildBallpark(cx, cz) {
   const sg = signMesh(['MODERN WOODMEN PARK'], 18, 2.2, { bg: '#0d2a4a', fg: '#ffffff', size: 60, w: 1024, h: 128 }); sg.position.set(0, 9, -12); g.add(sg);
   return true;
 }
-function buildBandshell(x, z) {
-  const y = terrainHeight(x, z), g = group(x, y, z, Math.PI);
-  const shell = new THREE.Mesh(new THREE.SphereGeometry(9, 20, 10, 0, Math.PI, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xf5f5f5, side: THREE.DoubleSide, roughness: 0.6 }));
-  shell.rotation.y = -Math.PI / 2; shell.position.y = 1; g.add(shell);
-  box(g, 0xd7ccc8, 18, 1, 9, 0, 0.5, 2);
-  const lights = box(g, 0, 14, 0.3, 0.3, 0, 7.5, 5, glow(0xffd54f, 2)); void lights;
-  return true;
-}
 function buildFountain(x, z) {
   const y = terrainHeight(x, z), g = group(x, y, z);
   const pool = new THREE.Mesh(new THREE.CylinderGeometry(9, 9.4, 0.8, 32), mat(0xbcaaa4)); pool.position.y = 0.4; g.add(pool);
@@ -183,15 +209,8 @@ export const casino = { door: null, x: 0, z: 0 };
 function buildCasino(x0) {
   const w = waterFrom(x0, 150, 0, 1); if (!w) return false;
   const x = w.x, z = w.z + 34, h = Math.PI / 2; // moored along the bank
-  const g = group(x, WATER_Y - 0.6, z, h);
-  box(g, 0xf5f5f5, 70, 3, 18, 0, 1.5, 0); box(g, 0xb71c1c, 70.2, 0.6, 18.2, 0, 2.6, 0);
-  for (let d = 0; d < 3; d++) { box(g, 0xfafafa, 60 - d * 10, 3, 16 - d * 2, -d * 2, 4.5 + d * 3.2, 0); box(g, 0x263238, 60 - d * 10 + 0.1, 1.2, 16 - d * 2 + 0.1, -d * 2, 4.8 + d * 3.2, 0); }
-  for (const s of [-3, 3]) { box(g, 0x212121, 1.6, 9, 1.6, 18, 17, s); box(g, 0xffca28, 2.2, 0.8, 2.2, 18, 21.5, s); }
-  const wheel = new THREE.Mesh(new THREE.CylinderGeometry(5, 5, 14, 16, 1, true), mat(0xc62828)); wheel.rotation.x = Math.PI / 2; wheel.position.set(-38, 3.5, 0); g.add(wheel); casino.wheel = wheel;
-  const sg = signMesh(['THE ARNETT BELLE', 'CASINO · OPEN 24 HOURS'], 22, 4.2, { bg: '#1a0033', fg: '#ffd54f', size: 64, w: 1024, h: 200, border: '#ff4081', glow: 1.6 });
-  sg.position.set(0, 16.5, 8.2); g.add(sg);
-  const sg2 = sg.clone(); sg2.position.z = -8.2; sg2.rotation.y = Math.PI; g.add(sg2);
-  for (let i = -30; i <= 30; i += 4) { const b = box(g, 0, 0.4, 0.4, 0.4, i, 3.4, 9.2, glow([0xffeb3b, 0xff4081, 0x40c4ff][Math.abs(Math.round(i / 4)) % 3], 2.5)); void b; }
+  // the boat (landmarks/belle.glb): sternwheeler parallel to the bank, boarding door mid-ship facing the shore
+  MODELS.push({ file: 'belle', x, z, y: WATER_Y - 0.6, load: 900, onLoad: (r) => { casino.wheel = r.getObjectByName('belle_wheel'); }, onUnload: () => { casino.wheel = null; } });
   // hull walls (boats bump into it), and a gangway to the bank
   const hx = Math.sin(h), hz = Math.cos(h);
   addBoxes('casino', [makeBox(x, z, hz, -hx, 9, 35, WATER_Y - 3, 6)].map((b) => b));
@@ -202,16 +221,6 @@ function buildCasino(x0) {
 }
 
 // ---------- signs on real landmarks ----------
-function buildBlade(x, z, lines, color) { // Adler Theatre: vertical blade sign + lit marquee over the doors
-  const q = W.nearestEdge(x, z, 80); if (!q) return false;
-  const dx = q.x - x, dz = q.z - z, l = Math.hypot(dx, dz) || 1, fx = x + (dx / l) * Math.max(5, l - q.e.width / 2 - 2.6), fz = z + (dz / l) * Math.max(5, l - q.e.width / 2 - 2.6);
-  const y = terrainHeight(fx, fz), face = Math.atan2(dx, dz), g = group(fx, y, fz, face);
-  const blade = signMesh(['ADLER'], 9, 1.6, { w: 720, h: 128, bg: '#3e0d0d', fg: color, size: 110, glow: 1.8 }); blade.position.set(0, 12, 0.8); blade.rotation.set(0, Math.PI / 2, Math.PI / 2); g.add(blade);
-  const mq = signMesh(['ADLER THEATRE', 'TONIGHT: THE TIM ARNETT REVUE'], 10, 1.6, { w: 1024, h: 164, bg: '#111111', fg: '#ffe082', size: 54, border: '#ffca28', glow: 1.5 }); mq.position.set(0, 4.6, 1.5); g.add(mq);
-  box(g, 0x212121, 10.4, 0.3, 3, 0, 3.7, 1.2);
-  void lines;
-  return true;
-}
 function buildRoofSign(x, z, text, color, size = 14) { // big letters on the roof of the tallest building at (x, z)
   let top = W.roofAt(x, z); if (!isFinite(top)) top = terrainHeight(x, z) + 12;
   const g = group(x, top, z, 0);
@@ -396,13 +405,13 @@ export function closedCrossings() { return train.crossings.filter((c) => c.down 
 
 // ---------- per frame ----------
 export function updateLandmarks(dt, tSec, focus, n) {
+  updateModels(dt, focus);
   for (const [m, k] of night) m.emissiveIntensity = n * k;
-  if (skyMat) skyMat.emissiveIntensity = n * 1.4 * (0.6 + 0.4 * Math.sin(tSec * 0.8));
   const flashOn = Math.floor(tSec * 2) % 2 === 0;
   for (const f of flashers) for (const m of f.userData.flash) m.emissiveIntensity = flashOn ? 3 : 0.2;
   if (ferris) { ferris.rotation.z += dt * 0.12; for (const c of ferris.children) if (c.userData.gondola) c.rotation.z = -ferris.rotation.z; }
   if (fountain) { fountain.scale.y = 0.85 + Math.sin(tSec * 2.1) * 0.15; }
-  if (casino.wheel) casino.wheel.rotation.y += dt * 0.6;
+  if (casino.wheel) casino.wheel.rotation.z += dt * 0.6;
   // barges
   if (riverPath) for (const b of barges) {
     const span = riverPath.len - b.len - 50, period = (2 * span) / 2.4;

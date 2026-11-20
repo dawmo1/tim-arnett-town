@@ -183,32 +183,76 @@ export function animateWheels(v, dt) {
   const steer = v.steerIn !== undefined && v.steerIn !== null ? -v.steerIn * 0.5 : Math.max(-0.5, Math.min(0.5, yawRate * v.T.len * 0.5 / Math.max(2, Math.abs(sp)) * Math.sign(sp || 1)));
   v.steerVis = (v.steerVis || 0) + (steer - (v.steerVis || 0)) * Math.min(1, dt * 8);
   for (const w of P.wheels) {
+    if (w.userData.y0 === undefined) w.userData.y0 = w.position.y;
+    w.position.y = w.userData.y0 - (v.sy || 0); // wheels stay on the road while the body bounces
     w.userData.spin.rotation.x += (sp * dt) / w.userData.r;
     if (w.userData.front) w.rotation.y = v.steerVis;
   }
 }
 
-// ---------- damage: dents, parts falling off, glass cracking ----------
-const tmp = new THREE.Vector3();
-// push vertices of every panel near local point (lx, ly, lz) inward along (nx, nz)
-export function dent(v, lx, ly, lz, nx, nz, depth, radius = 1.0) {
+// ---------- damage: dents, a crumpled hood ----------
+// A dented mesh gets its own copy of the geometry plus the factory positions / normals, so repair can undo it.
+function own(m) {
+  if (m.userData.pos0) return;
+  m.geometry = m.geometry.clone(); m.userData.own = true;
+  m.userData.pos0 = m.geometry.attributes.position.array.slice();
+  if (m.geometry.attributes.normal) m.userData.nrm0 = m.geometry.attributes.normal.array.slice();
+}
+const tmp = new THREE.Vector3(), dir = new THREE.Vector3();
+const MAX_DENT = 0.4; // no point sinks further than this from where it started, however many hits
+// push vertices of every panel near car-local point (lx, ly, lz) inward along (nx, ny, nz), with falloff
+export function dent(v, lx, ly, lz, nx, nz, depth, radius = 1.0, ny = -0.15) {
   const P = v.mesh.userData.parts; if (!P || !P.model) return;
+  const root = v.mesh.userData.body.children[0];
+  root.updateWorldMatrix(true, true);
   for (const m of P.meshes) {
-    if (!m.parent || m.material === GLASS || m.material.name === 'interior') continue;
-    if (!m.userData.own) { m.geometry = m.geometry.clone(); m.userData.own = true; }
-    // local point in this mesh's frame (meshes sit directly under the car root, maybe inside a part group)
-    m.updateWorldMatrix(true, false);
-    const root = v.mesh.userData.body.children[0];
+    if (!m.parent || m.material.name === 'interior') continue;
     tmp.set(lx, ly, lz); root.localToWorld(tmp); m.worldToLocal(tmp);
-    const pos = m.geometry.attributes.position, r2 = radius * radius;
+    dir.set(lx + nx, ly + ny, lz + nz); root.localToWorld(dir); m.worldToLocal(dir); dir.sub(tmp).normalize(); // push direction in this mesh's frame
+    const g = m.geometry;
+    if (!g.boundingSphere) g.computeBoundingSphere();
+    if (g.boundingSphere.center.distanceTo(tmp) > g.boundingSphere.radius + radius) continue;
+    own(m);
+    const pos = m.geometry.attributes.position, a = pos.array, o = m.userData.pos0, r2 = radius * radius;
     let moved = false;
     for (let i = 0; i < pos.count; i++) {
-      const dx = pos.getX(i) - tmp.x, dy = pos.getY(i) - tmp.y, dz = pos.getZ(i) - tmp.z, d2 = dx * dx + dy * dy * 0.6 + dz * dz;
+      const i3 = i * 3, dx = a[i3] - tmp.x, dy = a[i3 + 1] - tmp.y, dz = a[i3 + 2] - tmp.z, d2 = dx * dx + dy * dy * 0.6 + dz * dz;
       if (d2 > r2) continue;
       const k = (1 - d2 / r2) * depth * (0.8 + Math.random() * 0.4);
-      pos.setXYZ(i, pos.getX(i) + nx * k, pos.getY(i) - k * 0.15, pos.getZ(i) + nz * k);
+      let ex = a[i3] + dir.x * k - o[i3], ey = a[i3 + 1] + dir.y * k - o[i3 + 1], ez = a[i3 + 2] + dir.z * k - o[i3 + 2];
+      const e = Math.hypot(ex, ey, ez);
+      if (e > MAX_DENT) { const c = MAX_DENT / e; ex *= c; ey *= c; ez *= c; }
+      a[i3] = o[i3] + ex; a[i3 + 1] = o[i3 + 1] + ey; a[i3 + 2] = o[i3 + 2] + ez;
       moved = true;
     }
-    if (moved) pos.needsUpdate = true;
+    if (moved) { pos.needsUpdate = true; m.geometry.computeVertexNormals(); }
   }
+}
+// The hood folds as the front caves in (amt 0..1, absolute): it shortens and buckles up in the middle.
+export function crumple(v, amt) {
+  const P = v.mesh.userData.parts, hood = P && P.hood; if (!hood || !v.mesh.visible) return;
+  hood.traverse((m) => {
+    if (!m.isMesh) return;
+    const d = amt - (m.userData.crumple || 0); if (d < 0.02) return;
+    own(m); m.userData.crumple = amt;
+    const a = m.geometry.attributes.position.array, o = m.userData.pos0;
+    let z0 = Infinity, z1 = -Infinity;
+    for (let i = 2; i < o.length; i += 3) { z0 = Math.min(z0, o[i]); z1 = Math.max(z1, o[i]); }
+    const L = z1 - z0 || 1;
+    for (let i = 0; i < a.length; i += 3) {
+      const t = (o[i + 2] - z0) / L; // 0 at the windshield, 1 at the nose
+      a[i + 1] += d * Math.sin(Math.PI * t) * 0.16 * L;
+      a[i + 2] -= d * t * 0.3 * L;
+    }
+    m.geometry.attributes.position.needsUpdate = true; m.geometry.computeVertexNormals();
+  });
+}
+// back to factory shape (Arnett Auto)
+export function unDent(v) {
+  v.mesh.userData.body.traverse((m) => {
+    const o = m.userData && m.userData.pos0; if (!o) return;
+    const g = m.geometry; g.attributes.position.array.set(o); g.attributes.position.needsUpdate = true;
+    if (m.userData.nrm0) { g.attributes.normal.array.set(m.userData.nrm0); g.attributes.normal.needsUpdate = true; }
+    m.userData.crumple = 0;
+  });
 }

@@ -38,12 +38,17 @@ export function goalDone(id) {
 export function checkCountGoals() { for (const g of GOALS) if (g.max && g.get() >= g.max) goalDone(g.id); }
 
 // ---------- stores ----------
-// kind: 'rob' (walk in, aim a gun at the clerk to empty the till), 'guns', 'meds', 'body', 'clothes', 'casino'
+// kind: 'rob' (walk in, aim a gun at the clerk to empty the till), 'guns', 'meds', 'body', 'clothes', 'casino', 'bar' (venues.js)
 export const stores = [];
 // kinds that are a real building you walk into (built by interiors.js): [width, depth] in m
-export const WALK_IN = { rob: [14, 11], guns: [16, 11], clothes: [18, 13] };
+export const WALK_IN = { rob: [14, 11], guns: [16, 11], clothes: [18, 13], bar: [16, 12] };
 // Made-up names on real Davenport gas stations and corner stores.
 const ROB_NAMES = ['Tim-Mart', 'Arnett Gas', 'Big River Liquor', 'Hilltop Pantry', 'QuikTim', 'River Bend Fuel', 'Corner Tim', 'Bluff Mart', 'Lucky Arnett', 'Mississippi Mini Mart', 'Quad Stop', 'Eagle Point Liquor', 'Kimberly Quick Stop', 'Brady Street Market', 'Village Pantry', 'Northside Gas'];
+// Parody names on Davenport's real bars and pubs (OSM bar / pub points).
+const BAR_NAMES = ["Tim's Tap", 'The Rusty Barge', 'Quad City Swill', 'The Leaky Levee', 'Lock & Dam Lounge', 'The Muddy Paddle', "Arnett's Last Call", 'The Drunken Bix',
+  'Skybridge Spirits', 'Bettendorf Bad Decisions', 'The Floodwall', 'Hangover Hill', 'River Rat Saloon', 'The Tipsy Towboat', 'Brady Street Brawlhouse', 'Cornbelt Cocktails',
+  'Pint of No Return', 'The Barge Inn', 'Palmer Spine & Stein', 'The Hawkeye Hiccup', 'Credit Island Tab', 'Duck Creek Dive', 'The Fog Horn', 'Two Rivers Too Many',
+  'Kimberly Road Rage', 'The Sinking Paddlewheel', 'Iowa Nice & Icy', 'Village Idiot Pub', 'The Corn Mash', 'Centennial Bridge Burner'];
 // a sidewalk spot in front of a point of interest: {x, z} to stand on, door toward the building
 function frontOf(px, pz) {
   const q = W.nearestEdge(px, pz, 80, (e) => e.cls !== 'service' && !e.bridge);
@@ -66,7 +71,12 @@ function planStores() {
   for (const p of ends) { const f = frontOf(p.x, p.z); if (f) stores.push({ name: 'Arnett Arms', kind: 'guns', ...f, cooldown: 0, progress: 0 }); }
   for (const h of W.D.index.hospitals) { const f = frontOf(h.x, h.z); if (f) stores.push({ name: 'Hospital pharmacy', kind: 'meds', ...f }); }
   // walk-in stores get their own lot: front wall 2 m behind the sidewalk spot, door facing the street
+  poi.filter((p) => p.kind === 'bar' || p.kind === 'pub').forEach((p, i) => { const f = frontOf(p.x, p.z); if (f) stores.push({ name: BAR_NAMES[i % BAR_NAMES.length], kind: 'bar', ...f, cooldown: 0, progress: 0 }); });
   for (const s of stores) if (WALK_IN[s.kind]) { [s.w, s.d] = WALK_IN[s.kind]; s.cx = s.x + Math.sin(s.face) * (2 + s.d / 2); s.cz = s.z + Math.cos(s.face) * (2 + s.d / 2); }
+  // downtown bars sit door to door: drop a bar whose lot could overlap a walk-in store or bar already placed (circles round each lot)
+  const r = (s) => Math.hypot(s.w, s.d) / 2 + 1, keep = [];
+  for (const s of stores) if (s.kind !== 'bar' || !keep.some((o) => o.w && Math.hypot(o.cx - s.cx, o.cz - s.cz) < r(o) + r(s))) keep.push(s);
+  stores.splice(0, stores.length, ...keep);
 }
 // city/data.js drops any OSM building on these lots as tiles arrive (the first tile fetch runs this)
 lots.plan = () => { planStores(); return stores.filter((s) => s.w).map((s) => ({ x: s.cx, z: s.cz, fx: Math.sin(s.face), fz: Math.cos(s.face), hw: s.w / 2 + 1, hd: s.d / 2 + 1 })); };

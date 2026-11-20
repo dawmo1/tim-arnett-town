@@ -7,7 +7,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import * as W from './world.js';
 import { makeCharacter, animateCharacter, placeCharacter, randomLook, nameTag, mat, initCharacters, normLook, setProp, muzzleOf, weaponModel } from './character.js';
 import { SKIN as SKIN_TONES, TOPS, BOTTOMS, HAIRS, HATS, CLOTH, HAIRC, SHOES, BEARDS, GLASSES, MASKS } from './people/looks.js';
-import { createAllVehicles, makeParked, makeVehicle, V, TYPES, initFarCars, farCarsBegin, farCarAdd, farCarsEnd, stepVehicle, collideVehicles, pushCharOut, circles, charVehicle, makeVehicleMesh, damageZone, applyDamageVisual, applyBump } from './vehicles.js';
+import { createAllVehicles, makeParked, makeVehicle, V, TYPES, initFarCars, farCarsBegin, farCarAdd, farCarsEnd, stepVehicle, collideVehicles, pushCharOut, circles, charVehicle, makeVehicleMesh, damageZone, applyDamageVisual, applyBump, animateDamage, tipLift } from './vehicles.js';
 import { initTraffic, updateTraffic as tickTraffic, bumpTraffic, scareTraffic, updateSignals, traffic, patrolViewers } from './traffic.js';
 import { initWalkers, updateWalkers, walkers, panicNear, spawnFleeing, scare, provoke, setNpcContext, cartNear, revive, incident } from './npc.js';
 import { joinTraffic } from './traffic.js';
@@ -15,6 +15,7 @@ import { GANGS } from './gangs.js';
 import { initEmergency, updateEmergency, reportDown } from './emergency.js';
 import { initLandmarks, updateLandmarks, doors, closedCrossings, trainCars, bargeList } from './landmarks.js';
 import * as interior from './interiors.js';
+import { initVenues, useVenue, updateVenues } from './venues.js';
 import { initEvents, updateEvents, eventBlips } from './events.js';
 import { say, line } from './npc.js';
 import { initDayNight, updateDayNight, sky as weather, clockText, view as fogView } from './daynight.js';
@@ -35,6 +36,9 @@ import { wanted, crime, updateWanted as tickWanted, resetWanted, cones, initWant
 import { eco, initEconomy, addCash, spend, goalDone, checkCountGoals, GOALS, storeNear, dropCash, updateEconomy, stores } from './economy.js';
 import { updateRadio, nextStation, currentStation } from './radio.js';
 import { drunk, drunkPass, drinkItems, resetDrunk, updateDrunk, wobble, drunkSteer, swayCamera } from './drunk.js';
+import * as garage from './garage.js';
+import { applyMods, horn as modHorn, armorMul } from './carmods.js';
+import * as phone from './phone.js';
 
 // Everyone owns every weapon (price is unused). mag/ammoPack: magazine size and rounds per purchase; ammoPrice: cost of one ammoPack
 const WEAPONS = [
@@ -292,6 +296,7 @@ addEventListener('keydown', (e) => {
   if (!playing) return;
   if (shopOpen && (e.key === 'Escape' || e.code === 'KeyE') && !e.repeat) { e.preventDefault(); closeShop(); return; }
   if (paused) { pauseKey(e); return; }
+  if (phone.key(e)) { e.preventDefault(); return; } // phone up: arrows / Enter / Backspace / Esc belong to it
   if (e.key === 'Escape' && !locked) { openPause(); return; }
   if (e.code === 'Space' || e.code === 'Tab' || e.code.startsWith('Arrow')) e.preventDefault();
   if (e.repeat) return;
@@ -302,8 +307,9 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyE') { const d = doorNear(); if (d) useDoor(d); else if (!useStore()) toggleVehicle(); }
   if (e.code === 'KeyR') startReload();
   if (e.code === 'KeyN' && me.veh && !me.veh.T.bike) { const st = nextStation(); ui.flashPrompt(st.sub ? `📻 ${st.name} · ${st.sub}` : st.name); }
-  if (e.code === 'KeyP') openPhone();
-  if (e.code === 'KeyG' || e.code === 'KeyH') talk(e.code === 'KeyG');
+  if (e.code === 'KeyP') callMechanic();
+  if (e.code === 'KeyH' && me.veh && !me.dead) modHorn(me.veh); // horn (carmods.js: the car's own horn mod)
+  else if (e.code === 'KeyG' || e.code === 'KeyH') talk(e.code === 'KeyG');
   if (e.code === 'KeyC' && playing && !me.veh && !me.dead && !typing) { me.crouch = !me.crouch; ui.flashPrompt(me.crouch ? 'Crouching (C to stand)' : 'Standing'); }
 });
 addEventListener('keyup', (e) => { keys.delete(e.code); if ((e.code === 'Tab' || e.code === 'KeyQ') && wheelOpen) closeWheel(true); });
@@ -442,17 +448,18 @@ function mapBlips() {
   for (const h of W.places.hospitals) b.push({ x: h.x, z: h.z, type: 'hospital', name: h.name.replace(/^MercyOne /, '') });
   for (const p of police.stations()) b.push({ x: p.x, z: p.z, type: 'police', name: p.name });
   b.push(...storeList(true));
-  for (const e of eventBlips()) b.push({ ...e, type: 'event' });
+  for (const e of eventBlips()) b.push({ type: 'event', ...e });
+  b.push(...garage.blips());
   for (const r of remotes.values()) if (!r.dead) b.push({ x: r.x, z: r.z, type: 'player', name: r.name });
   return b;
 }
-const STORE_TYPE = { rob: 'rob', guns: 'guns', clothes: 'clothes', body: 'garage', casino: 'casino' };
+const STORE_TYPE = { rob: 'rob', guns: 'guns', clothes: 'clothes', body: 'garage', casino: 'casino', bar: 'bar' };
 function storeList(all) {
   const out = [];
   for (const s of stores) {
     const type = STORE_TYPE[s.kind];
     // robbable: the minimap shows the ones within 400 m (more would pile up on its edge); dimmed while the till is empty
-    if (type && (all || s.kind !== 'rob' || Math.hypot(s.x - me.x, s.z - me.z) < 400)) out.push({ x: s.x, z: s.z, type, name: s.kind === 'casino' ? 'The Arnett Belle casino' : s.name, dim: s.cooldown > 0 });
+    if (type && (all || (s.kind !== 'rob' && s.kind !== 'bar') || Math.hypot(s.x - me.x, s.z - me.z) < (s.kind === 'bar' ? 150 : 400))) out.push({ x: s.x, z: s.z, type, name: s.kind === 'casino' ? 'The Arnett Belle casino' : s.name, dim: s.cooldown > 0 });
   }
   return out;
 }
@@ -468,7 +475,7 @@ function poiBlips() {
   if (poiCache) return poiCache;
   if (!stores.length) return []; // stores aren't placed yet; try again next time
   // our own stores sit on some of these spots (Tim-Mart on a real gas station): don't double them up
-  poiCache = W.D.index.poi.filter((p) => POI_TYPE[p.kind] && !stores.some((s) => s.kind !== 'meds' && Math.hypot(s.x - p.x, s.z - p.z) < 60))
+  poiCache = W.D.index.poi.filter((p) => POI_TYPE[p.kind] && !stores.some((s) => s.kind !== 'meds' && (s.kind !== 'bar' || POI_TYPE[p.kind] === 'bar') && Math.hypot(s.x - p.x, s.z - p.z) < 60))
     .map((p) => ({ x: p.x, z: p.z, type: POI_TYPE[p.kind], name: p.name }));
   for (const f of W.places.fire) poiCache.push({ x: f.x, z: f.z, type: 'fire', name: f.name });
   return poiCache;
@@ -640,7 +647,7 @@ net.handlers.event = (e) => {
 };
 
 // ---------- helpers ----------
-function report(type, x = me.x, z = me.z) { lastAttack = performance.now(); crime(type, x, me.y, z); }
+function report(type, x = me.x, z = me.z) { lastAttack = performance.now(); crime(type, x, me.y, z); phone.log(type, x, z); }
 initWanted({ announce: (t) => ui.announce(t, '', '#ff5e5b') });
 function nameOf(uid) { if (uid === net.uid) return me.name; if (uid === 'police') return 'the police'; return net.players[uid]?.n || 'someone'; }
 function distCam(x, z) { return Math.hypot(camera.position.x - x, camera.position.z - z); }
@@ -738,7 +745,7 @@ function damageVehicle(v, dmg, hit) {
   if (v.mode === 'traffic') freeTraffic(v);
   v.mode = 'free';
   if (hit) damageZone(v, hit.cp[0], hit.cp[1], hit.imp);
-  dmg *= v.T.armor || 1;
+  dmg *= armorMul(v); // Arnett Auto armor (v.mods.armor)
   v.hp = Math.max(-v.T.hp, v.hp - dmg);
   // at 0 the engine dies; it only catches fire if you keep wrecking it
   if (v.hp <= -v.T.hp * 0.4 && !v.burnAt) { v.burnAt = net.now(); v.burnBy = net.uid; }
@@ -902,7 +909,7 @@ function respawn(first, sp) {
 
 // G: say hi to whoever's in front of you. H: insult them (some people swing back).
 function talk(nice) {
-  if (me.dead || me.veh || interior.room) return;
+  if (me.dead || me.veh || (interior.room && interior.room.kind !== 'bar')) return;
   let best = null, bd = 7;
   for (const w of walkers) {
     if (w.dead || w.mode === 'flee' || w.mode === 'gone') continue;
@@ -1111,7 +1118,7 @@ function applyHit(hit, w, d) {
   else if (hit.kind === 'player') {
     sendEvent('hit', { to: hit.ref.uid, dmg: r1(w.dmg * (hit.head ? 2 : 1)), by: me.name });
     fx.blood(hit.p.x, hit.p.y, hit.p.z, d.x, d.z); fx.soundHit(); ui.hitMarker(false);
-  } else if (hit.kind === 'veh') damageVehicle(hit.ref, w.dmg * 0.45 * (hit.ref.T.bulletproof ? 0.4 : 1));
+  } else if (hit.kind === 'veh') damageVehicle(hit.ref, w.dmg * 0.45 * (hit.ref.mods?.bp ? 0.4 : 1));
   else if (hit.kind === 'cop') damageCopUnit(hit.ref, w.dmg * (hit.ref.kind === 2 ? (hit.head ? 2.5 : 1) : 0.6));
 }
 function handPos() {
@@ -1313,7 +1320,7 @@ function collideAround(v, sliding) {
         bumpTraffic(o);
         if (!o.honkCd || performance.now() > o.honkCd) { o.honkCd = performance.now() + 2500; setTimeout(() => { if (o.mode !== 'traffic' || !o.ag) return; if (Math.random() < 0.3) o.ag.panicT = 4 + Math.random() * 3; else honkYell(o); }, 600 + Math.random() * 900); }
       }
-      else { freeTraffic(o, false, i0); if (pb) applyBump(o, pb); }
+      else { freeTraffic(o, false, i0); if (pb) applyBump(o, pb); o.alarmUntil = Math.max(o.alarmUntil || 0, performance.now() / 1000 + 45); } // knocked loose: hazards on (pileups)
     } else {
       const pushable = !o.driver || o.driver === net.uid;
       if (collideVehicles(v, o, pushable) <= 0) continue;
@@ -1401,9 +1408,9 @@ function updateVehicles(dt, tSec, nowMs) {
       if (v === me.veh) { /* driven in updatePlayer */ }
       else if (v.localSim) {
         const wi = stepVehicle(v, {}, dt);
-        if (v.hit && wi > 6) { crashFx(v, v.hit); damageZone(v, v.hit.cp[0], v.hit.cp[1], wi); }
+        if (v.hit && wi > 6) { crashFx(v, v.hit); damageZone(v, v.hit.cp[0], v.hit.cp[1], wi, v.hit.ly); }
         collideAround(v, true);
-        if (Math.hypot(v.vx, v.vz) < 0.3) { v.localSim = false; v.vx = v.vz = 0; writeVeh(v, true); }
+        if (Math.hypot(v.vx, v.vz) < 0.3 && Math.abs(v.frV || 0) + Math.abs(v.fpV || 0) < 0.2 && !(v.air > 0)) { v.localSim = false; v.vx = v.vz = 0; writeVeh(v, true); }
         else writeVeh(v);
       } else if (v.tgt) {
         const k = Math.min(1, dt * 8), ox = v.x, oz = v.z;
@@ -1428,7 +1435,12 @@ function updateVehicles(dt, tSec, nowMs) {
     animateWheels(v, dt);
     body.rotation.z = v.T.bike ? (v.driver ? v.tilt : 0.3) : 0;
     body.rotation.x = v.T.boat || v.T.heli ? v.pitch || 0 : v.air > 0.05 ? clamp(-(v.vy || 0) * 0.025, -0.35, 0.35) + (v.gp || 0) : v.gp || 0;
-    if (!v.T.bike && !v.T.heli && !v.T.boat) body.rotation.z = v.gr || 0;
+    // cars: ground slope + weight transfer / suspension (sr, sp, sy) + tipping over (fr, fp), lifted onto the lowest corner
+    if (!v.T.bike && !v.T.heli && !v.T.boat) {
+      body.rotation.set((v.gp || 0) + (v.sp || 0) + (v.fp || 0), 0, (v.gr || 0) + (v.sr || 0) + (v.fr || 0));
+      body.position.y = (v.sy || 0) + tipLift(v.T, v.fr, v.fp);
+      animateDamage(v, dt);
+    }
     if (v.T.heli) { body.rotation.z = v.tilt || 0; const rt = v.mesh.userData.rotor; if (rt) rt.rotation.y += dt * (v.driver || v.y > 0.5 ? 32 : 0); }
     if (v.hp < v.T.hp * 0.35 && !v.exploded && (v.hp > 0 || Math.random() < 0.6) && Math.abs(v.x - camera.position.x) < 120 && Math.abs(v.z - camera.position.z) < 120) fx.damageSmoke(v);
   }
@@ -1616,27 +1628,41 @@ function driveUpdate(dt, fwd, side) {
   const v = me.veh;
   const pre = { vx: v.vx, vz: v.vz, speed: v.speed };
   const shift = keys.has('ShiftLeft') || keys.has('ShiftRight');
-  const imp = stepVehicle(v, { throttle: fwd > 0 ? 1 : 0, brake: fwd < 0 ? 1 : 0, steer: drunkSteer(dt, -side), handbrake: !v.T.heli && keys.has('Space'), nitro: shift && !v.T.heli, up: keys.has('Space'), down: shift }, dt);
-  engineSound(v, fwd, dt);
+  // gas and brake read separately so holding both does a burnout
+  const gas = keys.has('KeyW') || keys.has('ArrowUp'), brk = keys.has('KeyS') || keys.has('ArrowDown');
+  const imp = stepVehicle(v, { throttle: gas ? 1 : 0, brake: brk ? 1 : 0, steer: drunkSteer(dt, -side), handbrake: !v.T.heli && keys.has('Space'), nitro: shift && !v.T.heli, up: keys.has('Space'), down: shift }, dt);
+  engineSound(v, v.burnout ? 1 : fwd, dt);
   // police spike strip: tyres burst (bulletproof tyres shrug it off)
-  if (!v.flat && !v.T.bulletproof && !v.T.boat && !v.T.heli && police.spikesHit(v)) { v.flat = true; fx.sparks(v.x, v.y + 0.3, v.z, 14); fx.soundBoom(30); ui.flashPrompt('Tyres blown!'); }
+  if (!v.flat && !v.mods?.bp && !v.T.boat && !v.T.heli && police.spikesHit(v)) { v.flat = true; fx.sparks(v.x, v.y + 0.3, v.z, 14); fx.soundBoom(30); ui.flashPrompt('Tyres blown!'); }
   if (v.flat && Math.abs(v.speed) > 4 && Math.random() < dt * 8) fx.sparks(v.x - Math.sin(v.h) * v.T.len * 0.35, v.y + 0.1, v.z - Math.cos(v.h) * v.T.len * 0.35, 2);
   if (v.boosting) { fx.sparks(v.x - Math.sin(v.h) * v.T.len / 2, v.y + 0.4, v.z - Math.cos(v.h) * v.T.len / 2, 2, -Math.sin(v.h), -Math.cos(v.h)); if (!v.boostSnd) { fx.soundNitro(); v.boostSnd = true; } } else v.boostSnd = false;
   if (v.T.boat && Math.abs(v.speed) > 6 && Math.random() < 0.5) fx.smokePuff(v.x - Math.sin(v.h) * v.T.len / 2, -0.1, v.z - Math.cos(v.h) * v.T.len / 2, true, 0.6);
   const wallHit = v.hit;
-  if (wallHit) { crashFx(v, wallHit); if (imp > 6) damageZone(v, wallHit.cp[0], wallHit.cp[1], imp); }
+  if (wallHit) { crashFx(v, wallHit); if (imp > 6) damageZone(v, wallHit.cp[0], wallHit.cp[1], imp, wallHit.ly); }
   const vImp = collideAround(v, false);
   const vHit = v.hit;
   let total = Math.max(imp, vImp);
-  if (v.slip > 6 && v.air === 0 && Math.abs(v.speed) > 6) fx.soundSqueal();
+  // how hard the crash was = the speed change it caused this frame (≈ closing speed × 1.15 off a wall)
+  if (wallHit || vHit) total = Math.max(total, Math.hypot(v.vx - pre.vx, v.vz - pre.vz) - 0.6);
+  // loops: tyre screech by slip, metal scraping (with sparks streaming off the contact) by slide speed, turbo
+  const land = v.air === 0 && v.sinkT === 0 && !v.T.boat && !v.T.heli;
+  fx.setScreech(!land ? 0 : v.burnout ? 1 : clamp((v.slip - 3) / 8, 0, 1) * clamp((Math.abs(v.speed) - 3) / 6, 0, 1));
+  const tc = v.touch, spd = Math.hypot(v.vx, v.vz);
+  let scrape = 0, sp0 = null;
+  if (v.upset && land && spd > 2) { scrape = Math.min(1, spd / 15); sp0 = [v.x, v.y + 0.2, v.z]; }
+  else if (tc && performance.now() - tc.t < 150) { scrape = clamp((Math.abs(-v.vx * tc.nz + v.vz * tc.nx) - 1.5) / 12, 0, 1); sp0 = [tc.cp[0], v.y + 0.45, tc.cp[1]]; }
+  fx.setScrape(scrape);
+  if (scrape > 0.05 && Math.random() < 0.8) fx.scrapeSparks(sp0[0], sp0[1], sp0[2], v.vx, v.vz, 1 + Math.round(scrape * 4));
+  fx.setTurbo(v.spool || 0, gas);
+  if (v.rough && land && spd > 6) shake = Math.max(shake, Math.min(0.08, spd * 0.004)); // bumpy off-road
   // through the windshield: big frontal hit with no time to brake
   const mainHit = imp >= vImp ? wallHit : vHit;
   if (mainHit && !me.dead) {
     const dv = Math.hypot(v.vx - pre.vx, v.vz - pre.vz);
     const frontal = mainHit.nx * Math.sin(v.h) + mainHit.nz * Math.cos(v.h) < -0.55;
-    if (frontal && !v.T.boat && !v.T.heli && (v.T.bike ? pre.speed > 14 && dv > 8 : pre.speed > 28 && dv > 18)) {
+    if (frontal && !v.T.boat && !v.T.heli && (v.T.bike ? pre.speed > 14 && dv > 8 : pre.speed > 25 && dv > 18)) {
       damageVehicle(v, (total - 7) * 3, mainHit);
-      launchMe(v, pre.vx * 0.7, 5, pre.vz * 0.7);
+      launchMe(v, pre.vx * 0.7, 4 + pre.speed * 0.08, pre.vz * 0.7);
       return;
     }
   }
@@ -1648,10 +1674,11 @@ function driveUpdate(dt, fwd, side) {
     const bx = -Math.sin(v.h) * (v.T.len / 2 - 0.8), bz = -Math.cos(v.h) * (v.T.len / 2 - 0.8);
     const sx = Math.cos(v.h) * (v.T.wid / 2 - 0.1), sz = -Math.sin(v.h) * (v.T.wid / 2 - 0.1);
     fx.skid(v.x + bx + sx, v.z + bz + sz, v.h, v.y); if (!v.T.bike) fx.skid(v.x + bx - sx, v.z + bz - sz, v.h, v.y);
-    if (Math.random() < 0.3) fx.smokePuff(v.x + bx, v.y + 0.3, v.z + bz, true, 0.5);
+    if (Math.random() < (v.burnout ? 0.9 : 0.3)) fx.smokePuff(v.x + bx, v.y + 0.3, v.z + bz, true, v.burnout ? 0.8 : 0.5);
   }
-  if (total > 9) {
-    damageVehicle(v, (total - 9) * 1.8 * (1.3 / v.T.mass) ** 0.5);
+  if (total > 5) {
+    // sedan: 13 m/s head-on into a wall ≈ 24 HP, 27 m/s ≈ 77 HP (wrecked); scrapes under 5 m/s are free
+    damageVehicle(v, (total - 5) * 2 * (1 + (total - 5) / 60) * (1.3 / v.T.mass) ** 0.5);
     if (total > 14) damageMe((total - 14) * (v.T.bike ? 4 : 2), 'a crash', '');
     if (me.dead) return;
     if (v.T.bike && total > 13) { ejectMe(); me.vy = 4; return; }
@@ -1749,8 +1776,8 @@ function updateWantedLevel(dt) {
 function updateRobbery(dt) {
   robberyPrompt = '';
   const R = interior.room;
-  if (!R || !R.clerk || (R.kind !== 'rob' && R.kind !== 'casino')) return;
-  const st = R.store, w = WEAPONS[me.weapon], c = R.clerk, casino = R.kind === 'casino', who = casino ? 'cashier' : 'clerk', till = casino ? 'cage' : 'till';
+  if (!R || !R.clerk || (R.kind !== 'rob' && R.kind !== 'casino' && R.kind !== 'bar')) return;
+  const st = R.store, w = WEAPONS[me.weapon], c = R.clerk, casino = R.kind === 'casino', who = casino ? 'cashier' : R.kind === 'bar' ? 'bartender' : 'clerk', till = casino ? 'cage' : 'till';
   const facing = aiming && Math.abs(angDiff(camYaw, Math.atan2(c.x - me.x, c.z - me.z))) < 0.35, close = Math.hypot(c.x - me.x, c.z - me.z) < 16;
   R.held = facing && close && w.kind === 'gun' && !(st.cooldown > 0);
   if (!R.held && (interior.nearExit(me.x, me.z) || canBuyAtCounter())) return; // let "E: Leave" / "E: Buy ammo" show
@@ -1818,6 +1845,7 @@ function useStore() {
   if (me.dead || me.enter) return false;
   if (interior.room) {
     if (interior.nearExit(me.x, me.z)) { leaveRoom(); return true; }
+    if (useVenue(me)) return true; // bars and the casino: drinks, pool, darts, slots, blackjack, roulette
     if (interior.nearCounter(me.x, me.z) && interior.room.kind === 'guns') { openShop('Arnett Arms', gunShopItems(), gunShopItems); return true; }
     if (canBuyAtCounter()) { const basic = () => [...gunShopItems(true), ...drinkItems()]; openShop(interior.room.store.name, basic(), basic); return true; }
     if (interior.nearCounter(me.x, me.z) && interior.room.kind === 'clothes') { openShop(interior.room.store.name, clothingItems()); return true; }
@@ -1852,28 +1880,11 @@ function gunShopItems(basic = false) {
   if (!basic) items.push({ label: 'Body armor', sub: 'Soaks up most incoming damage', price: 250, ok: () => me.armor < 100, buy: () => { me.armor = 100; } });
   return items;
 }
-// Arnett Auto: repairs, paint and wheels, performance, armor. Upgrades belong to that car.
-function modT(v) { if (!v.T.own) v.T = { ...v.T, own: true }; return v.T; }
-function rebuildCar(v) { scene.remove(v.mesh); v.mesh = makeVehicleMesh(v.T, v.color, 0, v.ti); scene.add(v.mesh); applyDamageVisual(v); if (v.rims) paintRims(v); v.headFor = ''; }
-function paintRims(v) { const rim = new THREE.MeshStandardMaterial({ color: v.rims, metalness: 0.85, roughness: 0.25 }); for (const w of v.mesh.userData.parts.wheels) (w.userData.spin || w).traverse((c) => { if (c.isMesh && (c.material.name === 'rim' || c.userData.rim)) { c.material = rim; c.userData.rim = true; } }); }
-function bodyShop(v) { openShop('Arnett Auto', autoItems(v)); }
-function autoItems(v) {
-  const done = (k) => v.mods && v.mods[k];
-  const mod = (k, f) => () => { v.mods = v.mods || {}; v.mods[k] = true; f(modT(v)); ui.announce('UPGRADED', v.T.name); };
-  const paint = (name, c) => ({ label: `Paint: ${name}`, sub: 'Fresh coat, same car', price: 100, buy: () => { v.color = c; rebuildCar(v); writeVeh(v, true); } });
-  return [
-    { label: 'Repair', sub: 'Fix the body, engine and glass (the cops still know your face)', price: 150, ok: () => v.hp < v.T.hp || v.flat || v.dz.f + v.dz.b + v.dz.l + v.dz.r > 0, buy: () => { v.hp = v.T.hp; v.dz = { f: 0, b: 0, l: 0, r: 0 }; v.burnAt = 0; v.flat = false; v.brokenHead = v.brokenTail = false; rebuildCar(v); writeVeh(v, true); } },
-    paint('Arnett Red', 0xc62828), paint('River Blue', 0x1565c0), paint('Midnight Black', 0x111214), paint('Pearl White', 0xf2f2f0), paint('Cornfield Gold', 0xe0a526), paint('Bluff Green', 0x2e7d32),
-    { label: 'Wheels: chrome', sub: 'Shiny rims', price: 120, buy: () => { v.rims = 0xeceff1; paintRims(v); } },
-    { label: 'Wheels: gold', sub: 'Flashy rims', price: 180, buy: () => { v.rims = 0xd4af37; paintRims(v); } },
-    { label: 'Engine tune', sub: '+20% top speed and acceleration', price: 600, ok: () => !done('engine'), buy: mod('engine', (T) => { T.max *= 1.2; T.acc *= 1.2; }) },
-    { label: 'Race brakes', sub: 'Stop much shorter', price: 300, ok: () => !done('brakes'), buy: mod('brakes', (T) => { T.brakeMul = 1.5; }) },
-    { label: 'Sport tires', sub: 'More grip in corners', price: 400, ok: () => !done('grip'), buy: mod('grip', (T) => { T.grip *= 1.3; T.turn *= 1.08; }) },
-    { label: 'Bigger nitro tank', sub: 'Boost lasts twice as long', price: 350, ok: () => !done('nitro'), buy: mod('nitro', (T) => { T.nitroMul = 2; }) },
-    { label: 'Armor plating', sub: 'Takes half the damage', price: 800, ok: () => !done('armor'), buy: mod('armor', (T) => { T.armor = 0.5; T.hp *= 1.5; v.hp = T.hp; }) },
-    { label: 'Bulletproof tires', sub: 'Gunfire barely scratches it', price: 500, ok: () => !done('bp'), buy: mod('bp', (T) => { T.bulletproof = true; }) },
-  ];
-}
+// Arnett Auto: the mod shop and personal cars live in garage.js, the looks and horns in carmods.js (v.mods)
+function rebuildCar(v) { scene.remove(v.mesh); v.mesh = makeVehicleMesh(v.T, v.color, 0, v.ti); scene.add(v.mesh); applyDamageVisual(v); applyMods(v); v.headFor = ''; }
+function bodyShop(v) { shopOpen = true; paused = true; keys.clear(); mouseDown = false; document.exitPointerLock?.(); garage.openModShop(v); }
+function repairCar(v) { v.hp = v.T.hp; v.dz = { f: 0, b: 0, l: 0, r: 0 }; v.burnAt = 0; v.flat = false; v.brokenHead = v.brokenTail = false; rebuildCar(v); writeVeh(v, true); }
+garage.initGarage({ spawn: (ti, c, label) => deliverCar(ti, label, c), remove: (v) => { removeVehicle(v.id); resetVehicle(v); }, vehicles: () => vehicles, myVeh: () => me.veh, repair: repairCar, writeVeh: (v) => writeVeh(v, true), close: closeShop });
 // ---- clothing store: Tim's Threads (outfits, a barber, tattoos and masks)
 const COLS = [['White', 0], ['Black', 1], ['Grey', 2], ['Navy', 4], ['Blue', 5], ['Red', 7], ['Maroon', 8], ['Green', 9], ['Olive', 10], ['Khaki', 11], ['Brown', 12], ['Gold', 14], ['Orange', 15], ['Pink', 16], ['Purple', 17], ['Teal', 18]];
 const HAIR_COLS = [['Black', 0], ['Dark brown', 1], ['Brown', 3], ['Auburn', 4], ['Blonde', 6], ['Grey', 7], ['Pink', 10], ['Blue', 11]];
@@ -1915,19 +1926,30 @@ function clothingItems() {
   return items;
 }
 // ---- phone: call a mechanic to drop a car off near you
-function openPhone() {
+function callMechanic() {
   if (!playing || me.dead || interior.room) return;
   const car = (label, ti, price) => ({ label, sub: 'Delivered to the nearest street', price, buy: () => deliverCar(ti, label) });
   openShop('Phone: Arnett Auto mechanic', [car('Sedan', V.SEDAN, 100), car('Hatchback', V.HATCH, 90), car('SUV', V.SUV, 150), car('Pickup', V.PICKUP, 150), car('Motorbike', V.BIKE, 120), car('Sports car', V.SPORTS, 300), car('Muscle car', V.MUSCLE, 400), car('Monster truck', V.MONSTER, 900)]);
 }
 let deliverN = 0;
-function deliverCar(ti, label) {
+// phone taxi: fade to black, stream the streets at the waypoint, step out on the sidewalk there
+async function taxiTo(x, z) {
+  await loading(true, '', 'fade');
+  const sp = W.sidewalkSpot({ x, z, r: 60 });
+  await W.preload(sp.x, sp.z, 200, loadProgress);
+  manageParked(0, sp.x, sp.z, true);
+  me.x = sp.x; me.z = sp.z; me.h = sp.h; me.y = W.groundHeight(sp.x, sp.z); me.vy = 0; camYaw = sp.h;
+  waypoint = null; gpsRoute = null;
+  setTimeout(() => loading(false), 300);
+}
+function deliverCar(ti, label, color = [0xc62828, 0x1565c0, 0x111214, 0xf2f2f0, 0xe0a526][Math.floor(Math.random() * 5)]) {
   const sp = W.roadSpot(me.x, me.z, 25, 60) || { x: me.x + 6, z: me.z, h: 0 };
-  const v = makeVehicle(newId('d'), ti, [0xc62828, 0x1565c0, 0x111214, 0xf2f2f0, 0xe0a526][Math.floor(Math.random() * 5)], sp);
+  const v = makeVehicle(newId('d'), ti, color, sp);
   v.stolenOnce = true; v.keep = true; scene.add(v.mesh); vehicles.push(v); vehById.set(v.id, v);
   waypoint = { x: sp.x, z: sp.z }; gpsRoute = null; routeT = 0;
   ui.addFeed(`Your ${label} is parked nearby (follow the GPS)`);
-  setTimeout(() => { v.keep = false; }, 120000);
+  setTimeout(() => { if (v.personal === undefined) v.keep = false; }, 120000); // personal cars (garage.js) stay put
+  return v;
 }
 let shopOpen = false;
 function openShop(title, items, rebuild) { // rebuild: () => items, re-run after each purchase so counts stay current
@@ -1979,6 +2001,7 @@ function spawnCamera(dt, tx, ty, tz, lx, ly, lz) {
   if (k >= 1) spawnCam = null;
 }
 function updateCamera(dt) {
+  if (garage.shopCam(camera, dt)) { followSun(me.veh ? me.veh.x : me.x, me.y, me.veh ? me.veh.z : me.z); return; } // Arnett Auto orbit
   const spd = me.veh ? Math.abs(me.veh.speed) : 0;
   const aimZoom = aiming && !me.dead && WEAPONS[me.weapon].kind === 'gun';
   const fov = aimZoom ? (WEAPONS[me.weapon].scope ? 16 : 48) : 70 + clamp(spd - 15, 0, 30) * 0.45 + (me.veh && me.veh.boosting ? 8 : 0);
@@ -2102,12 +2125,25 @@ initEmergency(scene, {
   extinguish: (v) => { v.burnAt = 0; v.burnBy = ''; fx.stopFire(v.fire); v.fire = null; v.hp = Math.max(v.hp, -v.T.hp * 0.3); writeVeh(v, true); },
 });
 interior.initInteriors(scene);
+initVenues({ openShop });
+phone.initPhone({
+  player: () => ({ x: me.veh ? me.veh.x : me.x, z: me.veh ? me.veh.z : me.z, dead: me.dead, inVeh: !!me.veh, inRoom: !!interior.room, speed: me.veh ? Math.abs(me.veh.speed || 0) : 0 }),
+  waypoint: () => waypoint,
+  mechanic: () => callMechanic(),
+  taxi: (x, z) => taxiTo(x, z),
+  deliver: (ti, label) => deliverCar(ti, label),
+  ammoItems: () => gunShopItems(),
+  heal: () => { me.hp = 100; },
+});
 initEvents({
   newId,
   vehicles: () => vehicles,
   add: (v) => { scene.add(v.mesh); vehicles.push(v); vehById.set(v.id, v); },
-  reward: (amount, text) => { addCash(amount); ui.announce('GOOD SAMARITAN', `${text} · +$${amount}`, '#7cf29a'); fx.soundCash(); },
+  reward: (amount, text, title = 'GOOD SAMARITAN') => { addCash(amount); ui.announce(title, `${text} · +$${amount}`, '#7cf29a'); ui.addFeed(`${text} (+$${amount})`); fx.soundCash(); },
   alarm: (v) => { v.alarmUntil = performance.now() / 1000 + 4.5; let n = 0; const iv = setInterval(() => { fx.soundHorn(distCam(v.x, v.z)); if (++n > 6) clearInterval(iv); }, 600); },
+  // street events (src/events/*.js): the scene for markers/props, you, your aim, car removal, the fire crew's extinguish
+  scene, me: () => me, threat: () => threatState, remove: (v) => resetVehicle(v), feed: (t) => ui.addFeed(t), now: () => net.now(),
+  extinguish: (v) => { v.burnAt = 0; v.burnBy = ''; fx.stopFire(v.fire); v.fire = null; v.hp = Math.max(v.hp, -v.T.hp * 0.3); writeVeh(v, true); },
 });
 initLandmarks(scene, {
   onCasino: (door, face) => stores.push({ name: 'The Arnett Belle', kind: 'casino', x: door.x, z: door.z, face, cooldown: 0, progress: 0 }),
@@ -2175,7 +2211,8 @@ function updateHud(dt, t) {
     for (const h of W.places.hospitals) if (Math.abs(h.x - me.x) < 400 && Math.abs(h.z - me.z) < 400) blips.push({ x: h.x, z: h.z, type: 'hospital' });
     for (const r of remotes.values()) if (!r.dead) blips.push({ x: r.x, z: r.z, color: '#40c4ff', size: 4.5 });
     for (const sb of storeList(false)) blips.push(sb);
-    for (const e of eventBlips()) blips.push({ ...e, type: 'event' });
+    for (const e of eventBlips()) blips.push({ type: 'event', ...e });
+    blips.push(...garage.blips());
     for (const s of police.stations()) if (Math.abs(s.x - me.x) < 400 && Math.abs(s.z - me.z) < 400) blips.push({ x: s.x, z: s.z, type: 'police' });
     for (const u of police.cops.values()) if (!police.isDown(u) && !u.parked) { const P = police.posOf(u); blips.push({ x: P.x, z: P.z, color: flash, size: u.kind === 3 ? 6 : u.kind === 2 ? 2.5 : 4 }); }
     const spd = me.veh ? Math.abs(me.veh.speed) : 0;
@@ -2278,7 +2315,9 @@ function update(dt, t) {
   updateEmergency(dt, { x: me.veh ? me.veh.x : me.x, z: me.veh ? me.veh.z : me.z }, camView(), tSec);
   updateLandmarks(dt, tSec, { x: me.veh ? me.veh.x : me.x, z: me.veh ? me.veh.z : me.z }, weather.night);
   interior.updateRoom(dt, me, threatState);
+  updateVenues(dt, me);
   updateEvents(dt, { x: me.veh ? me.veh.x : me.x, z: me.veh ? me.veh.z : me.z }, camView(), wanted.stars > 0 || !!interior.room);
+  phone.update(dt);
   // hiding: inside a shop or a parking ramp they lose you faster, unless they know you're in there (you just robbed it)
   me.pinned = !!(interior.room && interior.room.store.alarmed);
   me.hiding = !me.pinned && (!!interior.room || (!me.veh && W.buildingKindAt(me.x, me.z) === 1) || (me.veh && W.buildingKindAt(me.veh.x, me.veh.z) === 1));

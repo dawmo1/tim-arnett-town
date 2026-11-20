@@ -329,3 +329,116 @@ button { font: inherit; }
   .shopCard h2 { font-size: 34px; padding: 16px 14px 12px; }
 }
 @media (prefers-reduced-motion: reduce) { #stars.hot, #stars.flash i.on, #bottomleft.hot #mmFrame::after, #hurt.on, #announce.on, #feed li, #cash.bump, #helpbox { animation: none; } #announce.on { opacity: 1; } #bottomleft.hot #mmFrame::after { border-color: rgba(235,40,40,.95); } }
+
+/* ===== minigames (src/minigames): slots, blackjack, roulette, darts, pool. GTA V panels over a dimmed world ===== */
+.mg { position: fixed; inset: 0; z-index: 55; display: flex; align-items: center; justify-content: center; padding: 2vh 16px; background: rgba(0,0,0,.55); font: 500 18px/1.25 'Barlow Condensed', 'Arial Narrow', sans-serif; font-size-adjust: none; letter-spacing: .3px; color: #fff; outline: none; }
+.mg-panel { width: min(1180px, 100%); max-height: 100%; overflow: auto; display: flex; flex-direction: column; background: rgba(0,0,0,.72); box-shadow: 0 10px 40px rgba(0,0,0,.6); animation: mgIn .18s ease-out; }
+@keyframes mgIn { from { opacity: 0; transform: translateY(8px); } }
+.mg-title { margin: 0; padding: 18px 18px 14px; font: 400 48px/1 var(--display); text-align: center; letter-spacing: 1px; color: #fff; -webkit-text-stroke: 2px #000; paint-order: stroke fill; text-shadow: 0 3px 6px rgba(0,0,0,.5); background: linear-gradient(125deg, #7a2a9a, #1e0830 70%); }
+.mg-k-darts .mg-title, .mg-k-pool .mg-title { background: linear-gradient(125deg, #2f7a46, #133a22 70%); }
+.mg-sub { display: flex; justify-content: space-between; align-items: baseline; padding: 7px 14px; background: #000; font-weight: 600; font-size: 17px; letter-spacing: 1px; text-transform: uppercase; }
+.mg-cash, .mg-money { color: #72c472; font-weight: 600; font-variant-numeric: tabular-nums; }
+.mg-body { display: flex; flex-wrap: wrap; gap: 16px; justify-content: center; align-items: flex-start; padding: 14px; }
+.mg-cv { display: block; max-width: 100%; height: auto; border-radius: 4px; box-shadow: 0 4px 18px rgba(0,0,0,.5); }
+.mg-pool { cursor: crosshair; }
+.mg-msg { min-height: 40px; padding: 8px 16px; font-size: 21px; font-weight: 500; background: rgba(0,0,0,.55); border-left: 4px solid transparent; }
+.mg-msg.good { border-left-color: #72c472; }
+.mg-msg.bad { border-left-color: #e5484d; }
+.mg-msg b { font-weight: 600; }
+.mg-msg small { color: rgba(255,255,255,.65); }
+.mg-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; padding: 8px 14px; background: #000; }
+.mg-bets { display: flex; align-items: center; gap: 3px; }
+.mg-bets span { margin-right: 6px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: rgba(255,255,255,.7); }
+.mg-bets button { background: rgba(255,255,255,.08); color: #72c472; border: 0; padding: 5px 11px; font: 600 18px 'Barlow Condensed', sans-serif; cursor: pointer; }
+.mg-bets button.on { background: #fff; color: #1f7a2a; }
+.mg-bets.locked button { opacity: .45; cursor: not-allowed; }
+.mg-keys { flex: 1; display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; font-size: 16px; color: rgba(255,255,255,.8); }
+.mg kbd { display: inline-block; min-width: 22px; height: 22px; padding: 0 5px; border-radius: 3px; background: #fff; color: #000; font: 600 15px/22px 'Barlow Condensed', sans-serif; text-align: center; }
+.mg-leave, .mg-btn { background: rgba(0,0,0,.65); color: #fff; border: 0; padding: 8px 14px; font: 600 19px 'Barlow Condensed', sans-serif; text-transform: uppercase; letter-spacing: 1px; text-align: left; cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.mg-btn { width: 100%; }
+.mg-leave:hover, .mg-leave:focus-visible, .mg-btn:hover:not(:disabled), .mg-btn:focus-visible { background: #fff; color: #000; outline: none; }
+.mg-btn:hover:not(:disabled) kbd, .mg-leave:hover kbd { background: #000; color: #fff; }
+.mg-btn:disabled { color: rgba(255,255,255,.35); cursor: not-allowed; }
+.mg-big { font-size: 24px; padding: 12px 16px; margin-top: 8px; }
+.mg-side { width: 270px; display: grid; gap: 3px; align-content: start; }
+.mg-side h3 { margin: 0 0 4px; padding: 6px 12px; background: #000; font: 600 17px 'Barlow Condensed', sans-serif; text-transform: uppercase; letter-spacing: 1px; }
+/* slots paytable */
+.mg-pay-row { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; padding: 4px 12px; background: rgba(0,0,0,.65); }
+.mg-pay-icons { display: flex; gap: 2px; min-width: 94px; }
+.mg-pay-icons canvas { width: 30px; height: 30px; }
+.mg-pay-name { color: rgba(255,255,255,.75); font-size: 16px; }
+/* blackjack */
+.mg-felt { width: min(660px, 100%); display: grid; gap: 14px; padding: 18px; border: 10px solid #4a2610; border-radius: 22px 22px 120px 120px / 22px 22px 60px 60px; background: radial-gradient(ellipse at 50% 20%, #23864d, #0c3d22 75%); box-shadow: inset 0 0 40px rgba(0,0,0,.5); }
+.mg-bj-row { display: grid; gap: 8px; justify-items: center; }
+.mg-bj-label { font-weight: 600; font-size: 19px; text-transform: uppercase; letter-spacing: 1px; display: flex; align-items: center; gap: 8px; }
+.mg-bj-tot { background: #000; padding: 0 8px; min-width: 30px; text-align: center; }
+.mg-bj-tot:empty { display: none; }
+.mg-bj-rules { text-align: center; font: 400 21px var(--display); color: rgba(255,226,140,.8); letter-spacing: 1px; }
+.mg-hand { display: flex; justify-content: center; min-height: 124px; }
+.mg-card { width: 84px; height: 120px; perspective: 700px; animation: mgDeal .32s ease-out; }
+.mg-card + .mg-card { margin-left: -36px; }
+.mg-card-in { position: relative; width: 100%; height: 100%; transition: transform .45s; transform-style: preserve-3d; }
+.mg-card.down .mg-card-in { transform: rotateY(180deg); }
+.mg-face, .mg-back { position: absolute; inset: 0; border-radius: 8px; backface-visibility: hidden; -webkit-backface-visibility: hidden; box-shadow: -2px 3px 8px rgba(0,0,0,.45); }
+.mg-face { background: #fbfbf7; color: #151515; font-weight: 600; }
+.mg-card.red .mg-face { color: #c8102e; }
+.mg-face b { position: absolute; top: 5px; left: 7px; display: grid; justify-items: center; font-size: 22px; line-height: .95; }
+.mg-face b i { font-style: normal; font-size: 18px; }
+.mg-face b.br { top: auto; left: auto; bottom: 5px; right: 7px; transform: rotate(180deg); }
+.mg-face span { position: absolute; inset: 0; display: grid; place-items: center; font-size: 46px; }
+.mg-back { transform: rotateY(180deg); display: grid; place-items: center; border: 4px solid #fff; background: repeating-linear-gradient(45deg, #8b1020 0 6px, #a8182c 6px 12px); }
+.mg-back span { font: 400 44px var(--display); color: #fff; -webkit-text-stroke: 2px #000; paint-order: stroke fill; }
+@keyframes mgDeal { from { transform: translate(240px, -170px) rotate(-25deg); opacity: 0; } }
+.mg-chipstack { display: inline-grid; place-items: center; min-width: 46px; height: 46px; padding: 0 6px; border-radius: 50%; border: 4px dashed #fff; background: #1d4fb8; color: #fff; font-size: 15px; box-shadow: 0 2px 6px rgba(0,0,0,.5); }
+.mg-chipstack:empty { display: none; }
+/* roulette */
+.mg-rt-right { width: min(600px, 100%); display: grid; gap: 10px; }
+.mg-rt-right .mg-side { width: auto; display: flex; flex-wrap: wrap; }
+.mg-rt-right .mg-btn { width: auto; flex: 1; }
+.mg-rt-board { display: grid; grid-template-columns: 46px repeat(12, 1fr); grid-template-rows: repeat(3, 46px) 40px 40px; gap: 2px; padding: 6px; background: #0e4a29; border: 2px solid #d9c38a; }
+.mg-rt-cell { position: relative; border: 0; padding: 0; color: #fff; font: 600 18px 'Barlow Condensed', sans-serif; cursor: pointer; display: grid; place-items: center; }
+.mg-rt-cell.red { background: #b8141c; } .mg-rt-cell.black { background: #161616; } .mg-rt-cell.green { background: #14833b; }
+.mg-rt-cell.out { background: transparent; box-shadow: inset 0 0 0 1px rgba(255,255,255,.4); text-transform: uppercase; font-size: 16px; }
+.mg-rt-cell:hover, .mg-rt-cell:focus-visible { outline: 2px solid #fff; outline-offset: -2px; z-index: 1; }
+.mg-rt-cell.hit { box-shadow: inset 0 0 0 3px #ffd24a; animation: mgHit .5s ease-in-out 4 alternate; }
+@keyframes mgHit { to { filter: brightness(1.6); } }
+.mg-dia { display: block; width: 20px; height: 20px; transform: rotate(45deg); }
+.mg-dia.red { background: #d01a24; } .mg-dia.black { background: #000; box-shadow: 0 0 0 1px #fff; }
+.mg-chip { position: absolute; right: 1px; top: 1px; min-width: 24px; height: 24px; padding: 0 3px; border-radius: 12px; background: #ffd24a; border: 2px dashed #fff; color: #000; font: 600 12px/20px 'Barlow Condensed', sans-serif; font-style: normal; text-align: center; pointer-events: none; box-shadow: 0 1px 3px #000; }
+.mg-rt-hist { display: flex; gap: 3px; flex-wrap: wrap; align-items: center; width: 100%; padding-top: 4px; }
+.mg-rt-num { display: inline-grid; place-items: center; min-width: 28px; height: 28px; border-radius: 50%; color: #fff; font-weight: 600; }
+.mg-rt-num.red { background: #c0161f; } .mg-rt-num.black { background: #161616; box-shadow: 0 0 0 1px rgba(255,255,255,.4); } .mg-rt-num.green { background: #14833b; }
+/* darts chalkboard */
+.mg-chalk { padding: 10px; background: #1d2420; border: 8px solid #5a3a1c; gap: 6px; }
+.mg-chalk-row { display: flex; justify-content: space-between; align-items: baseline; padding: 4px 10px; border-left: 4px solid transparent; font-size: 20px; text-transform: uppercase; color: rgba(255,255,255,.75); }
+.mg-chalk-row b { font: 400 40px var(--display); color: #fff; }
+.mg-chalk-row.on { border-left-color: #fff; background: rgba(255,255,255,.08); color: #fff; }
+.mg-chalk-turn { display: flex; gap: 6px; min-height: 34px; align-items: center; padding: 0 10px; }
+.mg-chalk-turn span { padding: 2px 8px; background: rgba(255,255,255,.12); font-weight: 600; }
+.mg-chalk-turn b { margin-left: auto; font: 400 26px var(--display); color: #72c472; }
+@media (max-width: 760px) {
+  .mg { padding: 0; }
+  .mg-title { font-size: 34px; padding: 12px; }
+  .mg-body { padding: 10px; }
+  .mg-side { width: 100%; }
+  .mg-card { width: 62px; height: 90px; } .mg-card + .mg-card { margin-left: -26px; } .mg-face span { font-size: 32px; } .mg-face b { font-size: 17px; }
+  .mg-rt-board { grid-template-columns: 30px repeat(12, 1fr); grid-template-rows: repeat(3, 34px) 32px 32px; }
+  .mg-rt-cell { font-size: 14px; } .mg-rt-cell.out { font-size: 12px; }
+}
+@media (prefers-reduced-motion: reduce) { .mg-panel, .mg-card, .mg-rt-cell.hit { animation: none; } .mg-card-in { transition: none; } }
+/* ===== end minigames ===== */
+
+/* ===== street events (src/events/kit.js): GTA mission line + timer, bottom centre ===== */
+#evMission { position: absolute; left: 50%; bottom: 58px; transform: translateX(-50%); width: min(860px, calc(100% - 32px)); display: grid; justify-items: center; gap: 7px; pointer-events: none; font-family: var(--hud); text-align: center; }
+#evMission .evLine { font-size: 25px; font-weight: 500; line-height: 1.25; color: #fff; text-shadow: 0 0 3px #000, 0 2px 3px #000, 0 0 1px #000; text-wrap: balance; }
+#evMission .evLine b { color: #f0c850; font-weight: 600; }
+#evMission .evLine i { color: #ff5e5b; font-style: normal; font-weight: 600; }
+#evMission .evLine u { color: #6cb8ff; text-decoration: none; font-weight: 600; }
+#evMission .evLine.fail { color: #ffb3b0; }
+#evMission .evTime { background: var(--box); padding: 4px 16px 3px; font-size: 21px; font-weight: 600; letter-spacing: 1.5px; color: #fff; text-shadow: none; font-variant-numeric: tabular-nums; }
+#evMission .evTime.low { color: #ff5e5b; }
+#evMission.evIn .evLine { animation: evIn .25s ease-out; }
+@keyframes evIn { from { opacity: 0; transform: translateY(6px); } }
+@media (max-width: 760px), (max-height: 540px) { #evMission { bottom: 46px; } #evMission .evLine { font-size: 19px; } #evMission .evTime { font-size: 17px; } }
+@media (prefers-reduced-motion: reduce) { #evMission.evIn .evLine { animation: none; } }
+/* ===== end street events ===== */

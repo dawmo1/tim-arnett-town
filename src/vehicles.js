@@ -4,7 +4,7 @@ import * as W from './world.js';
 import { rng, clamp } from './util.js';
 import * as fx from './fx.js';
 import { sky } from './daynight.js';
-import { buildCarMesh, dent } from './carmodel.js';
+import { buildCarMesh, dent, crumple, unDent, GLASS } from './carmodel.js';
 
 export const TYPES = [
   { name: 'Sedan', len: 4.4, wid: 1.9, hgt: 1.45, max: 32, acc: 13, turn: 1.9, grip: 7, mass: 1.2, hp: 100 },
@@ -291,18 +291,31 @@ function launchPart(v, m, power) {
   m.position.copy(p); m.quaternion.copy(q); m.scale.copy(s);
   fx.debris(m, (v.vx || 0) * 0.6 + (Math.random() - 0.5) * power, 2 + Math.random() * power * 0.6, (v.vz || 0) * 0.6 + (Math.random() - 0.5) * power);
 }
-// Record an impact at world point (px, pz) and update the dents.
-export function damageZone(v, px, pz, imp) {
+// the part's factory pose, remembered before it first gets bent, hung or knocked off (repair puts it back)
+function base(m) { return m.userData.t0 || (m.userData.t0 = { p: m.position.clone(), q: m.quaternion.clone(), s: m.scale.clone() }); }
+// knock off part P[key], remembering where it belongs so repair() can bolt it back on
+function drop(v, P, key, power) {
+  const m = P[key]; if (!m || !m.parent) return;
+  base(m); (P.lost || (P.lost = [])).push({ key, m, parent: m.parent });
+  launchPart(v, m, power); P[key] = null;
+  if (P.hang) delete P.hang[key];
+}
+// Record an impact at world point (px, pz) and update the dents. ly = height of the hit (roof hits push down).
+// Panels only get dented on cars that are drawn up close (far ones are a silhouette anyway).
+export function damageZone(v, px, pz, imp, ly = 0.65) {
   if (v.T.bike || imp < 4) return;
   const fx = Math.sin(v.h), fz = Math.cos(v.h), rx = -Math.cos(v.h), rz = Math.sin(v.h);
   const lf = (px - v.x) * fx + (pz - v.z) * fz, lr = (px - v.x) * rx + (pz - v.z) * rz;
   const zone = Math.abs(lf) / v.T.len > Math.abs(lr) / v.T.wid ? (lf > 0 ? 'f' : 'b') : lr > 0 ? 'r' : 'l';
-  v.dz[zone] += imp;
+  const arm = tuneOf(v).armor; // armor plating dents less (the hp side is handled in main's damageVehicle)
+  v.dz[zone] += imp * arm;
   // dent the panels where it hit (car-local: +x left, +z forward)
   const P = v.mesh.userData.parts;
-  if (P && P.model && !v.T.heli && !v.T.boat) {
-    const lx = -lr, lz = lf, l = Math.hypot(lx, lz) || 1;
-    dent(v, lx, 0.65, lz, -lx / l, -lz / l, Math.min(0.13, imp * 0.0045), zone === 'f' || zone === 'b' ? 0.9 : 1.1);
+  if (P && P.model && !v.T.heli && !v.T.boat && v.mesh.visible) {
+    const lx = -lr, lz = lf, l = Math.hypot(lx, lz) || 1, roof = ly > v.T.hgt * 0.8;
+    const depth = Math.min(0.2, imp * 0.006) * arm, rad = (0.75 + Math.min(0.5, imp * 0.015)) * (zone === 'f' || zone === 'b' ? 0.9 : 1);
+    if (roof) dent(v, lx, ly, lz, 0, 0, depth, rad * 1.3, -1);
+    else dent(v, lx, ly, lz, -lx / l, -lz / l, depth, rad);
   }
   applyDamageVisual(v);
 }
@@ -317,7 +330,7 @@ export function applyDamageVisual(v) {
     P.frontG.position.z = v.T.len / 2 - segL * 0.5 * d;
     P.hood.scale.z = segL * (1 - 0.5 * d); P.hood.position.z = -P.hood.scale.z / 2;
     P.hood.rotation.x = -0.18 * d;
-    if (d > 0.45 && P.bumpF) { launchPart(v, P.bumpF, 4); P.bumpF = null; }
+    if (d > 0.45 && P.bumpF) drop(v, P, 'bumpF', 4);
     if (d > 0.8 && P.hood.parent && !v.T.truck && !P.hoodGone) { P.hoodGone = true; P.hood.rotation.x = -0.6; }
   }
   if (P.rearG) {
@@ -325,7 +338,7 @@ export function applyDamageVisual(v) {
     P.rearG.position.z = -v.T.len / 2 + segL * 0.5 * d;
     P.trunk.scale.z = segL * (1 - 0.5 * d); P.trunk.position.z = P.trunk.scale.z / 2;
     P.trunk.rotation.x = 0.18 * d;
-    if (d > 0.45 && P.bumpR) { launchPart(v, P.bumpR, 4); P.bumpR = null; }
+    if (d > 0.45 && P.bumpR) drop(v, P, 'bumpR', 4);
   }
   if (P.doorL) { const d = k('l'); P.doorL.position.x = v.T.wid / 2 - 0.05 - 0.2 * d; P.doorL.rotation.z = 0.12 * d; }
   if (P.doorR) { const d = k('r'); P.doorR.position.x = -v.T.wid / 2 + 0.05 + 0.2 * d; P.doorR.rotation.z = -0.12 * d; }
@@ -337,22 +350,27 @@ export function applyDamageVisual(v) {
   }
 }
 
-// Blender cars: hood and trunk spring up, bumpers / hood / doors come off, lamps break, glass cracks then shatters
+// Blender cars: the hood buckles and springs up, bumpers and doors hang loose then come off, lamps break,
+// glass cracks then shatters. Hanging parts swing in animateDamage.
 function modelDamage(v, P) {
   const k = (z) => Math.min(1, v.dz[z] / 45);
   const f = k('f'), b = k('b'), l = k('l'), r = k('r');
-  if (P.hood) P.hood.rotation.x = -0.4 * Math.max(0, f - 0.3);
-  if (f > 0.45 && P.bumpF) { launchPart(v, P.bumpF, 4); P.bumpF = null; }
+  const H = P.hang || (P.hang = {});
+  if (P.hood) { base(P.hood); P.hood.rotation.x = -0.4 * Math.max(0, f - 0.3); crumple(v, f); }
+  for (const [key, d] of [['bumpF', f], ['bumpR', b]]) {
+    if (!P[key] || d <= 0.25) continue;
+    if (d > 0.6) drop(v, P, key, 4); else { base(P[key]); H[key] = Math.min(1, (d - 0.25) / 0.3); }
+  }
   if (f > 0.5 && !v.brokenHead) { v.brokenHead = true; P.lampState = -1; fx.glass(v.x + Math.sin(v.h) * v.T.len / 2, v.y + 0.7, v.z + Math.cos(v.h) * v.T.len / 2, 6); }
-  if (f > 0.95 && P.hood) { launchPart(v, P.hood, 5); P.hood = null; }
-  if (P.trunk) P.trunk.rotation.x = 0.4 * Math.max(0, b - 0.3);
-  if (b > 0.45 && P.bumpR) { launchPart(v, P.bumpR, 4); P.bumpR = null; }
+  if (f > 0.95 && P.hood) drop(v, P, 'hood', 5);
+  if (P.trunk) { base(P.trunk); P.trunk.rotation.x = 0.4 * Math.max(0, b - 0.3); }
   if (b > 0.5 && !v.brokenTail) { v.brokenTail = true; P.lampState = -1; }
-  if (b > 0.95 && P.trunk) { launchPart(v, P.trunk, 5); P.trunk = null; }
+  if (b > 0.95 && P.trunk) drop(v, P, 'trunk', 5);
   for (const [side, d] of [['L', l], ['R', r]]) {
     for (const nm of ['door' + side, 'door' + side + '2']) {
-      const door = P[nm]; if (!door) continue;
-      if (d > 0.92 && !(nm === 'door' + side && v.driver)) { launchPart(v, door, 4); P[nm] = null; if (nm === 'doorL') P.doorL = null; }
+      if (!P[nm] || d <= 0.45) continue;
+      const held = nm === 'door' + side && v.driver; // the driver's door stays on (it's how you get out)
+      if (d > 0.92 && !held) drop(v, P, nm, 4); else H[nm] = Math.min(1, (d - 0.45) / 0.4);
     }
   }
   const total = v.dz.f + v.dz.b + v.dz.l + v.dz.r;
@@ -365,6 +383,41 @@ function modelDamage(v, P) {
     P.shattered = true;
     for (const m of P.glass) m.visible = false;
     fx.glass(v.x, v.y + v.T.hgt * 0.8, v.z, 22);
+  }
+}
+// Loose bumpers sag by a corner and doors hang ajar, swinging with the car; at speed a dangling part tears off.
+// Called per frame for cars that are drawn (cheap: nothing to do on an undamaged car).
+export function animateDamage(v, dt) {
+  const P = v.mesh.userData.parts, H = P && P.hang; if (!H) return;
+  const sp = Math.abs(v.speed || 0), t = performance.now() / 1000;
+  for (const key in H) {
+    const m = P[key]; if (!m) { delete H[key]; continue; }
+    const a = H[key], wob = Math.sin(t * (7 + sp * 0.3) + key.length) * Math.min(1, sp / 12) * 0.1 * a, t0 = base(m);
+    if (key[0] === 'b') { m.rotation.z = (0.3 * a + wob) * (key === 'bumpF' ? 1 : -1); m.position.y = t0.p.y - 0.12 * a; }
+    else { const ang = 0.22 * a + Math.abs(wob); m.rotation.y = key.includes('L') ? Math.min(m.rotation.y, -ang) : Math.max(m.rotation.y, ang); }
+    if (a >= 1 && sp > 16 && Math.random() < dt * 0.35 && !(v.driver && (key === 'doorL' || key === 'doorR'))) drop(v, P, key, 4);
+  }
+}
+// Arnett Auto: straighten every panel, bolt the lost parts back on, new glass and lamps. Resets v.dz too.
+// (carmods' applyMods can be called after it to put the window tint back.)
+export function repair(v) {
+  v.dz = { f: 0, b: 0, l: 0, r: 0 }; v.brokenHead = v.brokenTail = false;
+  v.fr = v.fp = v.frV = v.fpV = 0;
+  const P = v.mesh.userData.parts; if (!P) return;
+  for (const L of P.lost || []) { fx.undebris(L.m); L.parent.add(L.m); P[L.key] = L.m; }
+  P.lost = []; P.hang = null; P.hoodGone = false;
+  for (const key of ['hood', 'trunk', 'bumpF', 'bumpR', 'doorL', 'doorR', 'doorL2', 'doorR2']) {
+    const m = P[key], t0 = m && m.userData.t0;
+    if (t0) { m.position.copy(t0.p); m.quaternion.copy(t0.q); m.scale.copy(t0.s); }
+  }
+  unDent(v);
+  if (P.model) {
+    P.cracked = P.shattered = false; P.glassMat = GLASS;
+    for (const m of P.glass) { m.material = GLASS; m.visible = true; }
+    P.lampState = undefined;
+  } else {
+    P.cracked = P.shattered = false; P.glassMat.map = null; P.glassMat.color.setHex(0x26323f); P.glassMat.needsUpdate = true;
+    applyDamageVisual(v);
   }
 }
 export function circles(v) {
@@ -448,7 +501,9 @@ function hitWalls(v) {
     const B = boxOfWall(b), c = sat(A, B);
     if (!c) continue;
     const cp = contactPoint(A, B);
+    v.touch = { t: performance.now(), cp, nx: c.nx, nz: c.nz }; // still touching (scraping) even when not closing in
     const r = resolve(v, null, c, cp, true);
+    if (r) kick(v, c.nx, c.nz, r.imp, 1);
     if (r && r.imp > impact) { impact = r.imp; v.hit = { imp: r.imp, cp, nx: c.nx, nz: c.nz, wall: true }; }
   }
   return impact;
@@ -510,7 +565,54 @@ function stepHeli(v, inp, dt) {
   return Math.max(hitWalls(v), v.landed > 9 ? v.landed : 0);
 }
 
+// ---------- handling ----------
+// v.mods from Arnett Auto (carmods.js): upgrade levels above stock, 0 = stock. Old boolean upgrades already live in T.
+const lvl = (v, k) => { const x = v.mods && v.mods[k]; return typeof x === 'number' ? x : 0; };
+export function tuneOf(v) {
+  const e = lvl(v, 'engine'), s = lvl(v, 'suspension');
+  return { acc: 1 + 0.1 * e, max: 1 + 0.05 * e, brake: 1 + 0.2 * lvl(v, 'brakes'), grip: 1 + 0.06 * s, stiff: 1 + 0.25 * s, turbo: !!(v.mods && v.mods.turbo), armor: 1 - 0.1 * lvl(v, 'armor') };
+}
+// per-type character: loose = rear grip left under power in a slide, grip = cornering grip, roll = body lean
+function feel(T) {
+  return T._feel || (T._feel = T.muscle ? { loose: 0.7, grip: 0.95, roll: 1.15 } : T.name === 'Sports car' || T.convertible ? { loose: 1, grip: 1.12, roll: 0.6 }
+    : T.monster ? { loose: 0.85, grip: 1, roll: 1.3 } : T.bike ? { loose: 0.9, grip: 1.25, roll: 0 } : { loose: 0.9, grip: 1, roll: 1 });
+}
+const smooth = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+const wrapA = (p) => (p > Math.PI ? p - 2 * Math.PI : p < -Math.PI ? p + 2 * Math.PI : p);
+// One tipping axis (v.fr roll / v.fp pitch) of a box on flat ground: CG height h = a|sin p| + b|cos p| gives stable
+// rests on the wheels, a side (or the nose) and the roof. Returns how fast a face slapped down this frame.
+function tip(v, k, a, b, dt, onGround, springs) {
+  let p = v[k] || 0, w = v[k + 'V'] || 0, slap = 0;
+  if (onGround) {
+    const q = Math.round(p / (Math.PI / 2)) * (Math.PI / 2); // settled flat on the wheels, a side or the roof
+    if (Math.abs(p - q) < 0.015 && Math.abs(w) < 0.08) { v[k] = q; v[k + 'V'] = 0; return 0; }
+    const s = Math.sin(p), c = Math.cos(p);
+    let acc = -9.8 * (a * c * Math.sign(s) - b * s * Math.sign(c)) / (1.333 * (a * a + b * b));
+    if (springs && Math.abs(p) < 0.5) acc *= springs; // suspension pushes a lifted end back down
+    w = (w + acc * dt) * Math.exp(-0.8 * dt);
+    const np = wrapA(p + w * dt);
+    if (Math.sin(np) * s < 0 || Math.cos(np) * c < 0) { slap = Math.abs(w); w *= 0.6; } // a face slapped flat on the ground
+    p = np;
+  } else { w *= Math.exp(-0.4 * dt); p = wrapA(p + w * dt); }
+  v[k] = p; v[k + 'V'] = w;
+  return slap;
+}
+// how far the body must rise so a tipped car rests on its lowest corner (body pivots at ground centre)
+const lift1 = (p, a, h) => Math.max(0, a * Math.abs(Math.sin(p)) - Math.min(0, h * Math.cos(p)));
+export const tipLift = (T, fr, fp) => (fr || fp ? Math.max(lift1(fr, T.wid / 2, T.hgt), lift1(fp, T.len / 2, T.hgt)) : 0);
+// A hit tips the car: side hits roll it the way it's shoved (top-heavy, light cars most), frontal ones lift the rear.
+// share = how much of the closing speed this car takes (1 for a wall).
+function kick(v, nx, nz, imp, share) {
+  const T = v.T; if (T.bike || T.boat || T.heli || imp < 5 || v.mode === 'cop') return; // police.js poses cop cars itself (no tipping)
+  const right = -nx * Math.cos(v.h) + nz * Math.sin(v.h), fwd = nx * Math.sin(v.h) + nz * Math.cos(v.h);
+  v.frV = (v.frV || 0) + right * imp * share * 0.11 * (T.hgt / T.wid) * Math.pow(1.2 / T.mass, 0.3);
+  v.fpV = (v.fpV || 0) - fwd * imp * share * 0.012;
+  v.srV = (v.srV || 0) + right * imp * 0.03; v.spV = (v.spV || 0) - fwd * imp * 0.02;
+}
+
 // Arcade car physics. inp: {throttle, brake, steer, handbrake, nitro}. Returns impact speed against walls.
+// World velocity is kept while the nose turns, so the tyres have to bend it round: grip is a sideways force
+// limit, and past it the car slides (handbrake, power on in a muscle car, ice).
 export function stepVehicle(v, inp, dt) {
   v.steerIn = inp.steer || 0;
   const T = v.T;
@@ -521,35 +623,63 @@ export function stepVehicle(v, inp, dt) {
   const boosting = inp.nitro && v.nitro > 0 && inp.throttle > 0 && !T.bike;
   v.boosting = boosting;
   v.nitro = boosting ? Math.max(0, v.nitro - dt / (3.5 * (T.nitroMul || 1))) : Math.min(1, v.nitro + dt / 14);
+  const tn = tuneOf(v), F = feel(T);
   const fx = Math.sin(v.h), fz = Math.cos(v.h), rx = -Math.cos(v.h), rz = Math.sin(v.h);
   let vf = v.vx * fx + v.vz * fz, vr = v.vx * rx + v.vz * rz;
+  const vf0 = vf;
   const alive = v.hp > 0 && v.sinkT === 0;
-  const grounded = !(v.air > 0);
-  if (alive && grounded && inp.throttle > 0) vf += T.acc * inp.throttle * dt * (vf < 0 ? 2.5 : 1) * (boosting ? 1.6 : 1);
-  if (v.flat) { vf = Math.min(vf, T.max * 0.45); vr *= 1 + dt * 0.8; }
-  if (alive && grounded && inp.brake > 0) { if (vf > 0.5) vf -= T.acc * 2.4 * (T.brakeMul || 1) * dt; else vf = Math.max(-T.max * 0.35, vf - T.acc * 0.7 * dt); }
-  if (grounded) {
-    vf -= vf * ((inp.throttle || inp.brake) && alive ? 0.12 : 0.7) * dt;
-    if (inp.handbrake) vf -= vf * 1.4 * dt;
-    vr *= Math.exp(-(inp.handbrake ? 1.6 : T.grip * sky.grip) * dt);
+  const upset = !T.bike && (Math.abs(v.fr || 0) > 0.55 || Math.abs(v.fp || 0) > 0.6); // on its side or roof: no traction
+  const grounded = !(v.air > 0) && !upset;
+  const thr = alive ? inp.throttle || 0 : 0, brk = alive ? inp.brake || 0 : 0;
+  // burnout: throttle and brake together at a standstill spin the rear wheels on the spot
+  v.burnout = grounded && thr > 0 && brk > 0 && Math.abs(vf) < 3;
+  v.spool = tn.turbo ? clamp((v.spool || 0) + (thr && grounded ? dt * 1.4 : -dt * 3), 0, 1) : 0;
+  if (v.burnout) vf *= Math.exp(-6 * dt);
+  else if (grounded) {
+    if (thr > 0) vf += T.acc * tn.acc * (1 + 0.15 * v.spool) * thr * dt * (vf < 0 ? 2.5 : 1) * (boosting ? 1.6 : 1);
+    if (brk > 0) { if (vf > 0.5) vf -= T.acc * 2.4 * (T.brakeMul || 1) * tn.brake * dt; else if (!thr) vf = Math.max(-T.max * 0.35, vf - T.acc * 0.7 * dt); }
   }
+  if (v.flat) { vf = Math.min(vf, T.max * 0.45); vr *= 1 + dt * 0.8; }
   // grass, dirt and sand: extra drag and a much lower top speed than pavement
   const cls = grounded ? W.classAt(v.x, v.z) : -1;
   v.rough = cls === W.C.lawn || cls === W.C.park || cls === W.C.wood || cls === W.C.cemetery || cls === W.C.sand || cls === W.C.pitch;
-  if (v.rough) vf -= vf * 0.9 * dt;
-  const cap = T.max * (boosting ? 1.25 : 1) * (v.rough ? 0.5 : 1);
+  const slipA = Math.atan2(vr, Math.abs(vf) + 0.5); // + = sliding to the car's right
+  if (grounded) {
+    vf -= vf * ((thr || brk) ? 0.12 : 0.7) * dt;
+    if (inp.handbrake) vf -= vf * 1.4 * dt;
+    if (v.rough) vf -= vf * 0.9 * dt;
+    // sideways tyre force (m/s²); it fades a little once the tyres are past the limit, so grip lets go gradually
+    let cap = T.grip * sky.grip * tn.grip * F.grip * 5.5 * (1 - 0.3 * smooth(0.1, 0.45, Math.abs(slipA)));
+    if (inp.handbrake) cap *= 0.15; // rear wheels locked
+    else if (thr && Math.abs(slipA) > 0.12) cap *= F.loose; // power keeps a slide going
+    if (v.rough) cap *= 0.8;
+    const cut = Math.min(Math.abs(vr), cap * dt);
+    vr -= Math.sign(vr) * cut;
+    vf -= Math.sign(vf) * cut * 0.12; // scrubbing sideways costs speed
+  } else if (upset && !(v.air > 0)) { vf *= Math.exp(-1.6 * dt); vr *= Math.exp(-1.6 * dt); } // grinding along on a side or the roof
+  const cap = T.max * tn.max * (boosting ? 1.25 : 1) * (v.rough ? 0.5 : 1);
   if (vf > cap) vf = cap + (vf - cap) * Math.exp(-6 * dt);
-  const yaw = alive ? (inp.steer || 0) * T.turn * clamp(vf / 5, -1, 1) * (1 - 0.35 * Math.min(1, Math.abs(vf) / T.max)) * (inp.handbrake ? 1.35 : 1) : 0;
-  // spin: tires pull the turn rate toward what the steering asks for; a crash can overpower that
-  const gripK = grounded ? (inp.handbrake ? 2.5 : T.grip * 1.4 * sky.grip) : 0.2;
-  v.w = (v.w || 0) + (yaw - (v.w || 0)) * Math.min(1, gripK * dt);
+  const sp = Math.abs(vf);
+  let yaw = 0;
+  if (alive && v.burnout) yaw = (inp.steer || 0) * 1.6; // pivot on the front wheels
+  else if (alive && grounded) {
+    // steering gets calmer with speed; countersteer assist pulls the nose back toward where the car is going
+    yaw = (inp.steer || 0) * T.turn * clamp(vf / 5, -1, 1) * (1 - 0.45 * Math.min(1, sp / T.max)) * (inp.handbrake ? 1.6 : 1);
+    if (vf > 3) yaw -= slipA * (inp.handbrake ? 0.3 : 1.8);
+  }
+  // spin: tires pull the turn rate toward what the steering asks for (heavy vehicles answer slower); a crash can overpower that
+  if (grounded || v.burnout) {
+    const gripK = (inp.handbrake ? 2.5 : T.grip * 1.4 * sky.grip) * Math.sqrt(clamp(1.3 / T.mass, 0.35, 1.2));
+    v.w = (v.w || 0) + (yaw - (v.w || 0)) * Math.min(1, gripK * dt);
+  } else v.w = (v.w || 0) * Math.exp(-(upset ? 2 : 0.6) * dt); // airborne: the spin just dies down
   v.h += v.w * dt;
-  const nfx = Math.sin(v.h), nfz = Math.cos(v.h), nrx = -Math.cos(v.h), nrz = Math.sin(v.h);
-  v.vx = nfx * vf + nrx * vr; v.vz = nfz * vf + nrz * vr;
+  v.vx = fx * vf + rx * vr; v.vz = fz * vf + rz * vr;
+  const nfx = Math.sin(v.h), nfz = Math.cos(v.h);
   const ox = v.x, oz = v.z;
   v.x += v.vx * dt; v.z += v.vz * dt;
   v.speed = vf;
-  v.slip = Math.abs(vr) + Math.abs(v.w - yaw) * 2;
+  v.slip = v.burnout ? 12 : Math.abs(vr) + Math.abs(v.w - yaw) * 2;
+  v.upset = upset;
   v.tilt = T.bike ? clamp(-yaw * Math.abs(vf) * 0.03, -0.5, 0.5) : 0;
   let impact = 0;
   v.hit = null;
@@ -571,19 +701,70 @@ export function stepVehicle(v, inp, dt) {
     const floor = W.isLand(v.x, v.z) ? gh : -5;
     // stick to the road over small dips (hills); real drops still send you flying
     if (v.y > floor + (v.air > 0 ? 0.05 : 0.35) || (v.vy || 0) > 1.5) {
+      // take-off: the ramp's slope becomes the car's own tilt, and how fast it was tipping keeps it turning
+      if (!(v.air > 0) && !T.bike && v.mode !== 'cop') { v.fr = (v.fr || 0) + (v.gr || 0); v.fp = (v.fp || 0) + (v.gp || 0); v.frV = (v.frV || 0) + (v.grRate || 0) * 0.8; v.gr = v.gp = 0; }
       v.air = (v.air || 0) + dt;
       v.vy = (v.vy || 0) - 22 * dt;
       v.y += v.vy * dt;
       if (v.y <= floor) { v.landed = -v.vy; v.y = floor; v.vy = 0; }
     } else {
-      v.vy = dt > 0 ? (floor - v.y) / dt : 0;
+      const step = floor - v.y;
+      v.vy = dt > 0 ? step / dt : 0;
+      if (step < 0.2 && !(v.lastStep > 0.06)) v.vy = Math.min(v.vy, 1.2); // a lone curb is a jolt, not a launch (ramps keep rising)
+      v.lastStep = step;
       if (v.vy < 0) v.vy = 0;
       v.y = floor;
       v.lastAir = v.air || 0; v.air = 0;
     }
   }
   if (!(v.air > 0)) alignToGround(v, dt);
+  if (!T.bike) impact = Math.max(impact, bodyMotion(v, inp, dt, tn, F, (vf - vf0) / Math.max(dt, 1e-3), vr, alive));
   return impact;
+}
+
+// Weight transfer and suspension (springs v.sr roll, v.sp pitch, v.sy heave) plus tipping over (v.fr, v.fp).
+// Returns the speed of a side / roof slamming into the ground, with v.hit set for the crash effects.
+function bodyMotion(v, inp, dt, tn, F, aLon, vr, alive) {
+  const T = v.T, onGround = !(v.air > 0), drive = onGround && !v.upset, sp = Math.abs(v.speed);
+  const k = F.roll * (T.hgt / 1.45) / tn.stiff;
+  const tr = drive ? clamp(v.w * v.speed * 0.0028 * k, -0.13, 0.13) : 0; // lean out of the turn
+  const tp = drive ? (v.burnout ? -0.03 : clamp(-aLon * 0.0022 * k, -0.09, 0.09)) : 0; // nose dives braking, squats accelerating
+  // bumps: curbs and dips jolt the body, rough ground shakes it, landings squash it
+  const gh = v.y, dg = gh - (v.lastGh ?? gh); v.lastGh = gh;
+  if (drive && Math.abs(dg) > 0.03 && Math.abs(dg) < 0.7) { v.syV = (v.syV || 0) + dg * 9; v.spV = (v.spV || 0) - dg * 5; }
+  if (drive && v.rough && Math.random() < dt * 7) { const s = Math.min(1, sp / 20); v.srV = (v.srV || 0) + (Math.random() - 0.5) * s; v.spV = (v.spV || 0) + (Math.random() - 0.5) * 0.8 * s; v.syV = (v.syV || 0) + (Math.random() - 0.5) * 0.7 * s; }
+  if (v.landed > 2) { v.syV = (v.syV || 0) - Math.min(3, v.landed * 0.12); v.spV = (v.spV || 0) + (Math.random() - 0.5) * v.landed * 0.02; }
+  const K = 110 * tn.stiff, D = 9 * Math.sqrt(tn.stiff);
+  v.srV = v.srV || 0; v.spV = v.spV || 0; v.syV = v.syV || 0;
+  v.srV += ((tr - (v.sr || 0)) * K - v.srV * D) * dt; v.sr = clamp((v.sr || 0) + v.srV * dt, -0.2, 0.2);
+  v.spV += ((tp - (v.sp || 0)) * K - v.spV * D) * dt; v.sp = clamp((v.sp || 0) + v.spV * dt, -0.15, 0.15);
+  v.syV += (-(v.sy || 0) * K - v.syV * D) * dt; v.sy = clamp((v.sy || 0) + v.syV * dt, -0.15, 0.15);
+  if (v.mode === 'cop') return 0;
+  // tipping: a car sliding sideways that has started to go over trips and keeps rolling; tripping on a curb or dirt starts it
+  if (drive && Math.abs(vr) > 11) v.frV = (v.frV || 0) + vr * (dg > 0.05 ? 0.1 : v.rough ? 0.25 * dt : 0);
+  if (v.upset && onGround) v.frV = (v.frV || 0) + Math.sign(vr) * Math.min(Math.abs(vr), 25) * 0.5 * dt;
+  const steer = inp.steer || 0;
+  if (!onGround) { // air: the nose gently follows the arc; A / D roll, W / S tip the nose a little
+    const arc = -Math.atan2(v.vy || 0, Math.max(4, sp)) * 0.8;
+    v.frV = (v.frV || 0) - steer * 2.5 * dt;
+    v.fpV = (v.fpV || 0) + ((arc - (v.fp || 0)) * 3 - (v.fpV || 0) * 2 + ((inp.throttle || 0) - (inp.brake || 0)) * 0.8) * dt;
+  }
+  else if (v.upset && sp < 4) v.frV = (v.frV || 0) - steer * 7 * dt; // rock it back over with A / D
+  const b = T.hgt * 0.42;
+  const sr = tip(v, 'fr', T.wid / 2, b, dt, onGround, 0), spp = tip(v, 'fp', T.len / 2, b, dt, onGround, 2.5);
+  // a side or the roof hitting the ground (landing back on the wheels doesn't count)
+  const ar = Math.abs(v.fr), ap = Math.abs(v.fp);
+  if (sr > 2.2 && ar > 0.8 && !v.hit) {
+    const s = ar > 2.4 ? 0 : Math.sign(v.fr), rx = -Math.cos(v.h), rz = Math.sin(v.h);
+    v.hit = { imp: sr * 3, cp: [v.x + rx * s * T.wid / 2, v.z + rz * s * T.wid / 2], nx: 0, nz: 0, ly: s ? T.hgt * 0.55 : T.hgt, roof: !s };
+    return sr * 3;
+  }
+  if (spp > 2.2 && ap > 0.8 && !v.hit) {
+    const s = ap > 2.4 ? 0 : Math.sign(v.fp), fx = Math.sin(v.h), fz = Math.cos(v.h);
+    v.hit = { imp: spp * 3, cp: [v.x + fx * s * T.len / 2, v.z + fz * s * T.len / 2], nx: 0, nz: 0, ly: s ? T.hgt * 0.4 : T.hgt, roof: !s };
+    return spp * 3;
+  }
+  return 0;
 }
 
 // ---------- far-away cars: one instanced silhouette each (two draw calls for all of them) ----------
@@ -620,9 +801,10 @@ export function alignToGround(v, dt) {
   const hf = W.groundHeight(v.x + nfx * hl, v.z + nfz * hl), hb = W.groundHeight(v.x - nfx * hl, v.z - nfz * hl);
   const lx = Math.cos(v.h), lz = -Math.sin(v.h);
   const hL = W.groundHeight(v.x + lx * hwd, v.z + lz * hwd), hR = W.groundHeight(v.x - lx * hwd, v.z - lz * hwd);
-  const k = Math.min(1, dt * 10);
+  const k = Math.min(1, dt * 10), gr0 = v.gr || 0;
   v.gp = (v.gp || 0) + (clamp(Math.atan2(hb - hf, hl * 2), -0.5, 0.5) - (v.gp || 0)) * k;
-  v.gr = (v.gr || 0) + (clamp(Math.atan2(hL - hR, hwd * 2), -0.4, 0.4) - (v.gr || 0)) * k;
+  v.gr = gr0 + (clamp(Math.atan2(hL - hR, hwd * 2), -0.4, 0.4) - gr0) * k;
+  v.grRate = dt > 0 ? (v.gr - gr0) / dt : 0; // a ramp under one side launches the car rolling
 }
 
 // Crash a locally simulated vehicle v into another vehicle o.
@@ -634,8 +816,13 @@ export function collideVehicles(v, o, pushable) {
   const c = sat(A, B);
   if (!c) return 0;
   const cp = contactPoint(A, B);
+  v.touch = { t: performance.now(), cp, nx: c.nx, nz: c.nz };
   const r = resolve(v, o, c, cp, !pushable);
   if (!r) return 0;
+  // the lighter car takes more of the shove; traffic cars get knocked loose (simulated here), so they can roll too
+  const mo = (o.T && o.T.mass) || 50, ms = v.T.mass + mo;
+  kick(v, c.nx, c.nz, r.imp, 2 * mo / ms);
+  if ((pushable || o.mode === 'traffic') && o.T) kick(o, -c.nx, -c.nz, r.imp, 2 * v.T.mass / ms);
   v.hit = { imp: r.imp, cp, nx: c.nx, nz: c.nz, other: o };
   o.hit = { imp: r.imp, cp, nx: -c.nx, nz: -c.nz, other: v };
   if (!pushable) o.pending = { jx: -r.Jx / o.T.mass, jz: -r.Jz / o.T.mass, jw: -r.JwB / inertia(o.T) };

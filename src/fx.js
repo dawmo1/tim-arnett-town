@@ -80,6 +80,17 @@ export function debris(m, vx, vy, vz) {
   debrisList.push({ m, vx, vy, vz, wx: (Math.random() - 0.5) * 8, wz: (Math.random() - 0.5) * 8, life: 40, rest: false });
   if (debrisList.length > 40) { const d = debrisList.shift(); scene.remove(d.m); }
 }
+// a part going back on its car (repair): stop treating it as debris
+export function undebris(m) { const i = debrisList.findIndex((d) => d.m === m); if (i >= 0) debrisList.splice(i, 1); }
+// Sparks thrown off metal grinding along a wall or the road: streaks lined up with how they fly, trailing the car.
+export function scrapeSparks(x, y, z, vx, vz, n = 3) {
+  for (let i = 0; i < n && parts.length < 300; i++) {
+    const m = new THREE.Mesh(box, sparkMat); m.scale.set(0.03, 0.03, 0.3 + Math.random() * 0.3);
+    const k = 0.3 + Math.random() * 0.5, svx = vx * k + (Math.random() - 0.5) * 2, svz = vz * k + (Math.random() - 0.5) * 2;
+    m.position.set(x, y, z); m.rotation.y = Math.atan2(svx, svz); scene.add(m);
+    parts.push({ m, vx: svx, vy: 0.5 + Math.random() * 2.5, vz: svz, life: 0.2 + Math.random() * 0.25, kind: 'spark' });
+  }
+}
 // ---------- gunfight detail: bullet holes, wall blood, impact dust, shell casings ----------
 function splatTex(kind) {
   const n = 64, c = document.createElement('canvas'); c.width = c.height = n;
@@ -320,12 +331,59 @@ function tone(type, freq, dur, vol, t0 = 0) {
 }
 export function soundHorn(dist = 0) { const v = 0.18 * fall(dist * 1.5); tone('square', 392, 0.35, v); tone('square', 494, 0.35, v * 0.8); }
 let lastCrunch = 0, lastScrape = 0, lastSqueal = 0;
+// filtered noise hit starting t0 seconds from now
+function band(t0, dur, freq, q, vol, type = 'bandpass') {
+  if (!ac || vol <= 0.005) return;
+  const t = ac.currentTime + t0, src = ac.createBufferSource(); src.buffer = noise;
+  const f = ac.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q;
+  const g = ac.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  src.connect(f); f.connect(g); g.connect(out()); src.start(t, Math.random()); src.stop(t + dur + 0.02);
+}
+// A crash, layered by how hard it was (power ~ impact speed / 18): a low thud, ragged metal crunches,
+// then glass shattering and bits of debris tinkling down on the big ones.
 export function soundCrunch(power = 1, dist = 0) {
+  if (!ac) return;
   const now = performance.now();
   if (now - lastCrunch < 120) return;
   lastCrunch = now;
-  const v = Math.min(1, power) * fall(dist);
-  burst(0.5, 700, 0.9 * v); burst(0.18, 2600, 0.5 * v); tone('square', 90 + Math.random() * 60, 0.25, 0.12 * v);
+  const p = Math.min(1.5, power), v = Math.min(1, p) * fall(dist);
+  if (v <= 0.01) return;
+  const t = ac.currentTime, o = ac.createOscillator(), og = ac.createGain();
+  o.type = 'sine'; o.frequency.setValueAtTime(100 + Math.random() * 30, t); o.frequency.exponentialRampToValueAtTime(36, t + 0.25);
+  og.gain.setValueAtTime(0.9 * v, t); og.gain.exponentialRampToValueAtTime(0.001, t + 0.32); o.connect(og); og.connect(out()); o.start(t); o.stop(t + 0.34);
+  burst(0.35 + 0.3 * p, 600, 0.55 * v);
+  const n = 2 + Math.round(p * 3);
+  for (let i = 0; i < n; i++) band(i * 0.03 + Math.random() * 0.02, 0.1 + Math.random() * 0.15 * p, 500 + Math.random() * 1800, 1.4, 0.6 * v * (1 - i / (n + 1)));
+  if (p > 0.8) { // glass
+    band(0.02, 0.4, 4500, 0.7, 0.3 * v, 'highpass');
+    for (let i = 0; i < 9; i++) tone('triangle', 2600 + Math.random() * 4200, 0.04 + Math.random() * 0.06, 0.05 * v, 0.03 + Math.random() * 0.3);
+  }
+  if (p > 0.4) for (let i = 0; i < 3 + p * 6; i++) tone('triangle', 1600 + Math.random() * 2600, 0.04, 0.03 * v, 0.3 + Math.random() * 0.9); // debris
+}
+// Loops for the car you're in: tyre screech (by slip), metal scraping (by slide speed), turbo whistle.
+let loops = null;
+function loopsOn() {
+  if (loops) return loops;
+  const mk = (type, f, q) => { const s = ac.createBufferSource(); s.buffer = noise; s.loop = true; const b = ac.createBiquadFilter(); b.type = type; b.frequency.value = f; b.Q.value = q; const g = ac.createGain(); g.gain.value = 0; s.connect(b); b.connect(g); g.connect(out()); s.start(); return { b, g }; };
+  const osc = (type, f) => { const o = ac.createOscillator(), g = ac.createGain(); o.type = type; o.frequency.value = f; g.gain.value = 0; o.connect(g); g.connect(out()); o.start(); return { o, g }; };
+  return (loops = { screech: mk('bandpass', 1300, 9), squeal: osc('triangle', 1150), scrape: mk('bandpass', 2600, 1.1), grind: mk('lowpass', 260, 1), turbo: osc('sine', 1500), spool: 0, thr: false });
+}
+export function setScreech(a) {
+  if (!ac) return; const L = loopsOn(), t = ac.currentTime;
+  L.screech.g.gain.setTargetAtTime(0.09 * a, t, 0.05); L.screech.b.frequency.setTargetAtTime(1100 + 400 * a, t, 0.05);
+  L.squeal.g.gain.setTargetAtTime(0.025 * a, t, 0.05); L.squeal.o.frequency.setTargetAtTime(1050 + 250 * a + Math.random() * 60, t, 0.03);
+}
+export function setScrape(a) {
+  if (!ac) return; const L = loopsOn(), t = ac.currentTime, crackle = 0.6 + Math.random() * 0.8;
+  L.scrape.g.gain.setTargetAtTime(0.16 * a * crackle, t, 0.02); L.grind.g.gain.setTargetAtTime(0.22 * a, t, 0.05);
+  L.scrape.b.frequency.setTargetAtTime(1800 + 1600 * a, t, 0.05);
+}
+// turbo: whistle rises with boost; lifting off with boost up gives a blow-off "pssh"
+export function setTurbo(spool, throttle) {
+  if (!ac) return; const L = loopsOn(), t = ac.currentTime;
+  if (L.thr && !throttle && L.spool > 0.6) band(0, 0.35, 3800, 0.8, 0.14 * L.spool);
+  L.spool = spool; L.thr = throttle;
+  L.turbo.o.frequency.setTargetAtTime(1500 + 4500 * spool, t, 0.08); L.turbo.g.gain.setTargetAtTime(0.022 * spool * (throttle ? 1 : 0.3), t, 0.08);
 }
 export function soundScrape(dist = 0) {
   const now = performance.now();
@@ -443,7 +501,7 @@ const ENGINE = {
 let eng = null;
 export function setEngine(kind, rpm, load) {
   if (!ac) return;
-  if (!kind) { if (eng) eng.g.gain.setTargetAtTime(0, ac.currentTime, 0.15); return; }
+  if (!kind) { if (eng) eng.g.gain.setTargetAtTime(0, ac.currentTime, 0.15); if (loops) { setScreech(0); setScrape(0); setTurbo(0, false); } return; }
   const P = ENGINE[kind] || ENGINE.car;
   if (!eng || eng.kind !== kind) {
     if (eng) { eng.g.gain.setTargetAtTime(0, ac.currentTime, 0.05); const old = eng; setTimeout(() => { try { old.o1.stop(); old.o2.stop(); old.lfo.stop(); } catch { /* already stopped */ } }, 400); }

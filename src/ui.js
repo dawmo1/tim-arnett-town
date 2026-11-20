@@ -341,6 +341,7 @@ const ICON = {
   monument: (g) => { g.beginPath(); g.moveTo(-1.8, 3.5); g.lineTo(-1.2, -4); g.lineTo(0, -6); g.lineTo(1.2, -4); g.lineTo(1.8, 3.5); g.fill(); g.fillRect(-4.5, 3.5, 9, 2.2); },
   diamond: (g) => { g.beginPath(); g.moveTo(0, -6); g.lineTo(5, 0); g.lineTo(0, 6); g.lineTo(-5, 0); g.fill(); },
   arrow: (g) => { g.beginPath(); g.moveTo(0, -7); g.lineTo(5.5, 6); g.lineTo(0, 3); g.lineTo(-5.5, 6); g.fill(); },
+  car: (g) => { g.beginPath(); g.moveTo(-6.5, 2.5); g.lineTo(-6.5, -0.5); g.lineTo(-4, -1.2); g.lineTo(-2.5, -4.5); g.lineTo(2.5, -4.5); g.lineTo(4, -1.2); g.lineTo(6.5, -0.5); g.lineTo(6.5, 2.5); g.fill(); g.beginPath(); g.arc(-3.8, 3, 1.9, 0, 7); g.fill(); g.beginPath(); g.arc(3.8, 3, 1.9, 0, 7); g.fill(); },
 };
 // legend order; important = also on the minimap from anywhere (the rest only within ~150 m) and labelled first
 export const BLIP_TYPES = {
@@ -350,6 +351,7 @@ export const BLIP_TYPES = {
   guns: { name: 'Gun store', color: '#d23c30', icon: ICON.gun, important: true },
   clothes: { name: 'Clothing', color: '#b45ad6', icon: ICON.shirt, important: true },
   garage: { name: 'Mechanic / garage', color: '#3f8fe0', icon: ICON.wrench, important: true },
+  car: { name: 'Personal vehicle', color: '#2f80ed', icon: ICON.car, important: true },
   casino: { name: 'Casino', color: '#d4a017', icon: ICON.diamond, important: true },
   hospital: { name: 'Hospital', color: '#fff', ink: '#d23c30', icon: ICON.cross, important: true },
   police: { name: 'Police', color: '#2f6fdc', icon: ICON.star, important: true },
