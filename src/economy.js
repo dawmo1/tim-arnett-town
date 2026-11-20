@@ -6,7 +6,7 @@ import { lots, lotHits, lotNear, pointOnEdge, TILE } from './city/data.js';
 
 export const eco = { cash: 200, robbed: 0, jacked: 0, copCars: 0, done: new Set() };
 let scene, hooks = { announce() {}, sound() {}, feed() {} };
-export function initEconomy(s, h) { scene = s; hooks = { ...hooks, ...h }; markStores(); }
+export function initEconomy(s, h) { scene = s; hooks = { ...hooks, ...h }; markStores(stores); }
 
 export function addCash(n, why) {
   eco.cash = Math.max(0, Math.round(eco.cash + n));
@@ -42,8 +42,9 @@ export function checkCountGoals() { for (const g of GOALS) if (g.max && g.get() 
 export const stores = [];
 // kinds that are a real building you walk into (built by interiors.js): [width, depth] in m
 export const WALK_IN = { rob: [14, 11], guns: [16, 11], clothes: [18, 13], bar: [16, 12] };
-// Made-up names on real Davenport gas stations and corner stores.
-const ROB_NAMES = ['Tim-Mart', 'Arnett Gas', 'Big River Liquor', 'Hilltop Pantry', 'QuikTim', 'River Bend Fuel', 'Corner Tim', 'Bluff Mart', 'Lucky Arnett', 'Mississippi Mini Mart', 'Quad Stop', 'Eagle Point Liquor', 'Kimberly Quick Stop', 'Brady Street Market', 'Village Pantry', 'Northside Gas'];
+// Made-up names on real gas stations and corner stores across the Quad Cities.
+const ROB_NAMES = ['Tim-Mart', 'Arnett Gas', 'Big River Liquor', 'Hilltop Pantry', 'QuikTim', 'River Bend Fuel', 'Corner Tim', 'Bluff Mart', 'Lucky Arnett', 'Mississippi Mini Mart', 'Quad Stop', 'Eagle Point Liquor', 'Kimberly Quick Stop', 'Brady Street Market', 'Village Pantry', 'Northside Gas',
+  'Rock River Fuel', 'Deere Country Mart', 'Avenue of the Cities Stop', 'Blackhawk Gas & Go', 'Hy-Tim', 'Lock 15 Liquors', 'Silvis Switchyard Mart', 'Geneseo Gas & Grub', 'Bettendorf Bargain Fuel', 'Barge Stop', 'Corn Belt Convenience', 'Milan Mini Mart'];
 // Parody names on Davenport's real bars and pubs (OSM bar / pub points).
 const BAR_NAMES = ["Tim's Tap", 'The Rusty Barge', 'Quad City Swill', 'The Leaky Levee', 'Lock & Dam Lounge', 'The Muddy Paddle', "Arnett's Last Call", 'The Drunken Bix',
   'Skybridge Spirits', 'Bettendorf Bad Decisions', 'The Floodwall', 'Hangover Hill', 'River Rat Saloon', 'The Tipsy Towboat', 'Brady Street Brawlhouse', 'Cornbelt Cocktails',
@@ -114,34 +115,50 @@ async function place(store, px, pz, tileB, far = false) {
     if (await fits(s, tileB)) { stores.push(s); return; }
   }
 }
-async function planStores(tileB) {
-  const poi = W.D.index.poi;
+// stable pick from a list by position (so a store keeps its name whatever order the map loads in)
+const hashPick = (list, x, z) => list[Math.abs(Math.floor(Math.sin(x * 12.9898 + z * 78.233) * 43758.5453)) % list.length];
+// Davenport's hand-placed stores; every other town gets an Arnett Arms and a Tim's Threads near its middle (planned with that chunk)
+const FIXED = [[60, -330, 'Arnett Arms', 'guns'], [300, -3990, 'Arnett Arms', 'guns'], [-30, -1450, 'Arnett Auto', 'body'], [230, 40, "Tim's Threads", 'clothes'], [420, -4200, "Tim's Threads", 'clothes']];
+const ROB_KINDS = ['fuel', 'convenience', 'alcohol'];
+// Plans the stores whose real spot lies in `area` (one 2 km road chunk; city/data.js calls this lazily as you travel).
+// Density matches Davenport's: up to 2 robbable gas/corner stores per chunk (220 m apart), every real bar, the hospital pharmacies.
+async function planStores(tileB, area) {
+  const inA = (p) => p.x >= area.x0 && p.x < area.x1 && p.z >= area.z0 && p.z < area.z1;
+  const poi = W.D.index.poi.filter(inA);
   const spaced = (list, minD) => { const out = []; for (const p of list) if (!out.some((o) => Math.hypot(o.x - p.x, o.z - p.z) < minD)) out.push(p); return out; };
-  const rob = spaced(poi.filter((p) => ['fuel', 'convenience', 'alcohol'].includes(p.kind)), 220);
+  const rob = spaced(poi.filter((p) => ROB_KINDS.includes(p.kind)).sort((a, b) => a.x - b.x || a.z - b.z), 220).slice(0, 2);
   const bars = poi.filter((p) => p.kind === 'bar' || p.kind === 'pub');
-  // Arnett Arms downtown and by NorthPark; Tim's Threads downtown + NorthPark, Arnett Auto on Brady St
-  const fixed = [[60, -330, 'Arnett Arms', 'guns'], [300, -3990, 'Arnett Arms', 'guns'], [-30, -1450, 'Arnett Auto', 'body'], [230, 40, "Tim's Threads", 'clothes'], [420, -4200, "Tim's Threads", 'clothes']];
-  // two more Arnett Arms at real shop spots on the far east and west sides (so every part of town has one)
-  const spare = rob.slice(15), ends = spare.length ? [spare.reduce((a, b) => (b.x > a.x ? b : a)), spare.reduce((a, b) => (b.x < a.x ? b : a))] : [];
+  const fixed = FIXED.filter(([x, z]) => inA({ x, z }));
+  for (const t of W.D.index.towns) {
+    if (t.name === 'Davenport' || !inA(t) || !(t.pop >= 1500 || t.place === 'city' || t.place === 'town')) continue;
+    // at the real shop nearest the town's middle
+    const shops = W.D.index.poi.filter((p) => p.name && Math.hypot(p.x - t.x, p.z - t.z) < Math.max(600, t.r * 0.6) && (p.kind === 'clothes' || p.kind === 'department_store' || p.kind === 'mall' || p.kind === 'hardware' || p.kind === 'supermarket' || p.kind === 'convenience'));
+    const near = (k) => shops.filter((p) => !k || p.kind === k).sort((a, b) => Math.hypot(a.x - t.x, a.z - t.z) - Math.hypot(b.x - t.x, b.z - t.z))[0];
+    const g = near('hardware') || near() || t, c = near('clothes') || near('department_store') || shops.find((p) => p !== g) || { x: t.x + 120, z: t.z };
+    fixed.push([g.x, g.z, 'Arnett Arms', 'guns'], [c.x, c.z, "Tim's Threads", 'clothes']);
+  }
   // fetch the tiles round every spot at once (the checks below then wait on them one by one)
   await Promise.all([...rob, ...bars, ...fixed.map(([x, z]) => ({ x, z }))].flatMap((p) => lotTiles({ x: p.x, z: p.z, hw: 0, hd: 0 })).map(([tx, tz]) => tileB(tx, tz)));
-  for (const [i, p] of rob.slice(0, 15).entries()) await place({ name: ROB_NAMES[i % ROB_NAMES.length], kind: 'rob' }, p.x, p.z, tileB);
+  const before = stores.length;
+  for (const p of rob) await place({ name: hashPick(ROB_NAMES, p.x, p.z), kind: 'rob' }, p.x, p.z, tileB);
   for (const [x, z, name, kind] of fixed) {
     if (WALK_IN[kind]) await place({ name, kind }, x, z, tileB, true);
     else { const f = frontOf(x, z); if (f) stores.push({ name, kind, ...f, cooldown: 0, progress: 0 }); }
   }
-  for (const p of ends) await place({ name: 'Arnett Arms', kind: 'guns' }, p.x, p.z, tileB, true);
-  for (const h of W.D.index.hospitals) { const f = frontOf(h.x, h.z); if (f) stores.push({ name: 'Hospital pharmacy', kind: 'meds', ...f }); }
+  for (const h of W.D.index.hospitals) if (inA(h)) { const f = frontOf(h.x, h.z); if (f) stores.push({ name: 'Hospital pharmacy', kind: 'meds', ...f }); }
   // downtown bars sit door to door: a bar slides along the street past the stores and bars already placed
-  for (const [i, p] of bars.entries()) await place({ name: BAR_NAMES[i % BAR_NAMES.length], kind: 'bar' }, p.x, p.z, tileB);
+  for (const p of bars) await place({ name: hashPick(BAR_NAMES, p.x, p.z), kind: 'bar' }, p.x, p.z, tileB);
+  const added = stores.slice(before);
+  if (scene) markStores(added);
+  return added;
 }
-// city/data.js loadData awaits this before any tile is built, and drops any OSM building on these lots
-lots.plan = async (tileB) => { await planStores(tileB); return stores.filter((s) => s.w).map(lotOf); };
-function markStores() {
+// city/data.js awaits this for each chunk before building tiles near it, and drops any OSM building on these lots
+lots.plan = async (tileB, area) => (await planStores(tileB, area)).filter((s) => s.w).map(lotOf);
+function markStores(list) {
   // a soft glowing ring on the sidewalk for the walk-up counters (pharmacy, body shop); walk-in stores are buildings (interiors.js)
   const ringGeo = new THREE.RingGeometry(0.7, 0.9, 28).rotateX(-Math.PI / 2);
   const COL = { body: 0x4aa3ff, meds: 0xffffff };
-  for (const s of stores) if (!s.w) {
+  for (const s of list) if (!s.w && !s.ring) {
     const m = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: COL[s.kind], transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false }));
     m.position.set(s.x, W.groundHeight(s.x, s.z) + 0.12, s.z); scene.add(m); s.ring = m;
   }

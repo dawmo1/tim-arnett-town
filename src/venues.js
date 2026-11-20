@@ -44,7 +44,7 @@ export function useVenue(me) {
   if (!best) return false;
   if (best.act !== 'drinks') play(best.act);
   else if (R.kind === 'bar' && (R.store.alarmed || R.store.cooldown > 0)) ui.flashPrompt("The bartender won't serve you");
-  else hooks.openShop(R.kind === 'casino' ? 'Belle Bar' : R.store.name, drinkMenu(R));
+  else hooks.openShop(R.kind === 'casino' ? (R.hall ? 'Lone Wolf Bar' : 'Belle Bar') : R.store.name, drinkMenu(R));
   return true;
 }
 

@@ -85,7 +85,8 @@ function neon(g, text, col, w, x, y, z, ry) {
 const NEONS = [['Cold Beer', '#ff4f9a'], ['Hawks', '#ffd23f'], ['Busch-ish Light', '#3fc8ff'], ['Pabst Blue Ripoff', '#4f8bff'], ['Miller Time-ish', '#ffcf3f'], ['Live Bait', '#7dff6a'], ['Cocktails', '#ff6ae0'], ['Karaoke Tues', '#b388ff']];
 
 // Build a store's room at (x, y, z) turned by rot (local -z is the door side). under: the casino's hidden room.
-function buildRoom(store, x, y, z, rot, under) {
+// bare: furniture and people only (a landmark hall: the shell is modelled in the landmark's GLB).
+function buildRoom(store, x, y, z, rot, under, bare) {
   const kind = store.kind, [w, d] = store.w ? [store.w, store.d] : SIZES[kind];
   const g = new THREE.Group(); g.position.set(x, y, z); g.rotation.y = rot; scene.add(g);
   const cs = Math.cos(rot), sn = Math.sin(rot), wx = (lx, lz) => x + lx * cs + lz * sn, wz = (lx, lz) => z - lx * sn + lz * cs;
@@ -94,6 +95,7 @@ function buildRoom(store, x, y, z, rot, under) {
   const cb = (lx, lz, ux, uz, hu, hv, h) => boxes.push(makeBox(wx(lx, lz), wz(lx, lz), ux * cs + uz * sn, -ux * sn + uz * cs, hu, hv, y - 1, h));
   const wall = (cx, cz, ux, uz, len) => cb(cx, cz, ux, uz, 0.4, len / 2, 6);
   // shell: floor, ceiling, four walls (the door is on the -z wall)
+  if (!bare) {
   const floorCol = kind === 'bar' ? 0x3b2619 : kind === 'guns' ? 0x5d5348 : 0x9c958a;
   box(g, floorCol, w, 0.2, d, 0, -0.1, 0, kind === 'casino' ? shared().carpet : null); box(g, kind === 'casino' ? 0x2a0f18 : kind === 'bar' ? 0x22170f : 0xb9b8b2, w, 0.2, d, 0, 4.2, 0);
   const wallCol = kind === 'casino' ? 0x3b1222 : kind === 'bar' ? 0x5a3626 : kind === 'guns' ? 0x7a6f63 : kind === 'clothes' ? 0xc9b8cc : 0xc7c1b4;
@@ -121,6 +123,7 @@ function buildRoom(store, x, y, z, rot, under) {
     box(g, awn, 3.2, 0.12, 1.3, 0, 2.75, -d / 2 - 0.85); // awning over the door
     sign(g, store.name.toUpperCase(), Math.min(w - 2, 9), 1.1, 0, 3.65, -d / 2 - 0.3, Math.PI, signBg, '#ffffff');
     if (kind === 'rob') { const t = new THREE.Sprite(new THREE.SpriteMaterial({ map: ROB_TEX, transparent: true, opacity: 0.9 })); t.scale.set(1.1, 1.1, 1); t.position.set(0, 5.8, -d / 2); g.add(t); store.tag = t; } // faded while the till is empty (economy.js)
+  }
   }
   // ceiling lights (bars hang dim pendants, the casino chandeliers)
   if (kind !== 'bar' && kind !== 'casino') for (let i = -1; i <= 1; i++) box(g, 0, w * 0.25, 0.08, 0.5, i * w * 0.3, 4.05, 0, basic(0xfffbe8));
@@ -269,9 +272,9 @@ function buildRoom(store, x, y, z, rot, under) {
     box(g, 0xffd54f, 10, 0.08, 0.08, 0, 3.8, D2 - 3);
     clerk = person([0xe0ac69, 0xffffff, 0x111111, 0x3b2314, 8 | 64], 0, D2 - 1.8, Math.PI, 'stand');
     counter = { x: wx(0, D2 - 4), z: wz(0, D2 - 4) };
-    sign(g, 'THE ARNETT BELLE', 10, 1.2, 0, 3.5, D2 - 0.2, Math.PI, '#1a0033', '#ffd54f');
+    sign(g, store.name.toUpperCase(), 10, 1.2, 0, 3.5, D2 - 0.2, Math.PI, '#1a0033', '#ffd54f');
     sign(g, 'CASHIER', 3, 0.5, 0, 3.1, D2 - 3.1, Math.PI, '#ffd54f', '#1a0033');
-    neon(g, 'Slots', '#ff4081', 3, -W2 + 0.16, 3, 0, Math.PI / 2); neon(g, 'Blackjack', '#40c4ff', 3.4, -9, 3, D2 - 0.16, Math.PI); neon(g, 'Belle Bar', '#ffd54f', 3, W2 - 0.16, 3.1, -6, -Math.PI / 2);
+    neon(g, 'Slots', '#ff4081', 3, -W2 + 0.16, 3, 0, Math.PI / 2); neon(g, 'Blackjack', '#40c4ff', 3.4, -9, 3, D2 - 0.16, Math.PI); neon(g, bare ? 'Lone Wolf' : 'Belle Bar', '#ffd54f', 3, W2 - 0.16, 3.1, -6, -Math.PI / 2);
   }
   const owner = `shop_${Math.round(x)}_${Math.round(y)}_${Math.round(z)}`;
   addBoxes(owner, boxes);
@@ -287,6 +290,23 @@ function drop(R) {
     else if (m.geometry) { if (m.isInstancedMesh) m.dispose(); if (!m.geometry.userData.keep) m.geometry.dispose(); if (m.material.map && !m.material.map.userData.keep) { m.material.map.dispose(); m.material.dispose(); } }
   });
   if (R.store.tag?.parent === R.group) R.store.tag = null;
+}
+// Landmark halls (landmarks.js): rooms modelled inside a landmark's GLB, added and removed with the model.
+// Standing inside one makes it the room you're in (flat floor at h.y, the pooled light, out of police sight).
+// A 'casino' hall also gets the casino floor (tables, slots, bar, cage) centred on h.fx/fz.
+const halls = new Set();
+export function addHall(h) {
+  const store = { name: h.name, kind: h.kind, x: h.x, z: h.z, cooldown: 0, progress: 0 };
+  const R = h.kind === 'casino' ? buildRoom(store, h.fx ?? h.x, h.y, h.fz ?? h.z, h.rot, false, true)
+    : { kind: h.kind, store, group: null, owner: null, people: [], spots: null, seats: [] };
+  Object.assign(R, { hall: true, x: h.x, y: h.y, z: h.z, w: h.w, d: h.d, cs: Math.cos(h.rot), sn: Math.sin(h.rot), lx: h.fx ?? h.x, lz: h.fz ?? h.z, ly: h.ly ?? 3.8, light: h.light });
+  halls.add(R);
+  return R;
+}
+export function removeHall(R) {
+  if (R.group) drop(R);
+  halls.delete(R);
+  if (room === R) room = null;
 }
 // The casino: build its hidden room and return where to stand.
 export function enter(store, groundY) {
@@ -318,7 +338,7 @@ export function updateRoom(dt, me, threat) {
   }
   if (!room?.under) {
     let inside = null;
-    if (!me.veh) for (const R of built) {
+    if (!me.veh) for (const set of [built, halls]) for (const R of set) {
       const dx = me.x - R.x, dz = me.z - R.z;
       if (Math.abs(dx * R.cs - dz * R.sn) < R.w / 2 && Math.abs(dx * R.sn + dz * R.cs) < R.d / 2 && me.y < R.y + 3) { inside = R; break; }
     }
@@ -328,10 +348,10 @@ export function updateRoom(dt, me, threat) {
   // the shop light follows the shop you're in, or the nearest one when you're outside
   let lit = room, ld = 40;
   if (!lit) for (const R of built) { const d = Math.hypot(R.x - px, R.z - pz); if (d < ld) { ld = d; lit = R; } }
-  if (lit) { light.position.set(lit.x, lit.y + 3.8, lit.z); light.color.setHex(lit.kind === 'casino' ? 0xffc27a : lit.kind === 'bar' ? 0xff9a4a : 0xfff4e0); }
-  light.intensity = !lit ? 0 : lit.kind === 'casino' ? 30 : lit.kind === 'bar' ? 7 : 12;
+  if (lit) { light.position.set(lit.lx ?? lit.x, lit.y + (lit.ly ?? 3.8), lit.lz ?? lit.z); light.color.setHex(lit.light?.[0] ?? (lit.kind === 'casino' ? 0xffc27a : lit.kind === 'bar' ? 0xff9a4a : 0xfff4e0)); }
+  light.intensity = !lit ? 0 : lit.light ? lit.light[1] : lit.kind === 'casino' ? 30 : lit.kind === 'bar' ? 7 : 12;
   if (room?.spin) room.spin.rotation.z += dt * 1.6;
-  for (const R of room?.under ? [room, ...built] : built) for (const p of R.people) {
+  for (const R of room?.under || room?.hall ? [room, ...built] : built) for (const p of R.people) {
     const scared = threat && Math.hypot(threat.x - p.x, threat.z - p.z) < 30;
     const st = p === R.clerk && R.held ? { handsUp: true } : scared && p !== R.clerk ? { cower: true } : p.pose === 'chat' ? { chat: true } : p.pose === 'browse' ? { look: Math.sin(performance.now() / 900 + p.lx) * 0.6 } : {};
     animateCharacter(p.ch, dt, st);

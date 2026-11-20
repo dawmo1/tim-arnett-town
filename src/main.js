@@ -28,6 +28,8 @@ import { initPhysics, updateRagdolls, ragdoll, release, ragPos, syncPhysics } fr
 import { initNav, updateNav } from './nav.js';
 import { knock, flinch } from './npc.js';
 import * as police from './police.js';
+import { planeSpots, planeVisual } from './planes.js';
+import { initBreakables, updateBreakables, setBreakQuality, hitByCar, blast as blastProps, shot as shootProps } from './breakables.js';
 import * as fx from './fx.js';
 import * as ui from './ui.js';
 import { net, connect, joinRoom, sendState, setVehicle, removeVehicle, setCops, sendEvent, sendChat, hostUid, setLook as netSetLook } from './net.js';
@@ -158,7 +160,7 @@ function applyQuality(q) {
   scene.userData.sky.scale.setScalar(camera.far * 0.9);
   fogView.near = camera.far * 0.2; fogView.far = camera.far * 0.88;
   W.setDetailRadius(q === 'low' ? 260 : q === 'medium' ? 400 : 520);
-  W.setPropQuality(q);
+  W.setPropQuality(q); setBreakQuality(q);
   resize();
   const note = document.getElementById('qualityNote');
   if (note) note.textContent = settings.quality === 'auto' ? `Auto picked ${q}. It drops a level if the game runs slowly.` : '';
@@ -243,12 +245,23 @@ let pModels = 0, pCity = 0;
 const loadBar = () => loadProgress(pModels * 0.4 + pCity * 0.6);
 const modelsReady = loadAssets((p) => { pModels = p; loadBar(); });
 await W.initWorld(scene, activeQuality);
+initBreakables(scene, activeQuality);
 await Promise.all([modelsReady, W.prefetch(W.places.menu.x, W.places.menu.z, 320)]);
 initCharacters(activeQuality);
 fx.setCasingGeometry(geometryOf('weapons', 'casing'));
 await W.preload(W.places.menu.x, W.places.menu.z, 320, (p) => { pCity = p; loadBar(); });
 playBtn.disabled = false; playBtn.textContent = 'Story Mode';
-const firstSpawn = W.randomSpawn(); // picked now so its streets can download while you're in the menu
+// main menu "Start in": the town you drop into (picked now so its streets can download while you're in the menu)
+const startBtn = document.getElementById('startIn'), startOpts = ['Random', ...W.startTowns()];
+let startI = 0, spawnP = null;
+function pickStart(d) {
+  startI = (startI + d + startOpts.length) % startOpts.length;
+  startBtn.textContent = `Start in: ${startOpts[startI]}`;
+  spawnP = W.spawnIn(startOpts[startI]).then((sp) => { W.prefetch(sp.x, sp.z, 260); return sp; });
+}
+pickStart(0);
+startBtn.addEventListener('click', () => pickStart(1));
+startBtn.addEventListener('keydown', (e) => { if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { e.preventDefault(); pickStart(e.key === 'ArrowRight' ? 1 : -1); } });
 fx.initFx(scene);
 initWalkers(scene);
 initDayNight({ scene, sun, hemi, skyMat: scene.userData.sky.material, renderer });
@@ -473,9 +486,10 @@ const POI_TYPE = {
   park: 'park', school: 'school', college: 'school', university: 'school', car_repair: 'garage', tyres: 'garage',
   museum: 'landmark', attraction: 'landmark', stadium: 'landmark', theatre: 'landmark', cinema: 'landmark', gallery: 'landmark',
 };
-let poiCache = null;
+let poiCache = null, poiStores = 0;
 function poiBlips() {
-  if (poiCache) return poiCache;
+  if (poiCache && poiStores === stores.length) return poiCache; // stores are planned town by town as you travel
+  poiStores = stores.length;
   if (!stores.length) return []; // stores aren't placed yet; try again next time
   // our own stores sit on some of these spots (Tim-Mart on a real gas station): don't double them up
   poiCache = W.D.index.poi.filter((p) => POI_TYPE[p.kind] && !stores.some((s) => s.kind !== 'meds' && (s.kind !== 'bar' || POI_TYPE[p.kind] === 'bar') && Math.hypot(s.x - p.x, s.z - p.z) < 60))
@@ -578,10 +592,10 @@ playBtn.addEventListener('click', async () => {
   const name = nameInput.value.trim().slice(0, 16) || 'Player' + Math.floor(100 + Math.random() * 900);
   const room = cleanCode(roomInput.value) || randomCode();
   await connecting;
-  playBtn.textContent = 'Loading Davenport…';
+  playBtn.textContent = `Loading ${startOpts[startI] === 'Random' ? 'the Quad Cities' : startOpts[startI]}…`;
   await enginesReady;
   // drop in somewhere random in the city (load the streets around you first)
-  const sp = firstSpawn;
+  const sp = await spawnP;
   mmShow(null);
   await loading(true, W.areaAt(sp.x, sp.z)[0]);
   menuFocus = sp;
@@ -651,7 +665,15 @@ net.handlers.event = (e) => {
 };
 
 // ---------- helpers ----------
-function report(type, x = me.x, z = me.z) { lastAttack = performance.now(); crime(type, x, me.y, z); phone.log(type, x, z); }
+function report(type, x = me.x, z = me.z) {
+  lastAttack = performance.now(); crime(type, x, me.y, z); phone.log(type, x, z);
+  if (isHost && wanted.stars > 0 && /cop|gunfire/.test(type)) police.alert(x, z, net.uid); // radio for backup, nearby units take the call
+}
+// rammed a cop car: a tap is 1 star and a chase, a real hit 2 (once a second, so a scrape doesn't spam)
+function copBump(i, x, z) {
+  if (i <= 2 || performance.now() - (copBump.t || 0) < 1000) return;
+  copBump.t = performance.now(); report(i > 7 ? 'ramcop' : 'bumpcop', x, z);
+}
 initWanted({ announce: (t) => ui.announce(t, '', '#ff5e5b') });
 function nameOf(uid) { if (uid === net.uid) return me.name; if (uid === 'police') return 'the police'; return net.players[uid]?.n || 'someone'; }
 function distCam(x, z) { return Math.hypot(camera.position.x - x, camera.position.z - z); }
@@ -687,6 +709,8 @@ let parkT = 0, parkN = 0;
 const spotHash = (a, b) => { const s = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return s - Math.floor(s); };
 function manageParked(dt, x, z, force) {
   parkT -= dt; if (parkT > 0 && !force) return; parkT = 2.5;
+  // planes parked at the airport / farm strips once their ground is loaded (free to take: no stars for flying)
+  for (const s of planeSpots(x, z)) if (!vehById.has(s.id)) { const v = makeVehicle(s.id, s.kind === 'duster' ? V.DUSTER : V.PLANE, s.color, s); v.keep = true; v.stolenOnce = true; scene.add(v.mesh); vehicles.push(v); vehById.set(v.id, v); }
   const R = activeQuality === 'low' ? 170 : 240, want = activeQuality === 'low' ? 18 : activeQuality === 'medium' ? 32 : 44;
   for (const v of [...vehicles]) {
     if (v === me.veh || v.driver || v.localSim || v.keep || v.remote) continue;
@@ -774,13 +798,13 @@ function flushBump(o) {
   if (o.driver && o.driver !== net.uid) sendEvent('bump', { id: o.id, jx: r2(b.jx), jz: r2(b.jz), jw: r2(b.jw) });
   else { applyBump(o, b); o.localSim = true; }
 }
-function damageCopUnit(u, dmg) {
+function damageCopUnit(u, dmg, crimeType = 'hitcop') {
   if (u.kind === 2) { const dx = u.x - me.x, dz = u.z - me.z, l = Math.hypot(dx, dz) || 1; u.hitDir = { x: dx / l, z: dz / l }; u.ch.flinch = 1; }
   const hp = u.kind < 2 ? u.v.hp : u.hp;
   let killed;
   if (isHost) killed = police.damageCop(u.id, dmg);
   else { sendEvent('copHit', { id: u.id, dmg: r1(dmg) }); killed = hp > 0 && hp - dmg <= 0; }
-  report(killed ? (u.kind === 3 ? 'killheli' : 'killcop') : 'hitcop', u.kind < 2 ? u.v.x : u.x, u.kind < 2 ? u.v.z : u.z);
+  report(killed ? (u.kind === 3 ? 'killheli' : 'killcop') : crimeType, u.kind < 2 ? u.v.x : u.x, u.kind < 2 ? u.v.z : u.z);
   if (killed && u.kind === 2) dropCash(u.x, u.z, 60);
   if (killed && u.kind < 2) { eco.copCars++; checkCountGoals(); }
   if (killed && u.kind === 3) goalDone('heli');
@@ -805,7 +829,7 @@ function explode(x, y, z, by, bu, origin) {
   const dm = Math.hypot(me.x - x, me.z - z);
   if (!me.dead && dm < R) damageMe(140 * (1 - dm / R), by, bu, { x: ((me.x - x) / (dm || 1)) * 14, y: 8, z: ((me.z - z) / (dm || 1)) * 14 });
   if (me.veh) { const dv = Math.hypot(me.veh.x - x, me.veh.z - z); if (dv < R) damageVehicle(me.veh, 150 * (1 - dv / R)); }
-  scare(x, z, 45, 'explosion'); startle(x, z, 60); scareTraffic(x, z, 90);
+  scare(x, z, 45, 'explosion'); startle(x, z, 60); scareTraffic(x, z, 90); blastProps(x, y, z, R + 1.5);
   if (origin) {
     for (const w of walkers) { if (w.dead) continue; const d = Math.hypot(w.x - x, w.z - z); if (d < R) hurtWalker(w, 200, (w.x - x) / (d || 1), (w.z - z) / (d || 1), null, 16 * (1 - d / R) + 6); }
     for (const v of vehicles) {
@@ -1001,10 +1025,10 @@ function enterUpdate(dt) {
 // your engine: rpm climbs through five gears; muscle and sports cars pop on lift-off
 let lastGear = 0, offT = 0;
 function engineSound(v, fwd, dt) {
-  const T = v.T, kind = T.bike ? (T.name === 'Scooter' ? 'scooter' : 'bike') : T.heli ? 'heli' : T.boat ? 'boat' : T.muscle || T.monster ? 'muscle' : T.name === 'Sports car' || T.convertible ? 'sports' : T.truck || T.bus || T.cabbed ? 'truck' : 'car';
+  const T = v.T, kind = T.bike ? (T.name === 'Scooter' ? 'scooter' : 'bike') : T.heli ? 'heli' : T.plane ? 'plane' : T.boat ? 'boat' : T.muscle || T.monster ? 'muscle' : T.name === 'Sports car' || T.convertible ? 'sports' : T.truck || T.bus || T.cabbed ? 'truck' : 'car';
   if (v.hp <= 0) { fx.setEngine(null); return; }
   const s = Math.min(1, Math.abs(v.speed || 0) / T.max), g = Math.min(4, Math.floor(s * 5)), frac = s * 5 - g;
-  const rpm = T.heli ? (v.driver || v.y > 0.5 ? 0.6 + 0.4 * (fwd !== 0 ? 1 : 0) : 0) : s < 0.02 ? (fwd > 0 ? 0.35 : 0.06) : 0.2 + 0.8 * frac;
+  const rpm = T.heli ? (v.driver || v.y > 0.5 ? 0.6 + 0.4 * (fwd !== 0 ? 1 : 0) : 0) : T.plane ? 0.15 + 0.85 * (v.thr || 0) : s < 0.02 ? (fwd > 0 ? 0.35 : 0.06) : 0.2 + 0.8 * frac;
   fx.setEngine(kind, rpm, fwd > 0 ? 1 : 0.25);
   const tail = { x: v.x - Math.sin(v.h) * (T.len / 2 + 0.1), y: v.y + 0.35, z: v.z - Math.cos(v.h) * (T.len / 2 + 0.1) };
   if (fwd > 0 && s < 0.35 && Math.random() < dt * 6) fx.exhaust(tail.x, tail.y, tail.z, -(v.vx || 0), -(v.vz || 0));
@@ -1122,7 +1146,7 @@ function applyHit(hit, w, d) {
   else if (hit.kind === 'player') {
     sendEvent('hit', { to: hit.ref.uid, dmg: r1(w.dmg * (hit.head ? 2 : 1)), by: me.name });
     fx.blood(hit.p.x, hit.p.y, hit.p.z, d.x, d.z); fx.soundHit(); ui.hitMarker(false);
-  } else if (hit.kind === 'veh') damageVehicle(hit.ref, w.dmg * 0.45 * (hit.ref.mods?.bp ? 0.4 : 1));
+  } else if (hit.kind === 'veh') { damageVehicle(hit.ref, w.dmg * 0.45 * (hit.ref.mods?.bp ? 0.4 : 1)); if (hit.ref.patrol) report('hitcop', hit.ref.x, hit.ref.z); }
   else if (hit.kind === 'cop') damageCopUnit(hit.ref, w.dmg * (hit.ref.kind === 2 ? (hit.head ? 2.5 : 1) : 0.6));
 }
 function handPos() {
@@ -1147,6 +1171,7 @@ function fire(w) {
   for (let i = 0; i < (w.pellets || 1); i++) {
     const dd = spread(d, w.spread * (aiming ? 1 : 2.2) * (me.veh ? 1.6 : 1) * (1 + Math.min(1, drunk.lvl) * 1.5));
     const hit = raycast(o, dd, w.range);
+    shootProps(o, dd, hit.t);
     applyHit(hit, w, dd);
     bulletMarks(hit, dd);
     if (i < 3) fx.tracer(from, hit.p);
@@ -1318,6 +1343,16 @@ function collideAround(v, sliding) {
       const i0 = collideVehicles(v, o, false);
       if (i0 <= 0) continue;
       const pb = o.pending; o.pending = null;
+      if (o.patrol && !sliding) {
+        copBump(Math.max(2.1, i0), o.x, o.z); // any touch on a patrol car counts as a tap
+        if (isHost && wanted.stars > 0) { // it takes the call on the spot: now a police unit that chases you
+          const u = adoptPatrol(o); if (pb) applyBump(o, pb);
+          const hit = v.hit; if (!best || hit.imp > best.imp) best = hit;
+          crashFx(v, hit); damageZone(o, hit.cp[0], hit.cp[1], hit.imp);
+          if (hit.imp > 7) police.damageCop(u.id, (hit.imp - 7) * 3);
+          continue;
+        }
+      }
       // tap: they brake, then a beat later lean on the horn and yell, or floor it out of there.
       // Anything harder knocks the car loose with the driver still in it; freeTraffic picks how they react.
       if (i0 < 4) {
@@ -1328,6 +1363,7 @@ function collideAround(v, sliding) {
     } else {
       const pushable = !o.driver || o.driver === net.uid;
       if (collideVehicles(v, o, pushable) <= 0) continue;
+      if (o.patrol && !sliding) copBump(v.hit.imp, o.x, o.z);
       if (pushable) { o.mode = 'free'; o.localSim = true; } else flushBump(o);
     }
     const hit = v.hit, i = hit.imp;
@@ -1347,12 +1383,13 @@ function collideAround(v, sliding) {
     if (!best || i > best.imp) best = hit;
     crashFx(v, hit);
     damageZone(u.v, hit.cp[0], hit.cp[1], i);
-    if (!sliding && i > 7) damageCopUnit(u, (i - 7) * 3);
+    if (!sliding && i > 7) damageCopUnit(u, (i - 7) * 3, 'ramcop'); else if (!sliding) copBump(i, u.v.x, u.v.z);
   }
   v.hit = best;
   return best ? best.imp : 0;
 }
 
+function adoptPatrol(v) { const i = vehicles.indexOf(v); if (i >= 0) vehicles.splice(i, 1); vehById.delete(v.id); return police.adoptCar(v, net.uid); }
 // Traffic: local to each player (see traffic.js). Cars stop for anyone in front of them unless that
 // person is wanted or just attacked someone, and pull over for police chasing a suspect.
 const allCars = [];
@@ -1380,7 +1417,7 @@ function updateTraffic(dt, tSec) {
   const patrols = wanted.stars > 0 ? 0 : Math.round((q === 'low' ? 1 : q === 'medium' ? 2 : 3) * (night ? 1.5 : 1));
   tickTraffic(dt, { x: fxp, z: fzp }, { x: camera.position.x, z: camera.position.z, fx: tmpDir.x, fz: tmpDir.z }, obs, sirens, tSec, { radius: q === 'low' ? 200 : q === 'medium' ? 260 : 320, count, night, patrols });
   // patrol cars nearby join the chase once you're wanted
-  if (wanted.stars > 0 && isHost) for (const v of [...traffic]) if (v.patrol && v.mode === 'traffic' && Math.hypot(v.x - fxp, v.z - fzp) < 260) { const i = vehicles.indexOf(v); if (i >= 0) vehicles.splice(i, 1); vehById.delete(v.id); police.adoptCar(v, net.uid); }
+  if (wanted.stars > 0 && isHost) for (const v of [...traffic]) if (v.patrol && v.mode === 'traffic' && Math.hypot(v.x - fxp, v.z - fzp) < 260) adoptPatrol(v);
   updateSignals(tSec);
 }
 
@@ -1440,7 +1477,8 @@ function updateVehicles(dt, tSec, nowMs) {
     body.rotation.z = v.T.bike ? (v.driver ? v.tilt : 0.3) : 0;
     body.rotation.x = v.T.boat || v.T.heli ? v.pitch || 0 : v.air > 0.05 ? clamp(-(v.vy || 0) * 0.025, -0.35, 0.35) + (v.gp || 0) : v.gp || 0;
     // cars: ground slope + weight transfer / suspension (sr, sp, sy) + tipping over (fr, fp), lifted onto the lowest corner
-    if (!v.T.bike && !v.T.heli && !v.T.boat) {
+    if (v.T.plane) planeVisual(v, body, dt);
+    else if (!v.T.bike && !v.T.heli && !v.T.boat) {
       body.rotation.set((v.gp || 0) + (v.sp || 0) + (v.fp || 0), 0, (v.gr || 0) + (v.sr || 0) + (v.fr || 0));
       body.position.y = (v.sy || 0) + tipLift(v.T, v.fr, v.fp);
       animateDamage(v, dt);
@@ -1634,7 +1672,7 @@ function driveUpdate(dt, fwd, side) {
   const shift = keys.has('ShiftLeft') || keys.has('ShiftRight');
   // gas and brake read separately so holding both does a burnout
   const gas = keys.has('KeyW') || keys.has('ArrowUp'), brk = keys.has('KeyS') || keys.has('ArrowDown');
-  const imp = stepVehicle(v, { throttle: gas ? 1 : 0, brake: brk ? 1 : 0, steer: drunkSteer(dt, -side), handbrake: !v.T.heli && keys.has('Space'), nitro: shift && !v.T.heli, up: keys.has('Space'), down: shift }, dt);
+  const imp = stepVehicle(v, { throttle: gas ? 1 : 0, brake: brk ? 1 : 0, steer: drunkSteer(dt, -side), handbrake: !v.T.heli && !v.T.plane && keys.has('Space'), nitro: shift && !v.T.heli && !v.T.plane, up: keys.has('Space'), down: shift }, dt);
   engineSound(v, v.burnout ? 1 : fwd, dt);
   // police spike strip: tyres burst (bulletproof tyres shrug it off)
   if (!v.flat && !v.mods?.bp && !v.T.boat && !v.T.heli && police.spikesHit(v)) { v.flat = true; fx.sparks(v.x, v.y + 0.3, v.z, 14); fx.soundBoom(30); ui.flashPrompt('Tyres blown!'); }
@@ -1643,6 +1681,7 @@ function driveUpdate(dt, fwd, side) {
   if (v.T.boat && Math.abs(v.speed) > 6 && Math.random() < 0.5) fx.smokePuff(v.x - Math.sin(v.h) * v.T.len / 2, -0.1, v.z - Math.cos(v.h) * v.T.len / 2, true, 0.6);
   const wallHit = v.hit;
   if (wallHit) { crashFx(v, wallHit); if (imp > 6) damageZone(v, wallHit.cp[0], wallHit.cp[1], imp, wallHit.ly); }
+  hitByCar(v); // mailboxes, hydrants, poles...
   const vImp = collideAround(v, false);
   const vHit = v.hit;
   let total = Math.max(imp, vImp);
@@ -1664,7 +1703,7 @@ function driveUpdate(dt, fwd, side) {
   if (mainHit && !me.dead) {
     const dv = Math.hypot(v.vx - pre.vx, v.vz - pre.vz);
     const frontal = mainHit.nx * Math.sin(v.h) + mainHit.nz * Math.cos(v.h) < -0.55;
-    if (frontal && !v.T.boat && !v.T.heli && (v.T.bike ? pre.speed > 14 && dv > 8 : pre.speed > 25 && dv > 18)) {
+    if (frontal && !v.T.boat && !v.T.heli && !v.T.plane && (v.T.bike ? pre.speed > 14 && dv > 8 : pre.speed > 25 && dv > 18)) {
       damageVehicle(v, (total - 7) * 3, mainHit);
       launchMe(v, pre.vx * 0.7, 4 + pre.speed * 0.08, pre.vz * 0.7);
       return;
@@ -2037,7 +2076,7 @@ function updateCamera(dt) {
   if (me.veh && !me.lookBack && performance.now() - lastMouse > 1200 && Math.abs(me.veh.speed) > 3) {
     camYaw += angDiff(camYaw, me.veh.speed > 0 ? me.veh.h : me.veh.h + Math.PI) * Math.min(1, dt * (1.6 + Math.min(2.4, Math.abs(me.veh.speed) * 0.08)));
   }
-  const dist = me.veh ? (me.veh.T.heli ? 16 : 4.6 + me.veh.T.len + Math.min(4, spd * 0.09)) : me.dead ? 5 + deathSpin * 4 : aimZoom ? 2.3 : 4.2;
+  const dist = me.veh ? (me.veh.T.heli ? 16 : me.veh.T.plane ? 9 + me.veh.T.len + Math.min(6, spd * 0.06) : 4.6 + me.veh.T.len + Math.min(4, spd * 0.09)) : me.dead ? 5 + deathSpin * 4 : aimZoom ? 2.3 : 4.2;
   const cp = Math.cos(camPitch), dx = Math.sin(camYaw) * cp, dy = -Math.sin(camPitch), dz = Math.cos(camYaw) * cp;
   const sh = me.veh ? 0 : aimZoom ? 0.85 : 0.55, ax = tx - Math.cos(camYaw) * sh, az = tz + Math.sin(camYaw) * sh;
   let back = W.rayBuildings(ax, ty, az, -dx, -dy, -dz, dist);
@@ -2340,9 +2379,10 @@ function update(dt, t) {
   updateCamera(dt);
   updateWorldLife(dt, nowMs, t);
   updateEconomy(dt, me, t);
-  updateRadio(!!me.veh && !me.veh.T.bike && !me.dead);
+  { const talk = updateRadio(!!me.veh && !me.veh.T.bike && !me.dead, dt); if (talk) ui.flashPrompt('📻 ' + talk); }
   if (!me.veh || me.dead) fx.setEngine(null);
   fx.updateFx(dt);
+  updateBreakables(dt, me.x, me.z);
   sendT -= dt;
   if (sendT <= 0) {
     sendT = 0.1;
@@ -2385,5 +2425,5 @@ requestAnimationFrame(frame);
 // let a few frames render (and shaders compile) behind the loading screen, then show the menu
 setTimeout(() => { loading(true, '', 'menu'); ui.el.menu.hidden = false; playBtn.focus(); }, 400);
 // meanwhile, download the streets where you'll start
-W.prefetch(firstSpawn.x, firstSpawn.z, 260);
+
 

@@ -1,35 +1,14 @@
-// Builds the meshes and collision walls for one 200 m tile of Davenport.
+// Builds the meshes and collision walls for one 200 m tile of the Quad Cities.
+// Every building and street is first classed by src/city/areas.js (town core, old neighbourhood, newer suburb,
+// commercial strip, industrial, farmland) from real data, and drawn with that archetype's look the same way everywhere.
 import * as THREE from 'three';
 import { TILE, C, G, D, terrainHeight, district, pointOnEdge, nearestEdge } from './data.js';
 import { makeBox } from './collide.js';
-import { M, CELL, STYLE_CELL } from './mats.js';
-
-const hash = (n) => { const s = Math.sin(n * 12.9898 + 78.233) * 43758.5453; return s - Math.floor(s); };
-const col = new THREE.Color();
-const lin = (hex) => { col.setHex(hex); return [col.r, col.g, col.b]; };
-
-// ---------- geometry buffers ----------
-class Buf {
-  constructor(withAtlas = false) { this.p = []; this.n = []; this.c = []; this.uv = []; this.i = []; this.a = withAtlas ? [] : null; }
-  v(x, y, z, nx, ny, nz, r, g, b, u, w, ax = 0, ay = 0) {
-    this.p.push(x, y, z); this.n.push(nx, ny, nz); this.c.push(r, g, b); this.uv.push(u, w);
-    if (this.a) this.a.push(ax, ay);
-    return this.p.length / 3 - 1;
-  }
-  quad(a, b, c, d) { this.i.push(a, b, c, a, c, d); }
-  geometry() {
-    if (!this.i.length) return null;
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(this.p, 3));
-    g.setAttribute('normal', new THREE.Float32BufferAttribute(this.n, 3));
-    g.setAttribute('color', new THREE.Float32BufferAttribute(this.c, 3));
-    g.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
-    if (this.a) g.setAttribute('atlas', new THREE.Float32BufferAttribute(this.a, 2));
-    g.setIndex(this.p.length / 3 > 65535 ? new THREE.Uint32BufferAttribute(this.i, 1) : new THREE.Uint16BufferAttribute(this.i, 1));
-    g.computeBoundingSphere();
-    return g;
-  }
-}
+import { M, CELL, STYLE_CELL, SIGN_NAMES } from './mats.js';
+import { Buf, face, tri, obox, panel, lin, hash } from './geom.js';
+import { applyArchetypes, edgeArea, coreAt, HOUSE, pointsOf } from './areas.js';
+import { nameUV, displayName, STRIP_FOOD, GHOST } from './names.js';
+import { streetSigns, powerLines, parkingDetail, crops, dataPoints, dataLines } from './detail.js';
 
 // ---------- ground colours ----------
 const GROUND = [];
@@ -37,15 +16,18 @@ GROUND[C.lawn] = 0x84a85c; GROUND[C.water] = 0x5a5844; GROUND[C.park] = 0x74ad52
 GROUND[C.parking] = 0x5d6064; GROUND[C.paved] = 0x96938d; GROUND[C.industrial] = 0x8f897c; GROUND[C.cemetery] = 0x80a75e;
 GROUND[C.sand] = 0xcdbb8a; GROUND[C.road] = 0x5a5d61; GROUND[C.walk] = 0xa9a59c; GROUND[C.building] = 0x8d8a84;
 GROUND[C.pitch] = 0x63ab4b; GROUND[C.offmap] = 0x7d9461;
-const GROUND_LIN = GROUND.map((h) => lin(h));
+// newer map classes (tools/build-map.mjs); missing on old data, which is fine
+const MORE = { farm: 0x8e9a5a, meadow: 0x93ad62, orchard: 0x6f9c4a, golf: 0x6cb552, rail: 0x7d7466, wetland: 0x6d8a5a, creek: 0x6b6a52, pond: 0x5a5844, residential: 0x84a85c, scrub: 0x6f8a4c, farmyard: 0x9c9478, quarry: 0xb5ab95 };
+for (const [k, v] of Object.entries(MORE)) if (C[k] != null) GROUND[C[k]] = v;
+const GROUND_LIN = Array.from(GROUND, (h) => lin(h ?? 0x84a85c));
 
-function buildTerrain(t) {
-  const B = new Buf(), S = 51, step = 4;
+function buildTerrain(t, B) {
+  const S = 51, step = 4;
   const hgt = new Float32Array(S * S);
   for (let j = 0; j < S; j++) for (let i = 0; i < S; i++) hgt[j * S + i] = terrainHeight(t.ox + i * step, t.oz + j * step);
   const cls = (i, j) => t.c[Math.max(0, Math.min(49, j)) * 50 + Math.max(0, Math.min(49, i))];
-  // unmapped ground downtown is paved lots and plazas, not lawn
-  const urban = district(t.ox + 100, t.oz + 100) === 'downtown';
+  // unmapped ground in a town core is paved lots and plazas, not lawn
+  const urban = coreAt(t.ox + 100, t.oz + 100);
   const URBAN = lin(0x8f8b83);
   for (let j = 0; j < S; j++) for (let i = 0; i < S; i++) {
     const x = t.ox + i * step, z = t.oz + j * step, y = hgt[j * S + i];
@@ -57,7 +39,6 @@ function buildTerrain(t) {
     B.v(x, y, z, -hx / nl, 4 / nl, -hz / nl, r * k, g * k, b * k, x / 7, z / 7);
   }
   for (let j = 0; j < S - 1; j++) for (let i = 0; i < S - 1; i++) { const a = j * S + i; B.quad(a, a + S, a + S + 1, a + 1); }
-  return B.geometry();
 }
 
 // ---------- roads ----------
@@ -73,7 +54,7 @@ function denseOf(e) {
   for (let k = 0; k < m; k++) {
     const k0 = Math.max(0, k - 1), k1 = Math.min(m - 1, k + 1);
     let dx = xs[k1] - xs[k0], dz = zs[k1] - zs[k0]; const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;
-    // right-hand normal of travel direction a->b is (-dz... ) we keep (dz, -dx) = left; use both sides symmetrically
+    // (-dz, dx) is the right-hand side of travel a->b (x east, z south); both sides are built symmetrically
     nx[k] = -dz; nz[k] = dx;
     // mitre scale from the turn at this point
     if (k > 0 && k < m - 1) {
@@ -87,18 +68,28 @@ function denseOf(e) {
   dense.set(e.id, d);
   return d;
 }
-const ROAD_COL = { motor: 0x4a4d52, trunk: 0x4a4d52, primary: 0x4c4f53, secondary: 0x515458, tertiary: 0x56595d, minor: 0x5c5f62, residential: 0x5e6164, service: 0x66686a };
-const SIDEWALK = (e) => e.cls !== 'service' && e.cls !== 'motor' && e.cls !== 'trunk';
+const ROAD_COL = { motor: 0x4a4d52, trunk: 0x4a4d52, primary: 0x4c4f53, secondary: 0x515458, tertiary: 0x56595d, minor: 0x5c5f62, residential: 0x5e6164, service: 0x66686a, track: 0x8f8572 };
+const SIDEWALK = (e) => e.cls !== 'service' && e.cls !== 'motor' && e.cls !== 'trunk' && e.cls !== 'track';
 const WALK_W = 2.2;
 // radius of the paved junction at a node
 export function nodeRadius(k) {
-  let r = 0; for (const id of G.adj[k]) r = Math.max(r, G.edges[id].width / 2);
+  let r = 0; for (const id of G.adj[k]) { const e = G.edges[id]; if (e) r = Math.max(r, e.width / 2); }
   return r + (G.adj[k].length >= 3 ? 0.8 : 0);
 }
 const inTile = (t, x, z) => x >= t.ox && x < t.ox + TILE && z >= t.oz && z < t.oz + TILE;
+// How a street looks, from its tags (edge flags) and its surroundings. Rural roads with no surface tag: Scott County's
+// county roads are ~58% gravel (docs/references.md), so local roads out there are gravel unless tagged paved.
+function roadLook(e, t) {
+  if (e.look) return e.look;
+  const a = edgeArea(e, t), f = e.flags | 0;
+  const gravel = !!(f & 4) || (e.cls === 'track' && !(f & 2)) || (!(f & 6) && a === 'rural' && (e.cls === 'residential' || e.cls === 'minor' || e.cls === 'service') && hash(e.id * 0.7) < 0.58);
+  const sw = f & 8 ? [1, -1] : f & 16 ? [-1] : f & 32 ? [1] : SIDEWALK(e) && a !== 'rural' && !gravel ? [1, -1] : [];
+  return (e.look = { a, gravel, brick: !!(f & 2), sw, lit: !!(f & 64), median: !!(f & 4096) });
+}
+const BIG = new Set(['primary', 'secondary', 'tertiary', 'trunk', 'motor']);
 
-function buildRoads(t, roadB, walkB, markB) {
-  const WHITE = lin(0xeeeeea), YELLOW = lin(0xe8b923);
+function buildRoads(t, roadB, walkB, markB, groundB) {
+  const WHITE = lin(0xeeeeea), YELLOW = lin(0xe8b923), CURB = lin(0xbdb8ae), WALKC = lin(0xc9c5bd), BRICKW = lin(0x9a5a48), GRASS = lin(0x80a359);
   const deckY = (e, s, x, z) => (e.bridge ? pointOnEdge(e, s).y : terrainHeight(x, z));
   const flat = (B, ax, az, bx, bz, w, y0, y1, c) => { // a flat strip (markings) from a to b, w wide
     const dx = bx - ax, dz = bz - az, l = Math.hypot(dx, dz) || 1, px = (-dz / l) * w / 2, pz = (dx / l) * w / 2;
@@ -106,15 +97,29 @@ function buildRoads(t, roadB, walkB, markB) {
     const i2 = B.v(bx - px, y1, bz - pz, 0, 1, 0, ...c, 0, 0), i3 = B.v(bx + px, y1, bz + pz, 0, 1, 0, ...c, 0, 0);
     B.quad(i0, i3, i2, i1);
   };
+  const triFlat = (B, a, b, c, y, col) => { const i0 = B.v(a[0], y, a[1], 0, 1, 0, ...col, 0, 0), i1 = B.v(b[0], y, b[1], 0, 1, 0, ...col, 0, 0), i2 = B.v(c[0], y, c[1], 0, 1, 0, ...col, 0, 0); const cr = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]); if (cr < 0) B.i.push(i0, i1, i2); else B.i.push(i0, i2, i1); };
+  // a painted lane arrow at (x, z) pointing along (dx, dz): 'left' / 'right' bend, else straight
+  const arrow = (x, z, dx, dz, kind, y) => {
+    const rx = -dz, rz = dx; // right of travel
+    flat(markB, x - dx * 2.2, z - dz * 2.2, x + dx * 0.4, z + dz * 0.4, 0.2, y, y, WHITE);
+    let bx = x + dx * 0.4, bz = z + dz * 0.4, hx = dx, hz = dz;
+    if (kind === 'left' || kind === 'right') { const s = kind === 'left' ? -1 : 1; flat(markB, bx, bz, bx + rx * s * 0.9, bz + rz * s * 0.9, 0.2, y, y, WHITE); bx += rx * s * 0.9; bz += rz * s * 0.9; hx = rx * s; hz = rz * s; }
+    triFlat(markB, [bx - hz * 0.45, bz + hx * 0.45], [bx + hz * 0.45, bz - hx * 0.45], [bx + hx * 1.1, bz + hz * 1.1], y, WHITE);
+  };
   for (const id of t.e) {
-    const e = G.edges[id], d = denseOf(e), hw = e.width / 2;
-    const rc = lin(ROAD_COL[e.cls] || 0x5a5d61), v = 0.94 + hash(id) * 0.1, rcol = [rc[0] * v, rc[1] * v, rc[2] * v];
-    const wcol = lin(0xc9c5bd);
+    const e = G.edges[id]; if (!e) continue;
+    const d = denseOf(e), hw = e.width / 2, L = roadLook(e, t);
+    const base = L.gravel ? (e.cls === 'track' ? 0x8f8572 : 0xa39b8a) : L.brick ? 0x8a4b3b : ROAD_COL[e.cls] || 0x5a5d61;
+    const rc = lin(base), v = 0.94 + hash(id) * 0.1, rcol = [rc[0] * v, rc[1] * v, rc[2] * v];
     const trimA = G.adj[e.a].length >= 3 ? nodeRadius(e.a) + 0.5 : 0, trimB = G.adj[e.b].length >= 3 ? nodeRadius(e.b) + 0.5 : 0;
+    const big = BIG.has(e.cls), rural = L.a === 'rural';
+    // kerb, then (by area) a brick strip downtown, a grass parkway in the neighbourhoods, then the sidewalk
+    const lay = L.a === 'core' ? [[-0.2, 0.15, CURB, walkB, 1.5], [0.15, 1.35, big ? BRICKW : WALKC, walkB, 1.5], [1.35, WALK_W + 0.6, WALKC, walkB, 1.5]]
+      : (L.a === 'res' || L.a === 'suburb') && !big ? [[-0.2, 0.15, CURB, walkB, 1.5], [0.15, 0.9, GRASS, groundB, 7], [0.9, WALK_W + 0.3, WALKC, walkB, 1.5]]
+        : [[-0.2, 0.15, CURB, walkB, 1.5], [0.15, WALK_W, WALKC, walkB, 1.5]];
     for (let k = 0; k < d.m - 1; k++) {
       const mx = (d.x[k] + d.x[k + 1]) / 2, mz = (d.z[k] + d.z[k + 1]) / 2;
       if (!inTile(t, mx, mz)) continue;
-      // road surface
       const row = (B, k2, o0, o1, lift, c, uvScale) => {
         const out = [];
         for (const o of [o0, o1]) {
@@ -126,82 +131,95 @@ function buildRoads(t, roadB, walkB, markB) {
       };
       const [a0, a1] = row(roadB, k, -hw, hw, 0.06, rcol, 6), [b0, b1] = row(roadB, k + 1, -hw, hw, 0.06, rcol, 6);
       roadB.quad(a0, a1, b1, b0);
-      if (SIDEWALK(e)) for (const [o0, o1] of [[hw - 0.2, hw + WALK_W], [-hw - WALK_W, -hw + 0.2]]) {
-        const [c0, c1] = row(walkB, k, o0, o1, 0.035, wcol, 1.5), [d0, d1] = row(walkB, k + 1, o0, o1, 0.035, wcol, 1.5);
-        walkB.quad(c0, c1, d1, d0);
+      for (const side of L.sw) for (const [lo, hi, c, B, us] of lay) {
+        const o0 = side > 0 ? hw + lo : -hw - hi, o1 = side > 0 ? hw + hi : -hw - lo, lift = B === groundB ? 0.04 : c === CURB ? 0.045 : 0.035;
+        const [c0, c1] = row(B, k, o0, o1, lift, c, us), [d0, d1] = row(B, k + 1, o0, o1, lift, c, us);
+        B.quad(c0, c1, d1, d0);
       }
-      // markings (skipped inside junctions)
+      // markings (skipped inside junctions and on gravel and brick)
+      if (L.gravel || L.brick || e.cls === 'track') continue;
       const s0 = d.s[k], s1 = d.s[k + 1];
       if (s0 < trimA + 1 || s1 > e.len - trimB - 1) continue;
       const y0 = deckY(e, s0, d.x[k], d.z[k]) + 0.085, y1 = deckY(e, s1, d.x[k + 1], d.z[k + 1]) + 0.085;
       const at = (kk, o) => [d.x[kk] + d.nx[kk] * o, d.z[kk] + d.nz[kk] * o];
-      const big = ['primary', 'secondary', 'tertiary', 'trunk', 'motor'].includes(e.cls);
-      const lanes = e.lf + e.lb, lw = e.width / Math.max(1, lanes);
-      if (e.lf > 0 && e.lb > 0 && big) {
-        // double yellow: the left side (+n) holds the backward lanes, so the centre sits between
-        const c0 = (e.lb - e.lf) * lw / 2;
-        for (const o of [c0 - 0.13, c0 + 0.13]) { const [ax, az] = at(k, o), [bx, bz] = at(k + 1, o); flat(markB, ax, az, bx, bz, 0.11, y0, y1, YELLOW); }
-      }
-      // dashed lane lines between lanes going the same way
-      if ((big || lanes >= 3) && lanes >= 2) {
-        // 3 m dashes every 9 m, cut out of this piece
-        const L = s1 - s0 || 1;
-        for (let a = Math.floor(s0 / 9) * 9; a < s1; a += 9) {
-          const lo = Math.max(s0, a), hi = Math.min(s1, a + 3); if (hi <= lo) continue;
-          const f0 = (lo - s0) / L, f1 = (hi - s0) / L;
-          for (let li = 1; li < lanes; li++) {
-            if (e.lf > 0 && e.lb > 0 && li === e.lb) continue; // that's the centre line
-            const o = -e.width / 2 + li * lw;
-            const [ax, az] = at(k, o), [bx, bz] = at(k + 1, o);
-            flat(markB, ax + (bx - ax) * f0, az + (bz - az) * f0, ax + (bx - ax) * f1, az + (bz - az) * f1, 0.12, y0 + (y1 - y0) * f0, y0 + (y1 - y0) * f1, WHITE);
-          }
+      const lanes = e.lf + e.lb, lw = e.width / Math.max(1, lanes), twoWay = e.lf > 0 && e.lb > 0;
+      const c0 = (e.lb - e.lf) * lw / 2; // centre between the backward lanes (-o side) and the forward lanes
+      const dash = (o, col, w = 0.12, len = 3, gap = 9) => {
+        const Ls = s1 - s0 || 1;
+        for (let a = Math.floor(s0 / gap) * gap; a < s1; a += gap) {
+          const lo = Math.max(s0, a), hi = Math.min(s1, a + len); if (hi <= lo) continue;
+          const f0 = (lo - s0) / Ls, f1 = (hi - s0) / Ls, [ax, az] = at(k, o), [bx, bz] = at(k + 1, o);
+          flat(markB, ax + (bx - ax) * f0, az + (bz - az) * f0, ax + (bx - ax) * f1, az + (bz - az) * f1, w, y0 + (y1 - y0) * f0, y0 + (y1 - y0) * f1, col);
         }
+      };
+      const solid = (o, col, w = 0.11) => { const [ax, az] = at(k, o), [bx, bz] = at(k + 1, o); flat(markB, ax, az, bx, bz, w, y0, y1, col); };
+      if (twoWay && big && L.median) {
+        // a raised concrete median down the middle (OSM median tag)
+        for (const [lo, hi] of [[c0 - 0.7, c0 + 0.7]]) { const [p0, p1] = row(walkB, k, lo, hi, 0.12, CURB, 1.5), [q0, q1] = row(walkB, k + 1, lo, hi, 0.12, CURB, 1.5); walkB.quad(p0, p1, q1, q0); }
+      } else if (twoWay && big) for (const o of [c0 - 0.13, c0 + 0.13]) solid(o, YELLOW);
+      else if (twoWay && rural && e.cls !== 'service') dash(c0, YELLOW, 0.11, 3, 12); // county roads: a broken yellow centre line
+      if ((big || lanes >= 3) && lanes >= 2) for (let li = 1; li < lanes; li++) { if (twoWay && li === e.lb) continue; dash(-e.width / 2 + li * lw, WHITE); }
+      if (big || (rural && e.cls !== 'service')) for (const o of [hw - 0.35, -hw + 0.35]) solid(o, WHITE, 0.12);
+    }
+    // turn arrows from turn:lanes on the forward lanes, a little before the far junction
+    if (e.turn && e.lf > 0 && !L.gravel && G.adj[e.b].length >= 3 && e.len > trimB + 30) {
+      const ent = String(e.turn).split('|'), lanes = e.lf + e.lb, lw = e.width / Math.max(1, lanes);
+      if (ent.length === e.lf) {
+        const s = e.len - trimB - 12, p = pointOnEdge(e, s), q = pointOnEdge(e, s + 1), dx = q.x - p.x, dz = q.z - p.z, dl = Math.hypot(dx, dz) || 1;
+        ent.forEach((v, i) => {
+          const kind = /left/.test(v) ? 'left' : /right/.test(v) ? 'right' : /through/.test(v) ? 'through' : null; if (!kind) return;
+          const o = -e.width / 2 + (e.lb + i + 0.5) * lw, x = p.x + (-dz / dl) * o, z = p.z + (dx / dl) * o;
+          if (inTile(t, x, z)) arrow(x, z, dx / dl, dz / dl, kind, (e.bridge ? p.y : terrainHeight(x, z)) + 0.09);
+        });
       }
-      // white edge lines on big roads
-      if (big) for (const o of [hw - 0.35, -hw + 0.35]) { const [ax, az] = at(k, o), [bx, bz] = at(k + 1, o); flat(markB, ax, az, bx, bz, 0.12, y0, y1, WHITE); }
     }
   }
   // junction discs, crosswalks and stop lines at nodes in this tile
   const N = G.nodes;
-  for (let k = 0; k < N.n; k++) {
+  const zebra = (e, sA, sB, yy) => {
+    const p0 = pointOnEdge(e, sA), p1 = pointOnEdge(e, sB), ux = p1.x - p0.x, uz = p1.z - p0.z, ul = Math.hypot(ux, uz) || 1, nx = -uz / ul, nz = ux / ul;
+    for (let o = -e.width / 2 + 0.5; o <= e.width / 2 - 0.4; o += 1.1) flat(markB, p0.x + nx * o, p0.z + nz * o, p1.x + nx * o, p1.z + nz * o, 0.55, yy(p0), yy(p1), WHITE);
+  };
+  const nodes = new Set(); for (const id of t.e) { const e = G.edges[id]; if (e) { nodes.add(e.a); nodes.add(e.b); } }
+  for (const k of nodes) {
     const x = N.x[k], z = N.z[k];
     if (!inTile(t, x, z)) continue;
-    const adj = G.adj[k]; if (adj.length < 2) continue;
+    const adj = G.adj[k].filter((id) => G.edges[id]); if (adj.length < 2) continue;
     const r = nodeRadius(k), onBridge = adj.some((id) => G.edges[id].bridge);
     const ny = onBridge ? N.y[k] : null;
-    const walk = adj.some((id) => SIDEWALK(G.edges[id]));
+    const walk = adj.some((id) => roadLook(G.edges[id], t).sw.length);
     const disc = (B, rad, lift, c, uvs) => {
       const seg = 18, ctr = B.v(x, (ny ?? terrainHeight(x, z)) + lift, z, 0, 1, 0, ...c, x / uvs, z / uvs), ring = [];
       for (let s = 0; s < seg; s++) { const a = (s / seg) * Math.PI * 2, px = x + Math.cos(a) * rad, pz = z + Math.sin(a) * rad; ring.push(B.v(px, (ny ?? terrainHeight(px, pz)) + lift, pz, 0, 1, 0, ...c, px / uvs, pz / uvs)); }
       for (let s = 0; s < seg; s++) B.i.push(ctr, ring[(s + 1) % seg], ring[s]);
     };
-    const e0 = G.edges[adj[0]];
-    disc(roadB, r, 0.065, lin(ROAD_COL[e0.cls] || 0x5a5d61), 6);
+    const e0 = G.edges[adj[0]], l0 = roadLook(e0, t);
+    disc(roadB, r, 0.065, lin(l0.gravel ? 0xa39b8a : l0.brick ? 0x8a4b3b : ROAD_COL[e0.cls] || 0x5a5d61), 6);
     if (walk && adj.length >= 3) disc(walkB, r + WALK_W, 0.03, lin(0xc9c5bd), 1.5);
-    const ctrl = N.ctrl[k];
-    if (!ctrl || adj.length < 3) continue;
+    const ctrl = N.ctrl[k], core = coreAt(x, z);
+    // painted crosswalks at signals, and on every leg in a town core
+    if ((!ctrl && !core) || adj.length < 3) continue;
     for (const id of adj) {
       const e = G.edges[id]; if (e.len < r + 8) continue;
       const fromA = e.a === k, dirIn = fromA ? e.lb > 0 : e.lf > 0; // traffic arrives at this node along e
-      const p0 = pointOnEdge(e, fromA ? r + 0.6 : e.len - r - 0.6), p1 = pointOnEdge(e, fromA ? r + 3.6 : e.len - r - 3.6);
-      const ux = p1.x - p0.x, uz = p1.z - p0.z, ul = Math.hypot(ux, uz) || 1, nx = -uz / ul, nz = ux / ul;
       const yy = (p) => (e.bridge ? p.y : terrainHeight(p.x, p.z)) + 0.09;
-      if (ctrl === 1 && SIDEWALK(e)) { // zebra crosswalk
-        for (let o = -e.width / 2 + 0.5; o <= e.width / 2 - 0.4; o += 1.1) {
-          flat(markB, p0.x + nx * o, p0.z + nz * o, p1.x + nx * o, p1.z + nz * o, 0.55, yy(p0), yy(p1), WHITE);
-        }
-      }
-      if (dirIn) { // stop line across the lanes coming in
+      if ((ctrl === 1 || core) && roadLook(e, t).sw.length && !roadLook(e, t).brick) zebra(e, fromA ? r + 0.6 : e.len - r - 0.6, fromA ? r + 3.6 : e.len - r - 3.6, yy);
+      if (dirIn && ctrl) { // stop line across the lanes coming in
         const lanes = e.lf + e.lb, lw = e.width / Math.max(1, lanes), nIn = fromA ? e.lb : e.lf;
         const q = pointOnEdge(e, fromA ? r + 4.2 : e.len - r - 4.2), q2 = pointOnEdge(e, fromA ? r + 4.7 : e.len - r - 4.7);
-        // incoming lanes are on the incoming driver's right
         const tx = q.x - q2.x, tz = q.z - q2.z, tl = Math.hypot(tx, tz) || 1; // incoming travel direction
         const rx = -tz / tl, rz = tx / tl; // its right-hand side
         const oFar = e.lf > 0 && e.lb > 0 ? nIn * lw : e.width / 2, oNear = e.lf > 0 && e.lb > 0 ? 0.1 : -e.width / 2;
-        const ax = q.x + rx * oNear, az = q.z + rz * oNear, bx = q.x + rx * oFar, bz = q.z + rz * oFar;
-        flat(markB, ax, az, bx, bz, 0.5, yy(q), yy(q), WHITE);
+        flat(markB, q.x + rx * oNear, q.z + rz * oNear, q.x + rx * oFar, q.z + rz * oFar, 0.5, yy(q), yy(q), WHITE);
       }
     }
+  }
+  // mapped mid-block / uncontrolled crossings (highway=crossing)
+  for (const p of pointsOf(t, 'cw')) {
+    const q = nearestEdge(p.x, p.z, 10); if (!q || q.e.cls === 'motor' || q.e.cls === 'trunk' || roadLook(q.e, t).gravel) continue;
+    const e = q.e, ra = G.adj[e.a].length >= 3 ? nodeRadius(e.a) : 0, rb = G.adj[e.b].length >= 3 ? nodeRadius(e.b) : 0;
+    if ((q.s < ra + 5 && (G.nodes.ctrl[e.a] === 1 || coreAt(p.x, p.z))) || (q.s > e.len - rb - 5 && (G.nodes.ctrl[e.b] === 1 || coreAt(p.x, p.z)))) continue; // already painted at the junction
+    zebra(e, Math.max(0, q.s - 1.5), Math.min(e.len, q.s + 1.5), (pp) => (e.bridge ? pp.y : terrainHeight(pp.x, pp.z)) + 0.09);
   }
 }
 
@@ -209,6 +227,21 @@ function buildRoads(t, roadB, walkB, markB) {
 const SIDING_TINTS = [0xf4f1e8, 0xe9e2cf, 0xc9d6df, 0xd6dccb, 0xb9c4ca, 0xe8d9b0, 0xd9c6b6, 0xa9b8a5, 0xf2efe6, 0xcfc3a7, 0x9fb0bf, 0xe6e6e6];
 const ROOF_TINTS = [0x55504b, 0x3f3c3a, 0x6b4a3c, 0x4a4f55, 0x5d5a52, 0x6e6259, 0x3b4a44];
 const BRICK_TINTS = [0xffffff, 0xf0e2da, 0xffe9d6, 0xe6d4cc, 0xd9cbc3];
+// house colours by era (docs/references.md): painted Victorians, earthy Craftsman, pastel and brick-veneer ranches,
+// greige-to-charcoal vinyl on newer two-storeys, white farmhouses
+const STYLE_LOOK = {
+  victorian: [[0x3e5c4a, 0x6b2f2f, 0xc9a24a, 0x4f6d8c, 0xe9dfc4, 0x7a5c8a, 0x8a9a6b, 0xb5523b, 0xd8cfa8, 0x2f4f5f], 0.2, [0x3f3c3a, 0x4a4f55, 0x5d3a33, 0x3b4a44]],
+  cottage: [[0xf4f1e8, 0xe6e6e6, 0xf1e6b8, 0xc9d6df, 0xd6dccb, 0xe9e2cf], 0.05, ROOF_TINTS],
+  foursquare: [[0xa9b08f, 0xc8b48a, 0x8c7a5b, 0xefe8d8, 0x9aa38a, 0xd6c3a0, 0x7d8b74, 0xb9a88a], 0.35, ROOF_TINTS],
+  bungalow: [[0xa9b08f, 0xc8b48a, 0x8c7a5b, 0xefe8d8, 0x9aa38a, 0xd6c3a0, 0x7d8b74, 0xb9a88a], 0.2, ROOF_TINTS],
+  ranch: [[0xd9e7d6, 0xcfe0ea, 0xf1e6b8, 0xf4f1e8, 0xe8d6cf, 0xc9d6df, 0xe2e2d6], 0.45, [0x55504b, 0x3f3c3a, 0x6b4a3c, 0x5d5a52]],
+  modern2: [[0xcfc6b4, 0xb9b3a6, 0xd8d2c4, 0x9aa0a3, 0xf2efe6, 0x5c636a, 0x3f4a5a, 0xc4b59a], 0, [0x5a4e44, 0x4a4a4a, 0x6b5f52]],
+  farmhouse: [[0xf4f4f0, 0xf4f4f0, 0xf4f4f0, 0xefe9d9, 0xdfe6e8], 0, [0x4a4f55, 0x3f3c3a, 0x6e6259]],
+};
+const NAMED_COL = { white: 0xf2f2ee, red: 0x9b3a2e, brown: 0x7a5236, grey: 0x9a9a96, gray: 0x9a9a96, beige: 0xd8cbaa, yellow: 0xe6d28a, blue: 0x6f8fb0, green: 0x6f8f62, black: 0x2b2b2b, tan: 0xc8b48a, cream: 0xefe6cc, maroon: 0x6b2f2f };
+const tagCol = (v) => { if (!v) return null; const s = String(v).toLowerCase(); if (/^#[0-9a-f]{6}$/.test(s)) return parseInt(s.slice(1), 16); return NAMED_COL[s] ?? null; };
+const BIGBOX = ['ValuMart', 'Bullseye', 'Hi-Vue', "Menardo's", 'Hobby Hut', "Cole's", 'Fairaway', 'Best Bye', 'Home Deport', 'Dollar Generic', 'Alde', 'Lowe-Down'];
+const pick = (arr, s) => arr[Math.floor(hash(s) * arr.length) % arr.length];
 function pointInPoly(x, z, pts) {
   let c = false;
   for (let i = 0, j = pts.length - 2; i < pts.length; j = i, i += 2) {
@@ -216,24 +249,6 @@ function pointInPoly(x, z, pts) {
     if ((zi > z) !== (zj > z) && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) c = !c;
   }
   return c;
-}
-// a quad facing n (corners in order round the quad), with per-corner uvs
-function face(B, P, n, tint, at, uv) {
-  const id = P.map((p, k) => B.v(p[0], p[1], p[2], n[0], n[1], n[2], tint[0], tint[1], tint[2], uv[k][0], uv[k][1], at[0], at[1]));
-  const ax = P[1][0] - P[0][0], ay = P[1][1] - P[0][1], az = P[1][2] - P[0][2], bx = P[2][0] - P[0][0], by = P[2][1] - P[0][1], bz = P[2][2] - P[0][2];
-  const d = (ay * bz - az * by) * n[0] + (az * bx - ax * bz) * n[1] + (ax * by - ay * bx) * n[2];
-  if (d > 0) B.quad(id[0], id[1], id[2], id[3]); else B.quad(id[3], id[2], id[1], id[0]);
-}
-// a box turned to (ax, az): half-length ha along it, half-depth hp across, from y0 to y1
-function obox(B, x, z, ax, az, ha, hp, y0, y1, tint, at, S = 4, bottom = false) {
-  const px = -az, pz = ax;
-  const C = (sa, sp, y) => [x + ax * ha * sa + px * hp * sp, y, z + az * ha * sa + pz * hp * sp];
-  const side = (a0, p0, a1, p1, nx, nz, w) => face(B, [C(a0, p0, y0), C(a1, p1, y0), C(a1, p1, y1), C(a0, p0, y1)], [nx, 0, nz], tint, at, [[0, y0 / S], [w / S, y0 / S], [w / S, y1 / S], [0, y1 / S]]);
-  side(-1, 1, 1, 1, px, pz, 2 * ha); side(-1, -1, 1, -1, -px, -pz, 2 * ha);
-  side(1, -1, 1, 1, ax, az, 2 * hp); side(-1, -1, -1, 1, -ax, -az, 2 * hp);
-  const top = [C(-1, -1, y1), C(1, -1, y1), C(1, 1, y1), C(-1, 1, y1)];
-  face(B, top, [0, 1, 0], tint, at, top.map((p) => [p[0] / S, p[2] / S]));
-  if (bottom) { const bt = [C(-1, -1, y0), C(1, -1, y0), C(1, 1, y0), C(-1, 1, y0)]; face(B, bt, [0, -1, 0], tint, at, bt.map((p) => [p[0] / S, p[2] / S])); }
 }
 // outward normals per edge and the polygon pushed out by o (mitred corners)
 function outline(pts) {
@@ -261,38 +276,75 @@ function band(B, pts, ol, y0, y1, o, tint, at, parapet = 0) {
     if (P) face(B, [[i0[0], y0, i0[1]], [i1[0], y0, i1[1]], [i1[0], y1, i1[1]], [i0[0], y1, i0[1]]], [-nn[0], 0, -nn[1]], tint.map((c) => c * 0.85), at, [[0, 0], [L / 4, 0], [L / 4, (y1 - y0) / 4], [0, (y1 - y0) / 4]]);
   }
 }
+// a glowing strip or quad for the night-life material: kind 0 porch lamp, 1 window, 2 Christmas bulbs, 3 neon
+function glowQuad(B, P, n, col, kind, ph, uLen = 1) {
+  const U = [[0, 0], [uLen, 0], [uLen, 1], [0, 1]];
+  const id = P.map((p, k) => B.v(p[0], p[1], p[2], n[0], n[1], n[2], col[0], col[1], col[2], U[k][0], U[k][1], kind, ph));
+  B.quad(id[0], id[1], id[2], id[3]);
+}
 const AWNING = [0x9e2a2b, 0x2f5d3a, 0x1f3a5f, 0x5c1f2e, 0xc9a66b, 0x222222, 0x8a5a2b, 0x2a6f75].map(lin);
 const DOORS = [0x7a1f1f, 0x1f3550, 0x2b4a2e, 0x3b2a1f, 0xe9e4d8, 0x111111, 0x6b5a2a].map(lin);
-const TRIM = lin(0xf2efe8), CONCRETE = lin(0x9d9a93), WOOD = lin(0x8a7560);
-function buildBuildings(t, B, boxes, foot, SB, GB, junk) {
+const TRIM = lin(0xf2efe8), CONCRETE = lin(0x9d9a93), WOOD = lin(0x8a7560), GDOOR = lin(0xe9e6de), FIXTURE = lin(0xe8e2d0);
+const LANDMARK = /Figge|Conservatory|River Center|Union Station|Freight House|Adler|Blackhawk|Kahl|Putnam/;
+const PADROAD = new Set(['primary', 'secondary', 'tertiary', 'trunk']);
+
+function buildBuildings(t, B, boxes, foot, SB, GB, junk, X) {
+  const { glowB, litB, namesB, newK, bigBoxes, yards, dealers, has } = X;
+  // every footprint up front (yard props must not land inside a neighbour's house)
+  const fps = t.b.map((rec) => { const rel = rec[0], p = new Float32Array(rel.length); let a = Infinity, b = -Infinity, c = Infinity, d = -Infinity; for (let i = 0; i < rel.length; i += 2) { p[i] = rel[i] + t.ox; p[i + 1] = rel[i + 1] + t.oz; a = Math.min(a, p[i]); b = Math.max(b, p[i]); c = Math.min(c, p[i + 1]); d = Math.max(d, p[i + 1]); } return { p, a, b, c, d }; });
+  const occupied = (x, z, r) => fps.some((f) => x > f.a - r && x < f.b + r && z > f.c - r && z < f.d + r && (pointInPoly(x, z, f.p) || pointInPoly(x + r, z, f.p) || pointInPoly(x - r, z, f.p) || pointInPoly(x, z + r, f.p) || pointInPoly(x, z - r, f.p)));
   t.b.forEach((rec, bi) => {
-    const [rel, baseY, hgt, pitched, style, name, kind = 0] = rec;
-    const pts = new Float32Array(rel.length);
-    for (let i = 0; i < rel.length; i += 2) { pts[i] = rel[i] + t.ox; pts[i + 1] = rel[i + 1] + t.oz; }
-    const n = pts.length / 2; if (n < 3) return;
+    const [, baseY, hgt, pitched, style, name, kind = 0] = rec;
+    const pts = fps[bi].p, n = pts.length / 2; if (n < 3) return;
     let cx = 0, cz = 0; for (let i = 0; i < n; i++) { cx += pts[i * 2]; cz += pts[i * 2 + 1]; } cx /= n; cz /= n;
-    foot.push(pts);
     const seed = t.tx * 7919 + t.tz * 104729 + bi * 31;
-    const dist = district(cx, cz);
+    if (rec.arch?.canopy) { canopy(B, glowB, pts, cx, cz, baseY, baseY + hgt, seed); return; } // no footprint: you can stand under it
+    foot.push(pts);
+    const dist = district(cx, cz), a = rec.arch || { area: 'res' }, HS = HOUSE[a.style];
+    let area2 = 0; for (let i = 0; i < n; i++) { const j = (i + 1) % n; area2 += pts[i * 2] * pts[j * 2 + 1] - pts[j * 2] * pts[i * 2 + 1]; }
+    const fp = Math.abs(area2) / 2;
+    // roof form: the OSM roof:shape when tagged, else the archetype's
+    const RF = a.roofTag || '';
+    let form = /flat/.test(RF) ? 'flat' : /hip|pyram/.test(RF) ? 'hip' : /gambrel|mansard/.test(RF) ? 'gambrel' : /gable|saltbox|skillion/.test(RF) ? 'gable' : /dome|round|onion|cone/.test(RF) ? 'cone' : null;
+    if (!form) form = a.round && fp < 1500 && (a.area === 'rural' || a.area === 'industrial' || a.style === 'silo' || a.style === 'bin') ? 'cone' : !pitched && a.style !== 'barn' && a.style !== 'shed_big' ? 'flat' : a.style === 'barn' ? 'gambrel' : HS ? (a.style === 'ranch' && fp > 140 ? 'hip' : HS.roof) : 'gable';
+    const sloped = form !== 'flat';
+    // facade
     let cell = STYLE_CELL[style] || 'plain';
     if (cell === 'brick') cell = dist === 'village' ? 'brick2' : hash(seed) < 0.3 ? 'brick3' : 'brick';
     if (cell === 'glass' && hash(seed + 1) < 0.45) cell = 'office';
+    if (a.area === 'core' && !sloped && kind !== 1 && kind !== 2 && cell !== 'glass' && cell !== 'office') { const r = hash(seed + 12); cell = dist === 'village' ? 'brick2' : r < 0.45 ? 'brick' : r < 0.68 ? 'brick2' : r < 0.88 ? 'brick3' : 'stone'; }
+    if (a.area === 'strip' && !sloped && cell === 'brick') cell = hash(seed + 12) < 0.5 ? 'stucco' : 'brick3';
     if (/church|cathedral|chapel|temple/i.test(name) || kind === 2) cell = 'church';
     if (kind === 1) cell = 'ramp';
     else if (kind === 3) cell = 'brick3';
     else if (kind === 4) cell = 'metal';
-    // landmarks keep their real look
     if (/Figge|Conservatory/.test(name)) cell = 'glass';
     else if (/River Center/.test(name)) cell = 'office';
     else if (/Union Station|Freight House|Adler|Blackhawk|Kahl|Putnam/.test(name)) cell = 'brick2';
-    if (pitched && hgt < 4.2) cell = 'garage';
-    const store = !pitched && kind !== 1 && kind !== 2 && kind !== 3 && !name && hgt >= 6 && hgt < 32 && (((dist === 'downtown' || dist === 'village') && (style === 0 || style === 1) && hash(seed + 2) < 0.75) || style === 4 || kind === 5);
+    const SL = STYLE_LOOK[a.style];
+    if (SL) cell = hash(seed + 13) < SL[1] ? (a.style === 'ranch' && hash(seed + 14) < 0.5 ? 'brick3' : 'brick') : 'siding';
+    if (a.style === 'barn' || a.style === 'silo') cell = 'plain';
+    else if (a.style === 'shed_big' || a.style === 'bin') cell = 'metal';
+    else if (a.style === 'shed') cell = 'siding';
+    else if (a.style === 'garage' || (!a.style && pitched && hgt < 4.2)) cell = 'garage';
+    // OSM wall material wins
+    const mt = String(a.mat || '').toLowerCase();
+    if (mt && kind !== 1 && !LANDMARK.test(name)) cell = /brick/.test(mt) ? (cell.startsWith('brick') ? cell : 'brick') : /stone|lime|sand/.test(mt) ? 'stone' : /glass/.test(mt) ? 'glass' : /metal|steel|alum/.test(mt) ? 'metal' : /plaster|stucco/.test(mt) ? 'stucco' : /wood|vinyl|timber|siding/.test(mt) ? 'siding' : cell;
+    const house = HS ? fp < 420 : pitched && hgt >= 4.2 && hgt < 12 && fp < 320 && (cell === 'siding' || cell.startsWith('brick'));
+    const bigBox = a.area === 'strip' && !sloped && fp > 2500 && kind !== 1;
+    const store = !sloped && !bigBox && kind !== 1 && kind !== 2 && kind !== 3 && !LANDMARK.test(name) && hgt >= 4 && hgt < 32 && (!name || kind === 5 || a.shop)
+      && ((a.area === 'core' && (style === 0 || style === 1 || cell.startsWith('brick') || cell === 'stone') && hash(seed + 2) < 0.75) || style === 4 || kind === 5 || (a.area === 'strip' && !!a.shop));
     let tint = [1, 1, 1];
-    if (cell === 'siding' || cell === 'garage') tint = lin(SIDING_TINTS[Math.floor(hash(seed + 3) * SIDING_TINTS.length)]);
+    if (SL && cell === 'siding') tint = lin(pick(SL[0], seed + 3));
+    else if (cell === 'siding' || cell === 'garage') tint = lin(SIDING_TINTS[Math.floor(hash(seed + 3) * SIDING_TINTS.length)]);
     else if (cell.startsWith('brick')) tint = lin(BRICK_TINTS[Math.floor(hash(seed + 4) * BRICK_TINTS.length)]);
     else if (cell === 'stucco') tint = lin([0xffffff, 0xf3e9d8, 0xe9e4da, 0xf5efe1][Math.floor(hash(seed + 5) * 4)]);
-        const atl = (c) => [c[0] / 4, 1 - (c[1] + 1) / 4];
-    const A = atl(CELL[cell]), S = atl(CELL.store), R = atl(CELL.roof), SH = atl(CELL.shingle);
+    if (a.style === 'barn') tint = lin(hash(seed + 3) < 0.85 ? 0x9b2d20 : 0xe8e4da);
+    else if (a.style === 'shed_big') tint = lin(pick([0xd8d8d4, 0xb8bcbf, 0x9b2d20, 0xd9cfb6, 0xe8e8e2], seed + 3));
+    else if (a.style === 'silo') tint = lin(hash(seed + 3) < 0.3 ? 0x2a4a7e : 0xcfcabd); // blue glass-lined Harvestore or concrete stave
+    const tc = tagCol(a.col); if (tc != null && cell !== 'glass' && cell !== 'ramp') tint = lin(tc);
+    const atl = (c) => [c[0] / 4, 1 - (c[1] + 1) / 4];
+    const A = atl(CELL[cell]), S = atl(CELL.store), R = atl(CELL.roof), SH = atl(CELL.shingle), pl = atl(CELL.plain);
     const yb = baseY - 2.5, top = baseY + hgt;
     // walls
     let along = hash(seed + 6) * 16;
@@ -305,27 +357,25 @@ function buildBuildings(t, B, boxes, foot, SB, GB, junk) {
       if (pointInPoly((x0 + x1) / 2 + ox * 0.3, (z0 + z1) / 2 + oz * 0.3, pts)) { ox = -ox; oz = -oz; }
       const wall = (ylo, yhi, at, uS, vS, vOff) => {
         const u0 = along / uS, u1 = (along + L) / uS;
-        const a = B.v(x0, ylo, z0, ox, 0, oz, ...tint, u0, (ylo - vOff) / vS, ...at), b = B.v(x1, ylo, z1, ox, 0, oz, ...tint, u1, (ylo - vOff) / vS, ...at);
-        const c = B.v(x1, yhi, z1, ox, 0, oz, ...tint, u1, (yhi - vOff) / vS, ...at), d = B.v(x0, yhi, z0, ox, 0, oz, ...tint, u0, (yhi - vOff) / vS, ...at);
-        // winding so the face points along (ox, oz)
-        if ((x1 - x0) * oz - (z1 - z0) * ox > 0) B.quad(a, b, c, d); else B.quad(b, a, d, c);
+        const a0 = B.v(x0, ylo, z0, ox, 0, oz, ...tint, u0, (ylo - vOff) / vS, ...at), b0 = B.v(x1, ylo, z1, ox, 0, oz, ...tint, u1, (ylo - vOff) / vS, ...at);
+        const c0 = B.v(x1, yhi, z1, ox, 0, oz, ...tint, u1, (yhi - vOff) / vS, ...at), d0 = B.v(x0, yhi, z0, ox, 0, oz, ...tint, u0, (yhi - vOff) / vS, ...at);
+        if ((x1 - x0) * oz - (z1 - z0) * ox > 0) B.quad(a0, b0, c0, d0); else B.quad(b0, a0, d0, c0);
       };
       if (store) { wall(yb, baseY + 4.2, S, 18, 4.2, baseY); wall(baseY + 4.2, top, A, 16, 13.2, baseY + 4.2); }
       else wall(yb, top, A, 16, 13.2, baseY);
       along += L;
-      if (L > 0.5) boxes.push(makeBox((x0 + x1) / 2 - ox * 0.6, (z0 + z1) / 2 - oz * 0.6, ox, oz, 0.6, L / 2 + 0.05, yb, top - yb + (pitched ? 1.5 : 0)));
+      if (L > 0.5) boxes.push(makeBox((x0 + x1) / 2 - ox * 0.6, (z0 + z1) / 2 - oz * 0.6, ox, oz, 0.6, L / 2 + 0.05, yb, top - yb + (sloped ? 1.5 : 0)));
     }
-    // the wall that faces the nearest street (shop signs, awnings, front doors, porches)
-    let area2 = 0; for (let i = 0; i < n; i++) { const j = (i + 1) % n; area2 += pts[i * 2] * pts[j * 2 + 1] - pts[j * 2] * pts[i * 2 + 1]; }
-    const house = pitched && hgt >= 4.2 && hgt < 12 && Math.abs(area2) / 2 < 320 && (cell === 'siding' || cell.startsWith('brick'));
+    // the wall that faces the street (shop signs, awnings, front doors, porches, garage doors, barn doors)
+    const garage = a.style === 'garage', farm = a.area === 'rural', ind = a.area === 'industrial' && !sloped && fp > 400;
     let best = null, road = null;
-    if (store || house) {
-      road = nearestEdge(cx, cz, 70);
+    if (store || house || garage || bigBox || farm || ind || a.area === 'strip') {
+      road = nearestEdge(cx, cz, garage || ind ? 60 : 80, garage || ind ? null : (e) => e.cls !== 'service' && e.cls !== 'track');
       if (road) {
         let bd = 0.3;
         for (let i = 0; i < n; i++) {
           const x0 = pts[i * 2], z0 = pts[i * 2 + 1], x1 = pts[((i + 1) % n) * 2], z1 = pts[((i + 1) % n) * 2 + 1], L = Math.hypot(x1 - x0, z1 - z0);
-          if (L < (house ? 4 : 5)) continue;
+          if (L < (house ? 4 : garage ? 2.5 : 5)) continue;
           let ox = (z1 - z0) / L, oz = -(x1 - x0) / L;
           if (pointInPoly((x0 + x1) / 2 + ox * 0.3, (z0 + z1) / 2 + oz * 0.3, pts)) { ox = -ox; oz = -oz; }
           const tx = road.x - (x0 + x1) / 2, tz = road.z - (z0 + z1) / 2, tl = Math.hypot(tx, tz) || 1, d = (ox * tx + oz * tz) / tl;
@@ -333,93 +383,208 @@ function buildBuildings(t, B, boxes, foot, SB, GB, junk) {
         }
       }
     }
-    const pl = atl(CELL.plain), ol = outline(pts);
+    const ol = outline(pts);
+    const label = name ? displayName(name) : '';
     // canvas awnings over each shop front (the store texture repeats three 6 m shops)
     if (store && best) {
       const ux = (best.x1 - best.x0) / best.L, uz = (best.z1 - best.z0) / best.L, a0 = wallAlong[best.i];
       for (let k = Math.floor(a0 / 6); k * 6 < a0 + best.L; k++) {
         const s0 = Math.max(0.4, k * 6 - a0 + 0.35), s1 = Math.min(best.L - 0.4, k * 6 + 5.65 - a0);
         if (s1 - s0 < 2 || hash(seed + k * 13) > 0.72) continue;
-        const tint = AWNING[Math.floor(hash(seed + k * 17) * AWNING.length)], dk = tint.map((c) => c * 0.55);
+        const tn = AWNING[Math.floor(hash(seed + k * 17) * AWNING.length)], dk = tn.map((c) => c * 0.55);
         const P = (sa, out, y) => [best.x0 + ux * sa + best.ox * out, baseY + y, best.z0 + uz * sa + best.oz * out];
         const d = 1.35, nt = [best.ox * 0.35, 0.94, best.oz * 0.35];
-        face(B, [P(s0, 0.02, 3.2), P(s1, 0.02, 3.2), P(s1, d, 2.7), P(s0, d, 2.7)], nt, tint, pl, [[0, 0], [1, 0], [1, 1], [0, 1]]);
+        face(B, [P(s0, 0.02, 3.2), P(s1, 0.02, 3.2), P(s1, d, 2.7), P(s0, d, 2.7)], nt, tn, pl, [[0, 0], [1, 0], [1, 1], [0, 1]]);
         face(B, [P(s0, 0.02, 3.19), P(s1, 0.02, 3.19), P(s1, d, 2.69), P(s0, d, 2.69)], [-nt[0], -nt[1], -nt[2]], dk, pl, [[0, 0], [1, 0], [1, 1], [0, 1]]);
-        face(B, [P(s0, d, 2.38), P(s1, d, 2.38), P(s1, d, 2.7), P(s0, d, 2.7)], [best.ox, 0, best.oz], tint, pl, [[0, 0], [1, 0], [1, 1], [0, 1]]);
+        face(B, [P(s0, d, 2.38), P(s1, d, 2.38), P(s1, d, 2.7), P(s0, d, 2.7)], [best.ox, 0, best.oz], tn, pl, [[0, 0], [1, 0], [1, 1], [0, 1]]);
         for (const [sx, sgn] of [[s0, -1], [s1, 1]]) face(B, [P(sx, 0.02, 3.2), P(sx, d, 2.7), P(sx, d, 2.38), P(sx, 0.02, 2.38 + 0.5)], [ux * sgn, 0, uz * sgn], dk, pl, [[0, 0], [1, 0], [1, 1], [0, 1]]);
       }
       band(B, pts, ol, baseY + 4.2, baseY + 4.5, 0.16, TRIM.map((c) => c * 0.85), pl);
+      // a neon blade sign hung off the front of a downtown shop
+      if (a.area === 'core' && hash(seed + 81) < 0.5 && best.L > 5) {
+        const s = best.L * (0.2 + hash(seed + 82) * 0.6), bx = best.x0 + ux * s + best.ox * 0.62, bz = best.z0 + uz * s + best.oz * 0.62;
+        obox(B, best.x0 + ux * s + best.ox * 0.35, best.z0 + uz * s + best.oz * 0.35, best.ox, best.oz, 0.35, 0.03, baseY + 6.05, baseY + 6.12, lin(0x222222), pl);
+        panel(litB, bx, baseY + 4.95, bz, ux, uz, 0.45, 2.1, nameUV('blade', label || SIGN_NAMES[Math.floor(hash(seed + 83) * SIGN_NAMES.length)], t.key), undefined, true, 1);
+      }
     }
-    // houses: front door, a porch with steps and posts, gutters, a chimney, a driveway to the street
+    // houses: front door, a porch by style, garage doors, gutters, a chimney, a driveway, yard life and night life
     const baseYb = baseY;
+    let streetSide = 0; // which roof side (+v / -v) faces the street, set by the roof code
     if (house && best) {
       const ux = (best.x1 - best.x0) / best.L, uz = (best.z1 - best.z0) / best.L, ox = best.ox, oz = best.oz;
-      const porch = best.L > 6 && hash(seed + 31) < 0.75, ph = porch ? 0.35 : 0.15;
-      const df = 0.3 + hash(seed + 32) * 0.4, dx = best.x0 + ux * best.L * df, dz = best.z0 + uz * best.L * df;
+      const pk = HS ? HS.porch : best.L > 6 && hash(seed + 31) < 0.75 ? 'full' : 'stoop';
+      const porch = pk !== 'stoop' && best.L > 5;
+      const gar = HS && HS.garage && best.L > 7.5 ? (HS.garage === 2 || best.L > 12 ? 2 : 1) : 0, gw = gar === 2 ? 4.9 : 2.6;
+      const gEnd = hash(seed + 34) < 0.5 ? 0 : 1; // garage at the start or the end of the front wall
+      const df = gar ? (gEnd ? 0.25 : 0.75) : 0.3 + hash(seed + 32) * 0.4, dS = best.L * df, dx = best.x0 + ux * dS, dz = best.z0 + uz * dS;
       const door = DOORS[Math.floor(hash(seed + 33) * DOORS.length)];
-      const baseY = Math.max(baseYb, terrainHeight(dx + ox * 1.5, dz + oz * 1.5)); // the porch sits on the ground in front, not the lowest corner
-      obox(B, dx + ox * 0.03, dz + oz * 0.03, ux, uz, 0.62, 0.03, baseY + ph, baseY + ph + 2.3, TRIM, pl);
-      obox(B, dx + ox * 0.06, dz + oz * 0.06, ux, uz, 0.48, 0.03, baseY + ph, baseY + ph + 2.12, door, pl);
+      const by = Math.max(baseYb, terrainHeight(dx + ox * 1.5, dz + oz * 1.5)); // the porch sits on the ground in front, not the lowest corner
+      const ph = porch ? 0.35 : 0.15;
+      obox(B, dx + ox * 0.03, dz + oz * 0.03, ux, uz, 0.62, 0.03, by + ph, by + ph + 2.3, TRIM, pl);
+      obox(B, dx + ox * 0.06, dz + oz * 0.06, ux, uz, 0.48, 0.03, by + ph, by + ph + 2.12, door, pl);
+      // porch lamp beside the door
+      { const lx = dx + ux * 0.85 + ox * 0.09, lz = dz + uz * 0.85 + oz * 0.09, ly = by + ph + 1.95; glowQuad(glowB, [[lx - ux * 0.09, ly, lz - uz * 0.09], [lx + ux * 0.09, ly, lz + uz * 0.09], [lx + ux * 0.09, ly + 0.26, lz + uz * 0.09], [lx - ux * 0.09, ly + 0.26, lz - uz * 0.09]], [ox, 0, oz], FIXTURE, 0, hash(seed + 91)); }
+      let pc = dS, hwP = 0, dep = 2.2;
       if (porch) {
-        const hw = Math.min(best.L * 0.42, 3.6), pc = Math.max(hw + 0.3, Math.min(best.L - hw - 0.3, best.L * df)), px = best.x0 + ux * pc, pz = best.z0 + uz * pc, dep = 2.2;
-        obox(B, px + ox * dep / 2, pz + oz * dep / 2, ux, uz, hw, dep / 2, baseY - 0.6, baseY + ph, WOOD, pl);
-        for (const sx of [-hw + 0.12, hw - 0.12]) obox(B, px + ux * sx + ox * (dep - 0.12), pz + uz * sx + oz * (dep - 0.12), ux, uz, 0.08, 0.08, baseY + ph, baseY + 2.85, TRIM, pl);
-        obox(B, px + ox * (dep + 0.1) / 2, pz + oz * (dep + 0.1) / 2, ux, uz, hw + 0.15, (dep + 0.1) / 2, baseY + 2.85, baseY + 3.0, TRIM, pl, 4, true);
-        obox(B, dx + ox * (dep + 0.2), dz + oz * (dep + 0.2), ux, uz, 0.7, 0.2, baseY - 0.4, baseY + ph * 0.5, CONCRETE, pl);
-        // rails either side of the steps
-        for (const [a, b] of [[-hw + 0.1, (df * best.L - pc) - 0.75], [(df * best.L - pc) + 0.75, hw - 0.1]]) if (b - a > 0.3) obox(B, px + ux * (a + b) / 2 + ox * (dep - 0.12), pz + uz * (a + b) / 2 + oz * (dep - 0.12), ux, uz, (b - a) / 2, 0.04, baseY + ph + 0.8, baseY + ph + 0.9, TRIM, pl);
-      } else obox(B, dx + ox * 0.45, dz + oz * 0.45, ux, uz, 0.75, 0.4, baseY - 0.4, baseY + ph, CONCRETE, pl);
+        hwP = pk === 'small' ? 1.5 : Math.min(best.L * 0.48, pk === 'wrap' ? 6.5 : 4.6);
+        pc = Math.max(hwP + 0.3, Math.min(best.L - hwP - 0.3, dS));
+        if (gar) { const g0 = gEnd ? best.L - 0.6 - gw : 0.6, g1 = g0 + gw; if (pc + hwP > g0 - 0.3 && pc - hwP < g1 + 0.3) { hwP = Math.min(hwP, 1.5); pc = gEnd ? Math.min(pc, g0 - hwP - 0.4) : Math.max(pc, g1 + hwP + 0.4); } }
+        dep = pk === 'small' ? 1.6 : pk === 'wrap' ? 2.6 : 2.3;
+        const px = best.x0 + ux * pc, pz = best.z0 + uz * pc, post = a.style === 'bungalow' ? 0.15 : 0.08;
+        obox(B, px + ox * dep / 2, pz + oz * dep / 2, ux, uz, hwP, dep / 2, by - 0.6, by + ph, WOOD, pl);
+        for (const sx of [-hwP + 0.12, hwP - 0.12]) { obox(B, px + ux * sx + ox * (dep - 0.14), pz + uz * sx + oz * (dep - 0.14), ux, uz, post, post, by + ph, by + 2.85, TRIM, pl); if (post > 0.1) obox(B, px + ux * sx + ox * (dep - 0.14), pz + uz * sx + oz * (dep - 0.14), ux, uz, post + 0.07, post + 0.07, by + ph, by + ph + 0.9, lin(0x8c8278), pl); }
+        obox(B, px + ox * (dep + 0.1) / 2, pz + oz * (dep + 0.1) / 2, ux, uz, hwP + 0.15, (dep + 0.1) / 2, by + 2.85, by + 3.0, TRIM, pl, 4, true);
+        obox(B, dx + ox * (dep + 0.2), dz + oz * (dep + 0.2), ux, uz, 0.7, 0.2, by - 0.4, by + ph * 0.5, CONCRETE, pl);
+        for (const [a0, b0] of [[-hwP + 0.1, (dS - pc) - 0.75], [(dS - pc) + 0.75, hwP - 0.1]]) if (b0 - a0 > 0.3) obox(B, px + ux * (a0 + b0) / 2 + ox * (dep - 0.12), pz + uz * (a0 + b0) / 2 + oz * (dep - 0.12), ux, uz, (b0 - a0) / 2, 0.04, by + ph + 0.8, by + ph + 0.9, TRIM, pl);
+      } else obox(B, dx + ox * 0.45, dz + oz * 0.45, ux, uz, 0.75, 0.4, by - 0.4, by + ph, CONCRETE, pl);
+      // garage doors on ranches and newer two-storeys (OSM traces the garage as part of the house)
+      let gS = -1;
+      if (gar) {
+        gS = gEnd ? best.L - 0.6 - gw / 2 : 0.6 + gw / 2;
+        const gx = best.x0 + ux * gS, gz = best.z0 + uz * gS, gy = Math.max(baseYb, terrainHeight(gx + ox * 1.5, gz + oz * 1.5));
+        obox(B, gx + ox * 0.04, gz + oz * 0.04, ux, uz, gw / 2, 0.04, gy, gy + 2.2, GDOOR, atl(CELL.garage));
+        obox(B, gx + ox * 0.05, gz + oz * 0.05, ux, uz, gw / 2 + 0.12, 0.04, gy + 2.2, gy + 2.35, TRIM, pl);
+      }
+      // stone wainscot across the front of newer houses
+      if (a.style === 'modern2') obox(B, (best.x0 + best.x1) / 2 + ox * 0.05, (best.z0 + best.z1) / 2 + oz * 0.05, ux, uz, best.L / 2, 0.05, baseYb - 0.4, baseYb + 1.0, lin(0xc9bba0), atl(CELL.stone));
+      // window glow at night: TV blue or lamp-warm in a real window of the facade texture (siding: bays 0 and 2 of every
+      // 16 m, 1.6 m wide, sill 0.83 m; brick: every 4 m, 2.1 m wide), ground floor and, on two-storeys, upstairs
+      const winAt = cell === 'siding' ? (s) => { const m = (((wallAlong[best.i] + s) % 16) + 16) % 16; return Math.abs(m - 2) < 0.05 || Math.abs(m - 10) < 0.05; } : null;
+      if (cell === 'siding' || cell.startsWith('brick')) {
+        const step = cell === 'siding' ? 8 : 4, hwW = cell === 'siding' ? 0.78 : 1.0, a0 = wallAlong[best.i], first = (((cell === 'siding' ? 2 : 2) - a0) % step + step) % step;
+        let k = 0;
+        for (let s = first; s < best.L - 0.9 && k < 3; s += step) {
+          if (s < 0.9 || Math.abs(s - dS) < 1.6 || (gS >= 0 && Math.abs(s - gS) < gw / 2 + 1.2) || (winAt && !winAt(s))) continue;
+          const wx = best.x0 + ux * s + ox * 0.03, wz = best.z0 + uz * s + oz * 0.03;
+          for (const fl of hgt > 5.5 ? [0, 1] : [0]) {
+            const y0 = baseYb + (cell === 'siding' ? 0.83 : 0.72) + fl * 3.3, y1 = y0 + (cell === 'siding' ? 1.7 : 2.0);
+            if (y1 > top - 0.1) continue;
+            glowQuad(glowB, [[wx - ux * hwW, y0, wz - uz * hwW], [wx + ux * hwW, y0, wz + uz * hwW], [wx + ux * hwW, y1, wz + uz * hwW], [wx - ux * hwW, y1, wz - uz * hwW]], [ox, 0, oz], [0, 0, 0], 1, hash(seed + 95 + k * 7 + fl * 3));
+          }
+          k++;
+        }
+      }
+      const fenceLine = road ? (road.x - dx) * ox + (road.z - dz) * oz - (road.e.width || 7) / 2 - WALK_W - 0.6 : 0;
       // a flower bed under the front windows, a fence or hedge along the front of the yard
-      if (junk) {
-        const fs = df < 0.5 ? Math.min(best.L - 1.2, best.L * df + 2.2) : Math.max(1.2, best.L * df - 2.2);
-        if (hash(seed + 35) < 0.55) junk.push({ kind: hash(seed + 36) < 0.6 ? 'flowers' : 'hedge', x: best.x0 + ux * fs + ox * (porch ? 2.7 : 0.6), z: best.z0 + uz * fs + oz * (porch ? 2.7 : 0.6), y: baseY, h: Math.atan2(ox, oz) });
-        if (road) {
-          const front = (road.x - dx) * ox + (road.z - dz) * oz - (road.e.width || 7) / 2 - WALK_W - 0.6;
-          const r = hash(seed + 37), kindF = dist === 'west' && r < 0.5 ? 'chainlink' : r < 0.45 ? 'picket' : r < 0.65 ? 'hedge' : null;
-          if (kindF && front > 3.5 && front < 14) {
-            const seg = kindF === 'chainlink' ? 3 : kindF === 'hedge' ? 2 : 2.4, a0 = -3, a1 = best.L + 3;
-            const gate = best.L * df, drive = df < 0.5 ? best.L * 0.85 : best.L * 0.15, hasDrive = hash(seed + 34) < 0.6;
-            for (let a = a0; a + seg <= a1 + 0.01; a += seg) {
-              const mid = a + seg / 2;
-              if (Math.abs(mid - gate) < seg * 0.5 || (hasDrive && Math.abs(mid - drive) < seg * 0.5 + 1.4)) continue;
-              const fx = best.x0 + ux * mid + ox * front, fz = best.z0 + uz * mid + oz * front;
-              junk.push({ kind: kindF, x: fx, z: fz, y: terrainHeight(fx, fz), h: Math.atan2(ox, oz) });
-            }
+      const bedS = df < 0.5 ? Math.min(best.L - 1.2, dS + 2.2) : Math.max(1.2, dS - 2.2);
+      if (hash(seed + 35) < 0.55 && !gar) junk.push({ kind: hash(seed + 36) < 0.6 ? 'flowers' : 'hedge', x: best.x0 + ux * bedS + ox * (porch ? dep + 0.5 : 0.6), z: best.z0 + uz * bedS + oz * (porch ? dep + 0.5 : 0.6), y: by, h: Math.atan2(ox, oz) });
+      if (hash(seed + 66) < 0.06) { const gx = best.x0 + ux * bedS + ox * (porch ? dep + 1.1 : 1.3), gz = best.z0 + uz * bedS + oz * (porch ? dep + 1.1 : 1.3); junk.push({ kind: 'gnome', x: gx, z: gz, y: terrainHeight(gx, gz), h: Math.atan2(ox, oz) }); }
+      const hasDrive = !has.drive && (gar || hash(seed + 34.5) < 0.6), driveS = gar ? gS : df < 0.5 ? best.L * 0.85 : best.L * 0.15;
+      // front-yard fences belong to the pre-war blocks (picket, hedge, chain-link in the working-class West End)
+      if (road && !has.fence && (a.year < 1946 || (a.year < 1975 && hash(seed + 38) < 0.12))) {
+        const r = hash(seed + 37), kindF = dist === 'west' && r < 0.5 ? 'chainlink' : r < 0.45 ? 'picket' : r < 0.65 ? 'hedge' : null;
+        if (kindF && fenceLine > 3.5 && fenceLine < 14) {
+          const seg = kindF === 'chainlink' ? 3 : kindF === 'hedge' ? 2 : 2.4;
+          for (let s = -3; s + seg <= best.L + 3.01; s += seg) {
+            const mid = s + seg / 2;
+            if (Math.abs(mid - dS) < seg * 0.5 || (hasDrive && Math.abs(mid - driveS) < seg * 0.5 + 1.4)) continue;
+            const fx = best.x0 + ux * mid + ox * fenceLine, fz = best.z0 + uz * mid + oz * fenceLine;
+            junk.push({ kind: kindF, x: fx, z: fz, y: terrainHeight(fx, fz), h: Math.atan2(ox, oz) });
           }
         }
       }
-      // driveway on the far side from the door, out to the kerb
-      if (road && hash(seed + 34) < 0.6) {
-        const f = df < 0.5 ? 0.85 : 0.15, sx = best.x0 + ux * best.L * f + ox * 0.1, sz = best.z0 + uz * best.L * f + oz * 0.1;
+      // a flag on a pole out front (more common on newer lots)
+      if (hash(seed + 67) < (a.year >= 1975 ? 0.07 : 0.03) && fenceLine > 5) { const fx = dx + ox * Math.min(5, fenceLine - 1) + ux * 2.5, fz = dz + oz * Math.min(5, fenceLine - 1) + uz * 2.5; junk.push({ kind: 'flagpole', x: fx, z: fz, y: terrainHeight(fx, fz), h: Math.atan2(ux, uz) }); }
+      // driveway out to the kerb (in front of the garage doors when there are any), sometimes a pickup or car on it
+      if (road && hasDrive) {
+        const sx = best.x0 + ux * driveS + ox * 0.1, sz = best.z0 + uz * driveS + oz * 0.1, half = gar ? gw / 2 + 0.3 : 1.4;
         const len = (road.x - sx) * ox + (road.z - sz) * oz - (road.e.width || 7) / 2;
         if (len > 2 && len < 24) {
           const segs = Math.ceil(len / 4);
           for (let k = 0; k < segs; k++) {
-            const a = (k / segs) * len, b = ((k + 1) / segs) * len, Pd = (o, w) => { const x = sx + ox * o + ux * w, z = sz + oz * o + uz * w; return [x, terrainHeight(x, z) + 0.05, z]; };
-            face(B, [Pd(a, -1.4), Pd(a, 1.4), Pd(b, 1.4), Pd(b, -1.4)], [0, 1, 0], CONCRETE, pl, [[0, 0], [1, 0], [1, 1], [0, 1]]);
+            const a0 = (k / segs) * len, b0 = ((k + 1) / segs) * len, Pd = (o, w) => { const x = sx + ox * o + ux * w, z = sz + oz * o + uz * w; return [x, terrainHeight(x, z) + 0.05, z]; };
+            face(B, [Pd(a0, -half), Pd(a0, half), Pd(b0, half), Pd(b0, -half)], [0, 1, 0], CONCRETE, pl, [[0, 0], [1, 0], [1, 1], [0, 1]]);
           }
+          if (len > 6.5 && hash(seed + 64) < 0.5) newK.push(sx + ox * Math.min(len - 3, 3.6) - t.ox, sz + oz * Math.min(len - 3, 3.6) - t.oz, Math.atan2(ox, oz), 1);
         }
       }
+      // the back yard: sheds, swing sets, trampolines (more of them on newer, bigger lots)
+      let depth = 0; for (let i = 0; i < n; i++) depth = Math.max(depth, -((pts[i * 2] - cx) * ox + (pts[i * 2 + 1] - cz) * oz));
+      const newer = a.year >= 1975, items = [];
+      if (hash(seed + 60) < (newer ? 0.28 : 0.12)) items.push('swing');
+      if (hash(seed + 61) < (newer ? 0.22 : 0.08)) items.push('tramp');
+      if (hash(seed + 62) < (a.style === 'farmhouse' ? 0.15 : newer ? 0.25 : 0.3)) items.push('shed');
+      items.forEach((kd, k) => {
+        const back = depth + 4 + hash(seed + 63 + k) * 4, lat = (k - (items.length - 1) / 2) * 4.5, x = cx - ox * back + ux * lat, z = cz - oz * back + uz * lat;
+        if (occupied(x, z, kd === 'tramp' ? 2.2 : 1.8) || nearestEdge(x, z, 6)) return;
+        junk.push({ kind: kd, x, z, y: terrainHeight(x, z), h: Math.atan2(ox, oz) + (kd === 'shed' ? Math.PI : 0) });
+        if (kd === 'shed') X.solid.push(makeBox(x, z, ox, oz, 1.6, 1.3, terrainHeight(x, z) - 0.3, 3));
+      });
+      // farmhouses: a mailbox on a post at the road
+      if (a.style === 'farmhouse' && road) { const l = Math.hypot(cx - road.x, cz - road.z) || 1, o = road.e.width / 2 + 1.6, mx = road.x + (cx - road.x) / l * o, mz = road.z + (cz - road.z) / l * o; junk.push({ kind: 'ruralbox', x: mx, z: mz, y: terrainHeight(mx, mz), h: Math.atan2(road.x - mx, road.z - mz) }); }
+      // Christmas lights along the porch roof (and the eaves, below) when it snows; 55% of houses put them up
+      if (porch && hash(seed + 90) < 0.55) {
+        const px = best.x0 + ux * pc + ox * (dep + 0.08), pz = best.z0 + uz * pc + oz * (dep + 0.08), y = by + 2.86;
+        glowQuad(glowB, [[px - ux * hwP, y, pz - uz * hwP], [px + ux * hwP, y, pz + uz * hwP], [px + ux * hwP, y + 0.08, pz + uz * hwP], [px - ux * hwP, y + 0.08, pz - uz * hwP]], [ox, 0, oz], [1, 1, 1], 2, 0, hwP * 2 / 0.33);
+      }
     }
-    // a lit sign with a made-up name over the shop fronts, on the wall facing the street
-    if (store && SB && hash(seed + 9) < 0.85) {
-      {
-        if (best) {
-          const w = Math.min(best.L * 0.6, 9), mx = (best.x0 + best.x1) / 2 + best.ox * 0.14, mz = (best.z0 + best.z1) / 2 + best.oz * 0.14;
-          const ux = (best.x1 - best.x0) / best.L, uz = (best.z1 - best.z0) / best.L, y0 = baseY + 3.25, y1 = baseY + 4.15;
-          // winding: face outward
-          const flip = ux * best.oz - uz * best.ox > 0;
-          const si = Math.floor(hash(seed + 11) * 128), su = (si % 8) / 8, sv = 1 - (Math.floor(si / 8) + 1) / 16;
-          const ax = mx - ux * w / 2, az = mz - uz * w / 2, bx = mx + ux * w / 2, bz = mz + uz * w / 2;
-          const a = SB.v(ax, y0, az, best.ox, 0, best.oz, 1, 1, 1, flip ? su : su + 1 / 8, sv), b = SB.v(bx, y0, bz, best.ox, 0, best.oz, 1, 1, 1, flip ? su + 1 / 8 : su, sv);
-          const c = SB.v(bx, y1, bz, best.ox, 0, best.oz, 1, 1, 1, flip ? su + 1 / 8 : su, sv + 1 / 16), d = SB.v(ax, y1, az, best.ox, 0, best.oz, 1, 1, 1, flip ? su : su + 1 / 8, sv + 1 / 16);
-          if (flip) SB.quad(a, b, c, d); else SB.quad(b, a, d, c);
-        }
+    // detached garages (OSM traces them): a door on the side facing the alley or street
+    if (garage && best && road) {
+      const ux = (best.x1 - best.x0) / best.L, uz = (best.z1 - best.z0) / best.L, w = Math.min(best.L - 0.6, best.L >= 6.2 ? 4.9 : 2.6);
+      if (w > 1.8) { const gx = (best.x0 + best.x1) / 2, gz = (best.z0 + best.z1) / 2, gy = Math.max(baseY, terrainHeight(gx + best.ox, gz + best.oz)); obox(B, gx + best.ox * 0.04, gz + best.oz * 0.04, ux, uz, w / 2, 0.04, gy, Math.min(top - 0.1, gy + 2.15), GDOOR, atl(CELL.garage)); }
+    }
+    // industrial: a row of truck-dock doors (raised to trailer height, with bumpers) on the side facing the drive
+    if (ind && best && best.L > 9) {
+      const ux = (best.x1 - best.x0) / best.L, uz = (best.z1 - best.z0) / best.L, nD = Math.min(8, Math.floor((best.L - 3) / 4.6));
+      for (let k = 0; k < nD; k++) {
+        const s = (best.L - (nD - 1) * 4.6) / 2 + k * 4.6, x = best.x0 + ux * s + best.ox * 0.05, z = best.z0 + uz * s + best.oz * 0.05;
+        obox(B, x, z, ux, uz, 1.5, 0.05, baseY + 1.1, Math.min(top - 0.3, baseY + 4.1), lin(0x55595d), atl(CELL.garage));
+        for (const sx of [-1.75, 1.75]) obox(B, x + ux * sx + best.ox * 0.12, z + uz * sx + best.oz * 0.12, ux, uz, 0.12, 0.12, baseY + 0.9, baseY + 1.4, lin(0x1c1c1c), pl);
+      }
+    }
+    // farmsteads keep a grass yard (no crop rows) and get hay bales by the barn
+    if (farm) yards.push({ x: cx, z: cz, r: Math.sqrt(fp) * 0.7 + 14 });
+    if (a.style === 'barn' && hash(seed + 71) < 0.55) for (let k = 0; k < 3; k++) { const hx = cx + (hash(seed + 72 + k) - 0.5) * 6 + Math.sqrt(fp) * 0.7 + 2, hz = cz + (hash(seed + 75 + k) - 0.5) * 6; if (!occupied(hx, hz, 1)) { junk.push({ kind: 'haybale', x: hx, z: hz, y: terrainHeight(hx, hz), h: hash(seed + k) * 3 }); X.solid.push(makeBox(hx, hz, 1, 0, 0.75, 0.75, terrainHeight(hx, hz) - 0.2, 1.5)); } }
+    // car dealerships: shop=car on the building (rows of cars and flags in its lot, see detail.js)
+    if (a.shop === 'car' || /\b(Motors|Auto Sales|Chevrolet|Ford|Toyota|Honda|Nissan|Hyundai|Kia|Subaru|Dodge|Jeep|Buick|GMC|Cadillac|Lexus|Mazda|Volkswagen)\b/.test(name)) dealers.push({ x: cx, z: cz });
+    // a lit sign over the shop fronts on the wall facing the street: the real name when the map has one
+    if (store && best && hash(seed + 9) < 0.85) {
+      const w = Math.min(best.L * 0.6, 9), mx = (best.x0 + best.x1) / 2 + best.ox * 0.14, mz = (best.z0 + best.z1) / 2 + best.oz * 0.14;
+      const ux = (best.x1 - best.x0) / best.L, uz = (best.z1 - best.z0) / best.L, y0 = baseY + 3.25, y1 = baseY + 4.15;
+      const shopName = label || (a.area === 'strip' && fp < 650 && road && PADROAD.has(road.e.cls) ? pick(STRIP_FOOD, seed + 85) : '');
+      if (shopName) panel(litB, mx, (y0 + y1) / 2, mz, best.ox, best.oz, Math.min(w, 4.2), Math.min(w, 4.2) / 4.67, nameUV('shop', shopName, t.key), null, false, 1);
+      else if (SB) {
+        const flip = ux * best.oz - uz * best.ox > 0;
+        const si = Math.floor(hash(seed + 11) * 128), su = (si % 8) / 8, sv = 1 - (Math.floor(si / 8) + 1) / 16;
+        const ax = mx - ux * w / 2, az = mz - uz * w / 2, bx = mx + ux * w / 2, bz = mz + uz * w / 2;
+        const i0 = SB.v(ax, y0, az, best.ox, 0, best.oz, 1, 1, 1, flip ? su : su + 1 / 8, sv), i1 = SB.v(bx, y0, bz, best.ox, 0, best.oz, 1, 1, 1, flip ? su + 1 / 8 : su, sv);
+        const i2 = SB.v(bx, y1, bz, best.ox, 0, best.oz, 1, 1, 1, flip ? su + 1 / 8 : su, sv + 1 / 16), i3 = SB.v(ax, y1, az, best.ox, 0, best.oz, 1, 1, 1, flip ? su : su + 1 / 8, sv + 1 / 16);
+        if (flip) SB.quad(i0, i1, i2, i3); else SB.quad(i1, i0, i3, i2);
+      }
+    }
+    // strip pads (fast food, gas, banks along the arterials): a tall pylon sign at the road
+    if (a.area === 'strip' && !sloped && fp > 110 && fp < 650 && road && PADROAD.has(road.e.cls) && road.d < 60 && hash(seed + 86) < 0.8) {
+      const l = Math.hypot(cx - road.x, cz - road.z) || 1, o = road.e.width / 2 + 3.2, px = road.x + (cx - road.x) / l * o, pz = road.z + (cz - road.z) / l * o, py = terrainHeight(px, pz);
+      const nx = Math.sin(road.h), nz = Math.cos(road.h), ux = nz, uz = -nx, txt = label || pick(STRIP_FOOD, seed + 85);
+      for (const s of [-1.1, 1.1]) obox(B, px + ux * s, pz + uz * s, 1, 0, 0.16, 0.16, py - 0.3, py + 7.4, lin(0x6d7175), pl);
+      obox(B, px, pz, ux, uz, 1.95, 0.25, py + 7.4, py + 8.4, lin(0x2a2c2e), pl);
+      panel(litB, px, py + 7.9, pz, nx, nz, 3.7, 0.79, nameUV('pole', txt, t.key), undefined, false, 1);
+      X.solid.push(makeBox(px, pz, nx, nz, 0.25, 1.3, py - 0.5, 7.5));
+      // drive-through menu board along the side
+      const mx = cx + ux * (Math.sqrt(fp) / 2 + 2.2), mz = cz + uz * (Math.sqrt(fp) / 2 + 2.2);
+      if (!occupied(mx, mz, 0.8) && !nearestEdge(mx, mz, 4, (e) => e.cls !== 'service')) junk.push({ kind: 'menuboard', x: mx, z: mz, y: terrainHeight(mx, mz), h: Math.atan2(-ux, -uz) });
+    }
+    // big boxes: the store's name in big letters over the entrance and a glass vestibule; cart corrals go in its lot
+    if (bigBox && best) {
+      const ux = (best.x1 - best.x0) / best.L, uz = (best.z1 - best.z0) / best.L, mx = (best.x0 + best.x1) / 2, mz = (best.z0 + best.z1) / 2;
+      const w = Math.min(best.L * 0.42, 20), txt = label || pick(BIGBOX, seed + 87);
+      panel(litB, mx + best.ox * 0.1, Math.max(baseY + 4.6, top - 0.6 - w / 9.3), mz + best.oz * 0.1, best.ox, best.oz, w, w / 4.67, nameUV('bigbox', txt, t.key), null, false, 1);
+      obox(B, mx + best.ox * 2.2, mz + best.oz * 2.2, ux, uz, Math.min(5, best.L * 0.15), 2.2, baseY - 0.3, baseY + 4.2, [1, 1, 1], S, 18);
+      bigBoxes.push({ x: mx + best.ox * 30, z: mz + best.oz * 30 });
+    }
+    // downtown: a faded painted ad high on an exposed side wall of an old brick block
+    if (a.area === 'core' && cell.startsWith('brick') && hgt > 8 && !sloped && hash(seed + 80) < 0.3) {
+      let side = -1, sl = 6;
+      for (let i = 0; i < n; i++) { if (best && i === best.i) continue; const L = Math.hypot(pts[((i + 1) % n) * 2] - pts[i * 2], pts[((i + 1) % n) * 2 + 1] - pts[i * 2 + 1]); if (L > sl) { sl = L; side = i; } }
+      if (side >= 0) {
+        const x0 = pts[side * 2], z0 = pts[side * 2 + 1], x1 = pts[((side + 1) % n) * 2], z1 = pts[((side + 1) % n) * 2 + 1], nn = ol.N[side];
+        const w = Math.min(sl * 0.7, 9), h = w / 4.67, mx = (x0 + x1) / 2 + nn[0] * 0.04, mz = (z0 + z1) / 2 + nn[1] * 0.04;
+        if (!occupied(mx + nn[0] * 1.5, mz + nn[1] * 1.5, 0.5)) panel(namesB, mx, top - 1.3 - h / 2, mz, nn[0], nn[1], w, h, nameUV('ghost', pick(GHOST, seed + 84), t.key), null);
       }
     }
     // a little grit in the older and rougher parts of town: tags on walls, bags and a dumpster out back
-    const gritty = dist === 'west' || dist === 'riverfront' || kind === 4 || (dist === 'hilltop' && !pitched);
-    if (GB && gritty && !pitched && hash(seed + 21) < 0.35) {
+    const gritty = dist === 'west' || dist === 'riverfront' || kind === 4 || a.area === 'industrial' || (dist === 'hilltop' && !sloped);
+    if (GB && gritty && !sloped && hash(seed + 21) < 0.35) {
       for (let i = 0; i < n; i++) {
         const x0 = pts[i * 2], z0 = pts[i * 2 + 1], x1 = pts[((i + 1) % n) * 2], z1 = pts[((i + 1) % n) * 2 + 1], L = Math.hypot(x1 - x0, z1 - z0);
         if (L < 6 || hash(seed + i * 3) > 0.4) continue;
@@ -428,9 +593,9 @@ function buildBuildings(t, B, boxes, foot, SB, GB, junk) {
         const ux = (x1 - x0) / L, uz = (z1 - z0) / L, w = 3.4, f = 0.2 + hash(seed + i) * 0.6, mx = x0 + ux * L * f + ox * 0.08, mz = z0 + uz * L * f + oz * 0.08;
         const ti = Math.floor(hash(seed + i * 7) * 8), su = (ti % 4) / 4, sv = 1 - (Math.floor(ti / 4) + 1) / 2, flip = ux * oz - uz * ox > 0;
         const y0 = baseY + 0.3, y1 = baseY + 2.1, ax = mx - ux * w / 2, az = mz - uz * w / 2, bx = mx + ux * w / 2, bz = mz + uz * w / 2;
-        const a = GB.v(ax, y0, az, ox, 0, oz, 1, 1, 1, flip ? su : su + 0.25, sv), b = GB.v(bx, y0, bz, ox, 0, oz, 1, 1, 1, flip ? su + 0.25 : su, sv);
-        const c = GB.v(bx, y1, bz, ox, 0, oz, 1, 1, 1, flip ? su + 0.25 : su, sv + 0.5), d = GB.v(ax, y1, az, ox, 0, oz, 1, 1, 1, flip ? su : su + 0.25, sv + 0.5);
-        if (flip) GB.quad(a, b, c, d); else GB.quad(b, a, d, c);
+        const i0 = GB.v(ax, y0, az, ox, 0, oz, 1, 1, 1, flip ? su : su + 0.25, sv), i1 = GB.v(bx, y0, bz, ox, 0, oz, 1, 1, 1, flip ? su + 0.25 : su, sv);
+        const i2 = GB.v(bx, y1, bz, ox, 0, oz, 1, 1, 1, flip ? su + 0.25 : su, sv + 0.5), i3 = GB.v(ax, y1, az, ox, 0, oz, 1, 1, 1, flip ? su : su + 0.25, sv + 0.5);
+        if (flip) GB.quad(i0, i1, i2, i3); else GB.quad(i1, i0, i3, i2);
         if (junk && hash(seed + i * 11) < 0.5) {
           const jx = x0 + ux * L * (1 - f) + ox * 1.1, jz = z0 + uz * L * (1 - f) + oz * 1.1;
           junk.push({ kind: 'dumpster', x: jx, z: jz, y: terrainHeight(jx, jz), h: Math.atan2(ux, uz) });
@@ -444,14 +609,13 @@ function buildBuildings(t, B, boxes, foot, SB, GB, junk) {
       const contour = []; for (let i = 0; i < n; i++) contour.push(new THREE.Vector2(pts[i * 2], pts[i * 2 + 1]));
       const tris = THREE.ShapeUtils.triangulateShape(contour, []);
       const idx = contour.map((p) => B.v(p.x, y, p.y, 0, 1, 0, ...tintR, p.x / 16, p.y / 16, ...at));
-      for (const [a, b, c] of tris) {
-        // make each triangle face up
-        const pa = contour[a], pb = contour[b], pc = contour[c];
+      for (const [ia, ib, ic] of tris) {
+        const pa = contour[ia], pb = contour[ib], pc = contour[ic];
         const cr = (pb.x - pa.x) * (pc.y - pa.y) - (pb.y - pa.y) * (pc.x - pa.x);
-        if (cr < 0) B.i.push(idx[a], idx[b], idx[c]); else B.i.push(idx[a], idx[c], idx[b]);
+        if (cr < 0) B.i.push(idx[ia], idx[ib], idx[ic]); else B.i.push(idx[ia], idx[ic], idx[ib]);
       }
     };
-    if (!pitched) {
+    if (!sloped) {
       const g = 0.8 + hash(seed + 7) * 0.25;
       flatRoof(top, R, [g, g, g * 0.98]);
       if (kind === 1 || hgt < 4) return;
@@ -465,79 +629,124 @@ function buildBuildings(t, B, boxes, foot, SB, GB, junk) {
         if (big) band(B, pts, ol, top - 3.6, top - 3.4, 0.08, trim, pl);
       } else band(B, pts, ol, top - 0.25, top + (cell === 'metal' ? 0.15 : 0.55), cell === 'metal' ? 0.05 : 0.08, trim, pl, 0.18);
       // the roof: a mechanical penthouse on towers, AC units, water tanks on old blocks
-      if (junk) {
-        const inside = (x, z, r) => pointInPoly(x, z, pts) && pointInPoly(x + r, z + r, pts) && pointInPoly(x - r, z - r, pts) && pointInPoly(x + r, z - r, pts) && pointInPoly(x - r, z + r, pts);
-        let lx = 1, lz = 0, lb = 0;
-        for (let i = 0; i < n; i++) { const ddx = pts[((i + 1) % n) * 2] - pts[i * 2], ddz = pts[((i + 1) % n) * 2 + 1] - pts[i * 2 + 1], l = Math.hypot(ddx, ddz); if (l > lb) { lb = l; lx = ddx / l; lz = ddz / l; } }
-        const rh = Math.atan2(lx, lz);
-        if (hgt > 45 && inside(cx, cz, 7)) {
-          // a stepped crown on the tall towers, with a mast on the very top
-          const A2 = atl(CELL[cell]), w0 = Math.min(9, lb * 0.32);
-          obox(B, cx, cz, lx, lz, w0, w0 * 0.75, top, top + 6.6, tint, A2, 16);
-          band(B, [cx - lx * w0 + lz * w0 * 0.75, cz - lz * w0 - lx * w0 * 0.75, cx + lx * w0 + lz * w0 * 0.75, cz + lz * w0 - lx * w0 * 0.75, cx + lx * w0 - lz * w0 * 0.75, cz + lz * w0 + lx * w0 * 0.75, cx - lx * w0 - lz * w0 * 0.75, cz - lz * w0 + lx * w0 * 0.75], outline([cx - lx * w0 + lz * w0 * 0.75, cz - lz * w0 - lx * w0 * 0.75, cx + lx * w0 + lz * w0 * 0.75, cz + lz * w0 - lx * w0 * 0.75, cx + lx * w0 - lz * w0 * 0.75, cz + lz * w0 + lx * w0 * 0.75, cx - lx * w0 - lz * w0 * 0.75, cz - lz * w0 + lx * w0 * 0.75]), top + 6.4, top + 7.0, 0.2, trim, pl, 0.15);
-          obox(B, cx, cz, lx, lz, w0 * 0.55, w0 * 0.4, top + 6.6, top + 10.5, lin(0xb9bcbe), atl(CELL.metal));
-          obox(B, cx, cz, lx, lz, 0.15, 0.15, top + 10.5, top + 18 + hash(seed + 60) * 10, lin(0x9a9c9e), pl);
-        } else if (hgt > 16 && inside(cx, cz, 4)) obox(B, cx, cz, lx, lz, Math.min(4, lb * 0.16), 2.6, top, top + 3.2, lin(0xb9bcbe), atl(CELL.metal));
-        const nAc = Math.floor(hash(seed + 42) * (hgt > 16 ? 5 : 3));
-        for (let k = 0; k < nAc; k++) {
-          const ax = cx + (hash(seed + k * 5 + 43) - 0.5) * lb * 0.6, az = cz + (hash(seed + k * 5 + 44) - 0.5) * lb * 0.6;
-          if (inside(ax, az, 1.3) && Math.hypot(ax - cx, az - cz) > 4.5) junk.push({ kind: 'ac', x: ax, z: az, y: top, h: rh + (k % 2) * Math.PI / 2 });
-        }
-        if (old && hgt > 9 && (dist === 'downtown' || dist === 'village' || dist === 'west') && hash(seed + 45) < 0.35) {
-          const tx = cx + (hash(seed + 46) - 0.5) * lb * 0.4, tz = cz + (hash(seed + 47) - 0.5) * lb * 0.4;
-          if (inside(tx, tz, 2.2)) junk.push({ kind: 'tank', x: tx, z: tz, y: top, h: hash(seed + 48) * 6 });
-        }
-        // fire escape down a side wall of old walk-ups
-        if (old && !store && hgt > 9 && hgt < 40 && hash(seed + 49) < 0.55) {
-          for (let i = 0; i < n; i++) {
-            if (best && i === best.i) continue;
-            const x0 = pts[i * 2], z0 = pts[i * 2 + 1], x1 = pts[((i + 1) % n) * 2], z1 = pts[((i + 1) % n) * 2 + 1], L = Math.hypot(x1 - x0, z1 - z0);
-            if (L < 8) continue;
-            const nn = ol.N[i], f = 0.3 + hash(seed + 50) * 0.4, fx = x0 + (x1 - x0) * f + nn[0] * 0.05, fz = z0 + (z1 - z0) * f + nn[1] * 0.05, fh = Math.atan2(nn[0], nn[1]);
-            for (let y = baseY + 3.3; y < top - 2.5; y += 3.3) junk.push({ kind: 'fesc', x: fx, z: fz, y, h: fh });
-            break;
-          }
+      const inside = (x, z, r) => pointInPoly(x, z, pts) && pointInPoly(x + r, z + r, pts) && pointInPoly(x - r, z - r, pts) && pointInPoly(x + r, z - r, pts) && pointInPoly(x - r, z + r, pts);
+      let lx = 1, lz = 0, lb = 0;
+      for (let i = 0; i < n; i++) { const ddx = pts[((i + 1) % n) * 2] - pts[i * 2], ddz = pts[((i + 1) % n) * 2 + 1] - pts[i * 2 + 1], l = Math.hypot(ddx, ddz); if (l > lb) { lb = l; lx = ddx / l; lz = ddz / l; } }
+      const rh = Math.atan2(lx, lz);
+      if (hgt > 45 && inside(cx, cz, 7)) {
+        // a stepped crown on the tall towers, with a mast on the very top
+        const A2 = atl(CELL[cell]), w0 = Math.min(9, lb * 0.32), crown = [cx - lx * w0 + lz * w0 * 0.75, cz - lz * w0 - lx * w0 * 0.75, cx + lx * w0 + lz * w0 * 0.75, cz + lz * w0 - lx * w0 * 0.75, cx + lx * w0 - lz * w0 * 0.75, cz + lz * w0 + lx * w0 * 0.75, cx - lx * w0 - lz * w0 * 0.75, cz - lz * w0 + lx * w0 * 0.75];
+        obox(B, cx, cz, lx, lz, w0, w0 * 0.75, top, top + 6.6, tint, A2, 16);
+        band(B, crown, outline(crown), top + 6.4, top + 7.0, 0.2, trim, pl, 0.15);
+        obox(B, cx, cz, lx, lz, w0 * 0.55, w0 * 0.4, top + 6.6, top + 10.5, lin(0xb9bcbe), atl(CELL.metal));
+        obox(B, cx, cz, lx, lz, 0.15, 0.15, top + 10.5, top + 18 + hash(seed + 60) * 10, lin(0x9a9c9e), pl);
+      } else if (hgt > 16 && inside(cx, cz, 4)) obox(B, cx, cz, lx, lz, Math.min(4, lb * 0.16), 2.6, top, top + 3.2, lin(0xb9bcbe), atl(CELL.metal));
+      const nAc = Math.floor(hash(seed + 42) * (hgt > 16 || bigBox ? 5 : 3));
+      for (let k = 0; k < nAc; k++) {
+        const ax = cx + (hash(seed + k * 5 + 43) - 0.5) * lb * 0.6, az = cz + (hash(seed + k * 5 + 44) - 0.5) * lb * 0.6;
+        if (inside(ax, az, 1.3) && Math.hypot(ax - cx, az - cz) > 4.5) junk.push({ kind: 'ac', x: ax, z: az, y: top, h: rh + (k % 2) * Math.PI / 2 });
+      }
+      if (old && hgt > 9 && (a.area === 'core' || dist === 'west') && hash(seed + 45) < 0.35) {
+        const tx = cx + (hash(seed + 46) - 0.5) * lb * 0.4, tz = cz + (hash(seed + 47) - 0.5) * lb * 0.4;
+        if (inside(tx, tz, 2.2)) junk.push({ kind: 'tank', x: tx, z: tz, y: top, h: hash(seed + 48) * 6 });
+      }
+      // fire escape down a side wall of old walk-ups
+      if (old && !store && hgt > 9 && hgt < 40 && hash(seed + 49) < 0.55) {
+        for (let i = 0; i < n; i++) {
+          if (best && i === best.i) continue;
+          const x0 = pts[i * 2], z0 = pts[i * 2 + 1], x1 = pts[((i + 1) % n) * 2], z1 = pts[((i + 1) % n) * 2 + 1], L = Math.hypot(x1 - x0, z1 - z0);
+          if (L < 8) continue;
+          const nn = ol.N[i], f = 0.3 + hash(seed + 50) * 0.4, fx = x0 + (x1 - x0) * f + nn[0] * 0.05, fz = z0 + (z1 - z0) * f + nn[1] * 0.05, fh = Math.atan2(nn[0], nn[1]);
+          for (let y = baseY + 3.3; y < top - 2.5; y += 3.3) junk.push({ kind: 'fesc', x: fx, z: fz, y, h: fh });
+          break;
         }
       }
       return;
     }
-    // gable roof over the footprint's oriented box
+    const rt = lin(tagCol(a.roofCol) ?? (SL ? pick(SL[2], seed + 8) : a.style === 'silo' || a.style === 'bin' ? (a.style === 'silo' && tint[2] > tint[0] ? 0x1d3558 : 0x9aa0a6) : a.style === 'shed_big' ? 0x8f9396 : ROOF_TINTS[Math.floor(hash(seed + 8) * ROOF_TINTS.length)]));
+    // round silos and grain bins: a cone or dome over the footprint
+    if (form === 'cone') {
+      const r = Math.sqrt(fp / Math.PI), apex = [cx, top + r * (a.style === 'silo' ? 0.6 : 0.42), cz], inner = [cx, top - 1, cz];
+      for (let i = 0; i < n; i++) { const j = (i + 1) % n; tri(B, [pts[i * 2], top, pts[i * 2 + 1]], [pts[j * 2], top, pts[j * 2 + 1]], apex, rt, R, [[0, 0], [1, 0], [0.5, 1]], inner); }
+      return;
+    }
+    // pitched roofs over the footprint's oriented box: gable, gambrel (barns) or hip (foursquares, bigger ranches)
     let longest = 0, ux = 1, uz = 0;
-    for (let i = 0; i < n; i++) { const dx = pts[((i + 1) % n) * 2] - pts[i * 2], dz = pts[((i + 1) % n) * 2 + 1] - pts[i * 2 + 1], l = Math.hypot(dx, dz); if (l > longest) { longest = l; ux = dx / l; uz = dz / l; } }
+    for (let i = 0; i < n; i++) { const ddx = pts[((i + 1) % n) * 2] - pts[i * 2], ddz = pts[((i + 1) % n) * 2 + 1] - pts[i * 2 + 1], l = Math.hypot(ddx, ddz); if (l > longest) { longest = l; ux = ddx / l; uz = ddz / l; } }
     const vx = -uz, vz = ux;
     let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
     for (let i = 0; i < n; i++) { const pu = (pts[i * 2] - cx) * ux + (pts[i * 2 + 1] - cz) * uz, pv = (pts[i * 2] - cx) * vx + (pts[i * 2 + 1] - cz) * vz; u0 = Math.min(u0, pu); u1 = Math.max(u1, pu); v0 = Math.min(v0, pv); v1 = Math.max(v1, pv); }
     const oh = 0.45; u0 -= oh; u1 += oh; v0 -= oh; v1 += oh;
-    const rise = Math.max(1.3, Math.min(3.6, (v1 - v0) * 0.36)), vm = (v0 + v1) / 2;
+    const span = v1 - v0, vm = (v0 + v1) / 2;
+    const pitch = HS ? HS.pitch : a.style === 'barn' ? 0.95 : a.style === 'shed_big' ? 0.22 : a.style === 'garage' ? 0.38 : a.style === 'shed' ? 0.45 : null;
+    const rise = pitch != null ? Math.max(0.6, Math.min(6.5, (span / 2) * pitch)) : Math.max(1.3, Math.min(3.6, span * 0.36));
     const W = (pu, pv) => [cx + ux * pu + vx * pv, cz + uz * pu + vz * pv];
-    const rt = lin(ROOF_TINTS[Math.floor(hash(seed + 8) * ROOF_TINTS.length)]);
-    const ey = top - 0.15, ry = top + rise;
-    for (const [va, side] of [[v0, -1], [v1, 1]]) {
-      const [x0, z0] = W(u0, va), [x1, z1] = W(u1, va), [x2, z2] = W(u1, vm), [x3, z3] = W(u0, vm);
-      const sl = Math.hypot(vm - va, rise), nyv = Math.abs(vm - va) / sl, nh = rise / sl;
-      const nx = vx * side * nh, nz = vz * side * nh;
-      const a = B.v(x0, ey, z0, nx, nyv, nz, ...rt, u0 / 6, 0, ...SH), b = B.v(x1, ey, z1, nx, nyv, nz, ...rt, u1 / 6, 0, ...SH);
-      const c = B.v(x2, ry, z2, nx, nyv, nz, ...rt, u1 / 6, sl / 6, ...SH), d = B.v(x3, ry, z3, nx, nyv, nz, ...rt, u0 / 6, sl / 6, ...SH);
-      // face outward/up
-      const fx = (x1 - x0), fz = (z1 - z0), gx = x3 - x0, gy = ry - ey, gz = z3 - z0;
-      const cyv = fz * gx - fx * gz; // y of (f x g)
-      if (cyv > 0) B.quad(a, b, c, d); else B.quad(b, a, d, c);
+    const ey = top - 0.15, ry = top + rise, inner = [cx, top - 1.5, cz];
+    if (road) streetSide = (road.x - cx) * vx + (road.z - cz) * vz > 0 ? 1 : -1;
+    if (form === 'hip') {
+      const hv = span / 2; let ua = u0 + hv, ub = u1 - hv; if (ua > ub) ua = ub = (u0 + u1) / 2;
+      const P = (pu, pv, y) => { const [x, z] = W(pu, pv); return [x, y, z]; };
+      const c00 = P(u0, v0, ey), c10 = P(u1, v0, ey), c11 = P(u1, v1, ey), c01 = P(u0, v1, ey), r1 = P(ua, vm, ry), r2 = P(ub, vm, ry);
+      const uv = (p) => [p[0] / 6 + p[1] / 9, p[2] / 6];
+      for (const [p, q, r] of [[c00, c10, r2], [c00, r2, r1], [c11, c01, r1], [c11, r1, r2], [c10, c11, r2], [c01, c00, r1]]) tri(B, p, q, r, rt, SH, [uv(p), uv(q), uv(r)], inner);
+    } else {
+      const prof = form === 'gambrel' ? [[0, 0], [0.18, 0.62], [0.5, 1], [0.82, 0.62], [1, 0]] : [[0, 0], [0.5, 1], [1, 0]];
+      const PV = prof.map(([f, r]) => [v0 + f * span, ey + r * rise]);
+      let acc = 0;
+      for (let i = 0; i + 1 < PV.length; i++) {
+        const [va, ya] = PV[i], [vb, yb2] = PV[i + 1], dv = vb - va, dy = yb2 - ya, sl = Math.hypot(dv, dy), nv = -dy / sl, ny = dv / sl;
+        const [xa0, za0] = W(u0, va), [xa1, za1] = W(u1, va), [xb1, zb1] = W(u1, vb), [xb0, zb0] = W(u0, vb);
+        face(B, [[xa0, ya, za0], [xa1, ya, za1], [xb1, yb2, zb1], [xb0, yb2, zb0]], [vx * nv, ny, vz * nv], rt, SH, [[u0 / 6, acc / 6], [u1 / 6, acc / 6], [u1 / 6, (acc + sl) / 6], [u0 / 6, (acc + sl) / 6]]);
+        acc += sl;
+      }
+      // gable ends in the wall texture: the profile, with its eaves pulled in to the walls, fanned from the middle
+      const endP = PV.map(([pv, y], i) => [i === 0 ? v0 + oh : i === PV.length - 1 ? v1 - oh : pv, i === 0 || i === PV.length - 1 ? top : y]);
+      for (const ua of [u0 + oh, u1 - oh]) {
+        const [mx, mz] = W(ua, vm), mid = [mx, top, mz];
+        for (let i = 0; i + 1 < endP.length; i++) {
+          const [xa, za] = W(ua, endP[i][0]), [xb, zb] = W(ua, endP[i + 1][0]), pa = [xa, endP[i][1], za], pb = [xb, endP[i + 1][1], zb];
+          const uvw = (p, pv) => [(pv - v0) / 16, (p[1] - baseY) / 13.2];
+          tri(B, mid, pa, pb, tint, A, [uvw(mid, vm), uvw(pa, endP[i][0]), uvw(pb, endP[i + 1][0])], [cx, top - 1, cz]);
+        }
+      }
+      // barns: big doors and a hayloft door on the gable end that faces the road
+      if (a.style === 'barn' && road) {
+        const ue = (road.x - cx) * ux + (road.z - cz) * uz > 0 ? u1 - oh + 0.06 : u0 + oh - 0.06, [bx, bz] = W(ue, vm), dW = span * 0.2;
+        obox(B, bx, bz, vx, vz, dW + 0.18, 0.05, baseY - 0.2, baseY + 3.75, lin(0xf0ece4), pl);
+        obox(B, bx + ux * Math.sign(ue) * 0.03, bz + uz * Math.sign(ue) * 0.03, vx, vz, dW, 0.05, baseY - 0.2, baseY + 3.55, lin(0x5e1d16), pl);
+        obox(B, bx, bz, vx, vz, 0.75, 0.05, top + 0.4, top + 1.8, lin(0xf0ece4), pl);
+      }
     }
-    for (const [ua, side] of [[u0 + oh, -1], [u1 - oh, 1]]) { // gable ends (wall texture)
-      const [x0, z0] = W(ua, v0 + oh), [x1, z1] = W(ua, v1 - oh), [x2, z2] = W(ua, vm);
-      const nx = ux * side, nz = uz * side;
-      const a = B.v(x0, top, z0, nx, 0, nz, ...tint, 0, (top - baseY) / 13.2, ...A), b = B.v(x1, top, z1, nx, 0, nz, ...tint, (v1 - v0) / 16, (top - baseY) / 13.2, ...A);
-      const c = B.v(x2, ry - 0.05, z2, nx, 0, nz, ...tint, (vm - v0) / 16, (ry - baseY) / 13.2, ...A);
-      const cr = (x1 - x0) * nz - (z1 - z0) * nx;
-      if (cr > 0) B.i.push(a, b, c); else B.i.push(b, a, c);
+    flatRoof(top - 0.2, R, [0.6, 0.6, 0.6]); // ceiling under the roof (fills odd footprints)
+    if (house) {
+      // dormer on the street side of foursquares and bungalows
+      if (HS && HS.dormer && streetSide && span > 6 && u1 - u0 > 6.5) {
+        const dv = vm + streetSide * span * 0.2, yAt = ey + rise * (1 - Math.abs(dv - vm) / (span / 2)), [dx2, dz2] = W((u0 + u1) / 2, dv);
+        obox(B, dx2, dz2, ux, uz, 1.15, 0.95, yAt - 0.5, yAt + 1.25, tint, A);
+        obox(B, dx2, dz2, ux, uz, 1.35, 1.15, yAt + 1.25, yAt + 1.4, rt, SH);
+      }
+      // Queen Anne turret on the street corner of the bigger / more complex Victorians
+      if (a.style === 'victorian' && best && (a.nv >= 8 || hash(seed + 70) < 0.3)) {
+        const end = hash(seed + 69) < 0.5, tx = (end ? best.x1 : best.x0) + best.ox * 0.4, tz = (end ? best.z1 : best.z0) + best.oz * 0.4, Rt = 1.7, y0 = baseY - 0.5, y1 = top + 1.0, yA = y1 + 3.8;
+        for (let k = 0; k < 8; k++) {
+          const a0 = (k / 8) * Math.PI * 2, a1 = ((k + 1) / 8) * Math.PI * 2, am = (a0 + a1) / 2;
+          const p0 = [tx + Math.cos(a0) * Rt, tz + Math.sin(a0) * Rt], p1 = [tx + Math.cos(a1) * Rt, tz + Math.sin(a1) * Rt], w = Rt * 0.765;
+          face(B, [[p0[0], y0, p0[1]], [p1[0], y0, p1[1]], [p1[0], y1, p1[1]], [p0[0], y1, p0[1]]], [Math.cos(am), 0, Math.sin(am)], tint, A, [[k * w / 16, (y0 - baseY) / 13.2], [(k + 1) * w / 16, (y0 - baseY) / 13.2], [(k + 1) * w / 16, (y1 - baseY) / 13.2], [k * w / 16, (y1 - baseY) / 13.2]]);
+          tri(B, [p0[0], y1, p0[1]], [p1[0], y1, p1[1]], [tx, yA, tz], rt, SH, [[0, 0], [0.5, 0], [0.25, 0.7]], [tx, y1 - 1, tz]);
+        }
+      }
+      // Christmas lights along the street-side eave
+      if (streetSide && hash(seed + 90) < 0.55 && form !== 'hip') {
+        const ve = streetSide > 0 ? v1 : v0, [ax, az] = W(u0, ve), [bx, bz] = W(u1, ve), L = u1 - u0, y = ey - 0.06;
+        glowQuad(glowB, [[ax, y, az], [bx, y, bz], [bx, y + 0.08, bz], [ax, y + 0.08, az]], [vx * streetSide, 0, vz * streetSide], [1, 1, 1], 2, 0, L / 0.33);
+      }
     }
-    flatRoof(top - 0.2, R, [0.6, 0.6, 0.6]); // ceiling under the gable (fills odd footprints)
-    if (hgt >= 4.2) {
-      const pl = atl(CELL.plain), gut = hash(seed + 51) < 0.5 ? TRIM : lin(0x6e6a64);
-      for (const va of [v0, v1]) { const [gx, gz] = W((u0 + u1) / 2, va); obox(B, gx, gz, ux, uz, (u1 - u0) / 2, 0.07, ey - 0.16, ey - 0.02, gut, pl, 4, true); }
+    if (hgt >= 3 && (house || a.style === 'farmhouse' || a.style === 'garage')) {
+      const gut = hash(seed + 51) < 0.5 ? TRIM : lin(0x6e6a64);
+      if (form !== 'hip') for (const va of [v0, v1]) { const [gx, gz] = W((u0 + u1) / 2, va); obox(B, gx, gz, ux, uz, (u1 - u0) / 2, 0.07, ey - 0.16, ey - 0.02, gut, pl, 4, true); }
       const [dx0, dz0] = W(u0 + 0.1, v0 + 0.1); obox(B, dx0, dz0, ux, uz, 0.05, 0.05, baseY, ey - 0.1, gut, pl);
       const [dx1, dz1] = W(u1 - 0.1, v1 - 0.1); obox(B, dx1, dz1, ux, uz, 0.05, 0.05, baseY, ey - 0.1, gut, pl);
-      if (hash(seed + 52) < 0.45 && u1 - u0 > 5) {
+      if (house && hash(seed + 52) < (a.year && a.year < 1950 ? 0.7 : 0.35) && u1 - u0 > 5) {
         const cu = hash(seed + 53) < 0.5 ? u0 + 1.2 : u1 - 1.2, [chx, chz] = W(cu, vm + 0.5);
         obox(B, chx, chz, ux, uz, 0.42, 0.32, top, ry + 0.9, lin(BRICK_TINTS[0]), atl(CELL.brick3), 4);
         obox(B, chx, chz, ux, uz, 0.5, 0.4, ry + 0.9, ry + 1.05, lin(0x8c8a86), pl);
@@ -546,48 +755,72 @@ function buildBuildings(t, B, boxes, foot, SB, GB, junk) {
   });
 }
 
-// ---------- street lights (placed along roads, deterministic) ----------
-function streetLights(t) {
+// A gas-station / drive-thru canopy: a slab with a coloured fascia on a row of columns, lit underneath at night.
+function canopy(B, glowB, pts, cx, cz, baseY, top, seed) {
+  const n = pts.length / 2, pl = [0.75, 0.25], R = [CELL.roof[0] / 4, 1 - (CELL.roof[1] + 1) / 4];
+  const fascia = lin(pick([0xd62828, 0x1f6fd1, 0x2a9d3a, 0xf2f2f2, 0xf2b705, 0x111111], seed + 1)), WHITE = lin(0xf4f4f4);
+  band(B, pts, outline(pts), top - 0.9, top, 0.02, fascia, pl);
+  const contour = []; for (let i = 0; i < n; i++) contour.push(new THREE.Vector2(pts[i * 2], pts[i * 2 + 1]));
+  const tris = THREE.ShapeUtils.triangulateShape(contour, []);
+  for (const [y, up] of [[top, true], [top - 0.9, false]]) {
+    const idx = contour.map((p) => B.v(p.x, y, p.y, 0, up ? 1 : -1, 0, ...(up ? [0.8, 0.8, 0.8] : WHITE), p.x / 16, p.y / 16, ...(up ? R : pl)));
+    for (const [a, b, c] of tris) { const pa = contour[a], pb = contour[b], pc = contour[c], cr = (pb.x - pa.x) * (pc.y - pa.y) - (pb.y - pa.y) * (pc.x - pa.x); if ((cr < 0) === up) B.i.push(idx[a], idx[b], idx[c]); else B.i.push(idx[a], idx[c], idx[b]); }
+  }
+  // columns down the middle along the long side; a lit panel under the slab
+  let L = 0, ux = 1, uz = 0; for (let i = 0; i < n; i++) { const dx = pts[((i + 1) % n) * 2] - pts[i * 2], dz = pts[((i + 1) % n) * 2 + 1] - pts[i * 2 + 1], l = Math.hypot(dx, dz); if (l > L) { L = l; ux = dx / l; uz = dz / l; } }
+  let u0 = Infinity, u1 = -Infinity; for (let i = 0; i < n; i++) { const u = (pts[i * 2] - cx) * ux + (pts[i * 2 + 1] - cz) * uz; u0 = Math.min(u0, u); u1 = Math.max(u1, u); }
+  const nc = Math.max(2, Math.round((u1 - u0) / 8));
+  for (let k = 0; k < nc; k++) { const u = u0 + 2 + ((u1 - u0 - 4) * k) / (nc - 1), x = cx + ux * u, z = cz + uz * u; obox(B, x, z, ux, uz, 0.3, 0.3, Math.min(baseY, terrainHeight(x, z)) - 0.3, top - 0.9, WHITE, pl); }
+  const y = top - 0.92, w = (u1 - u0) / 2 - 1, vx = -uz * 2, vz = ux * 2;
+  glowQuad(glowB, [[cx - ux * w - vx, y, cz - uz * w - vz], [cx + ux * w - vx, y, cz + uz * w - vz], [cx + ux * w + vx, y, cz + uz * w + vz], [cx - ux * w + vx, y, cz - uz * w + vz]], [0, -1, 0], [0.9, 0.9, 0.85], 3, 0);
+}
+
+// ---------- street lights (placed along roads, deterministic; mapped lamps replace them nearby) ----------
+function streetLights(t, junk, mapped) {
   const out = [];
   for (const id of t.e) {
-    const e = G.edges[id];
-    if (!SIDEWALK(e) || e.len < 20) continue;
-    const dist = district(e.pts[0], e.pts[1]);
-    const gap = dist === 'downtown' || dist === 'village' ? 26 : e.cls === 'residential' ? 44 : 34;
+    const e = G.edges[id]; if (!e) continue;
+    const L = roadLook(e, t);
+    if (e.len < 20 || e.cls === 'service' || e.cls === 'track' || e.cls === 'motor') continue;
+    if (L.a === 'rural' && !L.lit) continue; // no streetlights out in the country
+    if (!L.sw.length && L.a !== 'strip' && !L.lit) continue;
+    const core = L.a === 'core', gap = core ? 22 : L.a === 'strip' ? 38 : L.a === 'suburb' ? 55 : 44;
     const s0 = 8 + hash(id) * gap;
     for (let s = s0, k = 0; s < e.len - 8; s += gap, k++) {
       const p = pointOnEdge(e, s);
       const side = (k + id) % 2 ? 1 : -1, off = e.width / 2 + 0.6;
       const x = p.x + Math.cos(p.h) * off * side, z = p.z - Math.sin(p.h) * off * side;
-      if (!inTile(t, x, z)) continue;
-      out.push({ x, z, y: terrainHeight(x, z), h: p.h + (side > 0 ? -Math.PI / 2 : Math.PI / 2) });
+      if (!inTile(t, x, z) || mapped.some((m) => (m.x - x) ** 2 + (m.z - z) ** 2 < 500)) continue;
+      const l = { x, z, y: terrainHeight(x, z), h: p.h + (side > 0 ? -Math.PI / 2 : Math.PI / 2) };
+      out.push(l);
+      if (core && k % 2 === 0) junk.push({ kind: 'banner', x, z, y: l.y, h: l.h }); // seasonal banners downtown
     }
   }
   return out;
 }
 
-// ---------- street furniture along the sidewalks (deterministic per edge) ----------
-function streetProps(t, junk, boxes) {
+// ---------- street furniture along the sidewalks (deterministic per edge; kinds the map has are skipped) ----------
+function streetProps(t, junk, boxes, has) {
   for (const id of t.e) {
-    const e = G.edges[id];
-    if (!SIDEWALK(e) || e.len < 30) continue;
-    const dist = district(e.pts[0], e.pts[1]), busy = dist === 'downtown' || dist === 'village', big = e.cls === 'primary' || e.cls === 'secondary';
+    const e = G.edges[id]; if (!e) continue;
+    const L = roadLook(e, t);
+    if (!L.sw.length || e.len < 30) continue;
+    const busy = L.a === 'core', big = e.cls === 'primary' || e.cls === 'secondary';
     const put = (kind, s, side, off, extra = {}) => {
+      if (has.has(kind)) return null;
       const p = pointOnEdge(e, s), x = p.x + Math.cos(p.h) * off * side, z = p.z - Math.sin(p.h) * off * side;
       if (!inTile(t, x, z)) return null;
       const j = { kind, x, z, y: terrainHeight(x, z), h: p.h + (side > 0 ? -Math.PI / 2 : Math.PI / 2), ...extra };
       junk.push(j); return j;
     };
     const kerb = e.width / 2 + 0.55, back = e.width / 2 + WALK_W - 0.35;
-    // hydrants every block or so, near the start of the edge
     if (hash(id * 3.7) < 0.8) put('hydrant', 9 + hash(id) * 6, hash(id * 1.3) < 0.5 ? 1 : -1, kerb);
-    // a bus stop on bigger roads now and then (with a bench inside)
     if (big && e.len > 60 && hash(id * 5.1) < (busy ? 0.35 : 0.25)) {
       const side = hash(id * 2.9) < 0.5 ? 1 : -1, s = e.len * (0.35 + hash(id * 7.7) * 0.3);
       const j = put('busstop', s, side, e.width / 2 + 1.25);
       if (j) { j.busStop = true; boxes.push(makeBox(j.x - Math.sin(j.h) * 0.6, j.z - Math.cos(j.h) * 0.6, Math.cos(j.h), -Math.sin(j.h), 1.6, 0.1, j.y, 2.5)); }
     }
-    if (busy || dist === 'riverfront') {
+    if (busy || district(e.pts[0], e.pts[1]) === 'riverfront') {
       for (let s = 16 + hash(id * 9.1) * 20, k = 0; s < e.len - 14; s += 34 + hash(id + k) * 30, k++) {
         const side = (k + id) % 2 ? 1 : -1, r = hash(id * 13 + k);
         if (r < 0.3) put('bench', s, side, back);
@@ -595,8 +828,10 @@ function streetProps(t, junk, boxes) {
         else if (r < 0.7 && busy) { put('newsbox', s, side, back + 0.05); put('newsbox', s + 0.6, side, back + 0.05); }
         else if (r < 0.78) put('mailbox', s, side, kerb + 0.2);
       }
-      // parking meters along downtown kerbs
-      if (busy && e.cls !== 'primary') for (let s = 14, k = 0; s < e.len - 14; s += 7.5, k++) if (hash(id * 17 + k) < 0.8) { put('meter', s, 1, kerb - 0.15); put('meter', s + 3, -1, kerb - 0.15); }
+      // planters along downtown kerbs, staggered across the street
+      if (busy) for (let s = 12 + hash(id * 2.3) * 10, k = 0; s < e.len - 10; s += 24, k++) put('planter', s, k % 2 ? 1 : -1, kerb + 0.35);
+      // parking meters: downtown Davenport still has them
+      if (busy && e.cls !== 'primary' && district(e.pts[0], e.pts[1]) === 'downtown') for (let s = 14, k = 0; s < e.len - 14; s += 7.5, k++) if (hash(id * 17 + k) < 0.8) { put('meter', s, 1, kerb - 0.15); put('meter', s + 3, -1, kerb - 0.15); }
     } else if (hash(id * 11.3) < 0.25) put(hash(id * 4.1) < 0.6 ? 'bin' : 'bench', e.len * 0.5, (id % 2) ? 1 : -1, hash(id) < 0.5 ? kerb + 0.1 : back);
   }
 }
@@ -624,30 +859,49 @@ function buildRail(t, B) {
   }
 }
 
-// Build everything for a tile. Returns {group, boxes, trees, lights, foot}.
+// Build everything for a tile. Returns {group, boxes, trees, lights, foot, junk}.
 export function buildTile(t) {
+  applyArchetypes(t); // normally done when the data arrived (stream.js onData); this is the safety net
   const group = new THREE.Group();
   const add = (geo, mat, shadow, recv = true) => { if (!geo) return; const m = new THREE.Mesh(geo, mat); m.castShadow = shadow; m.receiveShadow = recv; m.matrixAutoUpdate = false; group.add(m); };
-  add(buildTerrain(t), M.terrain, false);
+  // one buffer per material: grass parkways join the terrain, poles / posts / pylons / silos join the buildings
+  // (plain atlas cell), and every text panel shares one material (lit ones flagged per vertex)
+  const groundB = new Buf(); buildTerrain(t, groundB);
   const roadB = new Buf(), walkB = new Buf(), markB = new Buf();
-  buildRoads(t, roadB, walkB, markB);
+  const bB = new Buf(true), sB = new Buf(), gB = new Buf(), glowB = new Buf(true), namesB = new Buf(true), cropB = new Buf();
+  const litB = namesB, solidB = bB;
+  // boxes: the old per-prop boxes (not registered; stream.js makes walls from the data). solid: new things that block
+  // (utility poles, walls, billboards, silos, towers, sheds, pylons), registered by stream.js with the tile
+  const boxes = [], solid = [], foot = [], junk = [], trees = [], wires = [], newK = [], bigBoxes = [], yards = [], dealers = [];
+  buildRoads(t, roadB, walkB, markB, groundB);
+  const lightsMapped = [];
+  const has = dataPoints(t, junk, lightsMapped, solid, solidB, namesB, trees);
+  Object.assign(has, dataLines(t, junk, solid, solidB, roadB));
+  buildBuildings(t, bB, boxes, foot, sB, gB, junk, { glowB, litB, namesB, solidB, newK, bigBoxes, yards, dealers, has, solid });
+  const lights = [...lightsMapped, ...streetLights(t, junk, lightsMapped)];
+  parkingDetail(t, markB, lights, junk, bigBoxes, dealers);
+  streetSigns(t, namesB, solidB, boxes);
+  powerLines(t, junk, wires, solid);
+  crops(t, cropB, yards);
+  if (!t.kAdded) { for (const v of newK) t.k.push(v); t.kAdded = true; } // driveway cars join the parked-car spots (once)
+  add(cropB.geometry(), M.crop, false);
+  add(groundB.geometry(), M.terrain, false);
   add(walkB.geometry(), M.walk, false);
   add(roadB.geometry(), M.road, false);
   add(markB.geometry(), M.mark, false);
-  const bB = new Buf(true), sB = new Buf(), gB = new Buf(), boxes = [], foot = [], junk = [];
-  buildBuildings(t, bB, boxes, foot, sB, gB, junk);
   add(bB.geometry(), M.building, true);
   add(sB.geometry(), M.signs, false);
   add(gB.geometry(), M.graffiti, false);
+  add(glowB.geometry(), M.glow, false, false);
+  add(namesB.geometry(), M.names, false);
+  if (wires.length) { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(wires, 3)); g.computeBoundingSphere(); const w = new THREE.LineSegments(g, M.wire); w.matrixAutoUpdate = false; group.add(w); }
   const rB = new Buf(); buildRail(t, rB); add(rB.geometry(), M.rail, false);
-  const trees = [];
   for (let i = 0; i < t.t.length; i += 4) {
     const x = t.t[i] + t.ox, z = t.t[i + 1] + t.oz;
     trees.push({ x, z, y: terrainHeight(x, z), kind: t.t[i + 2], s: t.t[i + 3] / 10, seed: hash(x * 3.1 + z) });
     boxes.push(makeBox(x, z, 1, 0, 0.22 * t.t[i + 3] / 10, 0.22 * t.t[i + 3] / 10, terrainHeight(x, z) - 1, 6));
   }
-  streetProps(t, junk, boxes);
-  const lights = streetLights(t);
+  streetProps(t, junk, boxes, has);
   for (const l of lights) boxes.push(makeBox(l.x, l.z, 1, 0, 0.12, 0.12, l.y - 0.5, 8));
-  return { group, boxes, trees, lights, foot, junk };
+  return { group, boxes, solid, trees, lights, foot, junk };
 }

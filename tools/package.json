@@ -5,15 +5,17 @@
   "scripts": {
     "vendor": "node build-vendor.mjs",
     "fetch": "node fetch-map.mjs",
-    "map": "node build-map.mjs"
+    "map": "node --max-old-space-size=5000 build-map.mjs",
+    "pbf": "node --max-old-space-size=6000 pbf-extract.mjs"
   },
   "devDependencies": {
-    "three": "0.160.0",
     "@dimforge/rapier3d-compat": "0.21.0",
     "@recast-navigation/core": "0.44.0",
     "@recast-navigation/generators": "0.44.0",
+    "earcut": "3.2.4",
     "esbuild": "0.28.2",
+    "osm-pbf-parser": "2.3.0",
     "pngjs": "7.0.0",
-    "earcut": "3.2.4"
+    "three": "0.160.0"
   }
 }

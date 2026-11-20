@@ -5,7 +5,10 @@ import { makeStreakMesh } from '../carlights.js';
 import { D, TILE, WATER_Y, tiles, fetchTile, isFetching, inRange, tileKey, terrainHeight } from './data.js';
 import { addBoxes, removeBoxes, makeBox } from './collide.js';
 import { buildTile } from './tile.js';
-import { M, initMaterials } from './mats.js';
+import { M, initMaterials, GLOW } from './mats.js';
+import { applyArchetypes } from './areas.js';
+import { proceduralProps } from './propgeo.js';
+import { releaseNames, flushNames } from './names.js';
 import { gltf } from '../assets.js';
 
 let scene;
@@ -23,8 +26,9 @@ export function setPropQuality(q) { propScale = q === 'low' ? 0.55 : q === 'high
 function pointInPoly(x, z, p) { let c = false; for (let i = 0, j = p.length - 2; i < p.length; j = i, i += 2) { if ((p[i + 1] > z) !== (p[j + 1] > z) && x < ((p[j] - p[i]) * (z - p[i + 1])) / (p[j + 1] - p[i + 1]) + p[i]) c = !c; } return c; }
 function tileBoxes(t) {
   const boxes = [];
-  for (const [rel, baseY, hgt, pitched, , , kind] of t.b) {
-    if (kind === 1) continue; // parking ramps are open: drive or walk in and hide
+  for (const rec of t.b) {
+    const [rel, baseY, hgt, pitched, , , kind] = rec;
+    if (kind === 1 || rec.arch?.canopy) continue; // parking ramps and canopies are open: drive or walk in
     const n = rel.length / 2, pts = new Float32Array(rel.length);
     for (let i = 0; i < n; i++) { pts[i * 2] = rel[i * 2] + t.ox; pts[i * 2 + 1] = rel[i * 2 + 1] + t.oz; }
     for (let i = 0; i < n; i++) {
@@ -43,6 +47,7 @@ function tileBoxes(t) {
 }
 function onData(t) {
   if (t.boxes) return;
+  applyArchetypes(t); // building heights by archetype first, so walls and roofs match what's drawn
   t.boxes = tileBoxes(t);
   addBoxes(t.key, t.boxes);
 }
@@ -98,8 +103,10 @@ function buildFar() {
   farBoxes.frustumCulled = false; farBoxes.castShadow = false;
   farBoxes.userData.saved = farBoxes.instanceMatrix.array.slice();
   scene.add(farBoxes);
-  water = new THREE.Mesh(new THREE.PlaneGeometry(16000, 14000).rotateX(-Math.PI / 2), M.water);
-  water.position.set(-1000, WATER_Y, -1500); water.receiveShadow = true; water.matrixAutoUpdate = true;
+  // one river surface over the whole region (every river sits at y = 0 in the data; ponds up on the land are class pond)
+  const I = D.index, wx0 = I.tx0 * TILE - 2000, wx1 = (I.tx1 + 1) * TILE + 2000, wz0 = I.tz0 * TILE - 2000, wz1 = (I.tz1 + 1) * TILE + 2000;
+  water = new THREE.Mesh(new THREE.PlaneGeometry(wx1 - wx0, wz1 - wz0).rotateX(-Math.PI / 2), M.water);
+  water.position.set((wx0 + wx1) / 2, WATER_Y, (wz0 + wz1) / 2); water.receiveShadow = true; water.matrixAutoUpdate = true;
   scene.add(water);
 }
 function hideFar(key, hide) {
@@ -114,7 +121,8 @@ const inst = {};
 let instDirty = false, instT = 0;
 const instAt = { x: 0, z: 0 };
 // how far away each kind of prop is still drawn (m)
-const PROP_FAR = { fesc: 260, ac: 240, tank: 320, busstop: 220, dumpster: 150, bag: 110, picket: 150, chainlink: 150, hedge: 160, flowers: 110, bench: 140, bin: 120, newsbox: 100, hydrant: 120, meter: 90, mailbox: 110 };
+const PROP_FAR = { fesc: 260, ac: 240, tank: 320, busstop: 220, dumpster: 150, bag: 110, picket: 150, chainlink: 150, hedge: 160, flowers: 110, bench: 140, bin: 120, newsbox: 100, hydrant: 120, meter: 90, mailbox: 110,
+  upole: 320, upolet: 320, shed: 160, swing: 120, tramp: 120, flagpole: 160, gnome: 45, corral: 140, banner: 150, planter: 110, featherflag: 150, balloons: 150, ruralbox: 100, menuboard: 100, haybale: 180 };
 // Blender props (assets/models/props.glb): every prop kind is one instanced mesh with baked colours.
 export const WIND = { value: 0 };
 const PROP_GEO = new Map();
@@ -141,7 +149,7 @@ function swayPatch(m, amt) {
   return m;
 }
 let PROP_MAT, LEAF_MAT, LENS_MAT;
-const SHADOW = new Set(['dumpster', 'tank', 'fesc', 'busstop', 'streetlight', 'bench', 'ac']);
+const SHADOW = new Set(['dumpster', 'tank', 'fesc', 'busstop', 'streetlight', 'bench', 'ac', 'upole', 'upolet', 'shed', 'swing', 'tramp', 'corral', 'haybale']);
 function propMesh(name, cap = 16) {
   const geo = propGeometry(name); if (!geo) return null;
   const leaves = name.includes('_leaves'), mat = leaves ? LEAF_MAT : name === 'streetlight_lens' ? LENS_MAT : PROP_MAT;
@@ -174,6 +182,8 @@ function makeInstanced() {
   fb.maple_trunk = fb.oak_trunk; fb.maple_leaves = fb.oak_leaves;
   for (const [k, g] of Object.entries(fb)) if (!propGeometry(k)) { g.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 3).fill(k.endsWith('_trunk') ? 0.3 : k === 'dumpster' ? 0.2 : 0.8), 3)); PROP_GEO.set(k, g); }
   void leafMat;
+  // procedural prop kit (yard life, utility poles, lot and downtown furniture) unless props.glb has its own
+  for (const [k, g] of Object.entries(proceduralProps())) if (!propGeometry(k)) PROP_GEO.set(k, g);
 }
 function ensure(name, n) {
   let m = inst[name] || propMesh(name);
@@ -193,6 +203,7 @@ function rebuildInstances() {
   // props by kind (rooftop units, fire escapes, dumpsters, benches, ...)
   const byKind = new Map(), oj = new THREE.Object3D();
   for (const j of all.junk) {
+    if (j.broken) continue; // knocked over (breakables.js) until the tile is rebuilt or it respawns
     const far = (PROP_FAR[j.kind] || 200) * propScale; if ((j.x - instAt.x) ** 2 + (j.z - instAt.z) ** 2 > far * far) continue;
     let a = byKind.get(j.kind); if (!a) byKind.set(j.kind, a = []); a.push(j);
   }
@@ -229,7 +240,7 @@ function rebuildInstances() {
     });
     tr.count = lv.count = G.length; tr.instanceMatrix.needsUpdate = lv.instanceMatrix.needsUpdate = true; if (lv.instanceColor) lv.instanceColor.needsUpdate = true;
   }
-  const L = all.lights, pole = ensure('streetlight', L.length), lamp = ensure('streetlight_lens', L.length), lpool = ensure('lpool', L.length), lstreak = ensure('lstreak', L.length);
+  const L = all.lights.filter((l) => !l.broken), pole = ensure('streetlight', L.length), lamp = ensure('streetlight_lens', L.length), lpool = ensure('lpool', L.length), lstreak = ensure('lstreak', L.length);
   L.forEach((l, i) => {
     o.rotation.set(0, l.h, 0); o.position.set(l.x, l.y, l.z); o.scale.set(1, 1, 1); o.updateMatrix(); pole.setMatrixAt(i, o.matrix); lamp.setMatrixAt(i, o.matrix);
     o.position.set(l.x + Math.sin(l.h) * 2.4, l.y + 0.07, l.z + Math.cos(l.h) * 2.4); o.scale.set(13, 1, 13); o.updateMatrix(); lpool.setMatrixAt(i, o.matrix);
@@ -277,6 +288,7 @@ function buildOne(px, pz) {
     const rec = buildTile(t);
     rec.t = t; t.used = performance.now();
     scene.add(rec.group);
+    if (rec.solid?.length) addBoxes(w.key + '#d', rec.solid); // poles, walls, billboards, silos, sheds (tile.js)
     built.set(w.key, rec);
     hideFar(w.key, true);
     instDirty = true;
@@ -291,7 +303,7 @@ function unloadFar(px, pz) {
     if (dist2(rec.t.tx, rec.t.tz, px, pz) < lim) continue;
     scene.remove(rec.group);
     rec.group.traverse((m) => { if (m.geometry) m.geometry.dispose(); });
-    built.delete(key); hideFar(key, false); instDirty = true;
+    built.delete(key); hideFar(key, false); instDirty = true; releaseNames(key); removeBoxes(key + '#d');
     for (const fn of listeners.unloaded) fn(rec.t, rec);
   }
   // forget tile data far away (keeps memory small on Chromebooks)
@@ -306,13 +318,17 @@ function solidRadius(px, pz) {
   for (const w of wantData(px, pz, R)) if (D.tileSet.has(w.key) && !built.has(w.key)) { r = Math.min(r, Math.sqrt(w.d2) - TILE * 0.72); }
   return Math.max(0, r - 30);
 }
-let frameBudget = 7;
+let frameBudget = 7, nameT = 0;
 export function updateStream(px, pz, dt) {
   pumpFetch(px, pz);
   const t0 = performance.now();
   while (performance.now() - t0 < frameBudget) if (!buildOne(px, pz)) break;
   unloadFar(px, pz);
   WIND.value += dt;
+  // night life on houses and lit signs follow the town's night lighting (daynight.js drives M.signs)
+  GLOW.time.value += dt; GLOW.night.value = Math.min(1, (M.signs?.emissiveIntensity || 0) / 1.2);
+  if (M.names) M.names.emissiveIntensity = GLOW.night.value * 1.3;
+  nameT -= dt; if (nameT <= 0) { nameT = 0.5; flushNames(); }
   instT -= dt;
   // small props only draw near the player: re-pick them after a walk or drive of 40 m
   if (!instDirty && (px - instAt.x) ** 2 + (pz - instAt.z) ** 2 > 1600) instDirty = true;
@@ -337,10 +353,13 @@ export async function preload(px, pz, rad, onProgress) {
     if (performance.now() - tYield > 40) { await new Promise((r) => setTimeout(r, 0)); tYield = performance.now(); } // keep the spinner turning
   }
   R = saveR;
-  instAt.x = px; instAt.z = pz; rebuildInstances(); instDirty = false;
+  instAt.x = px; instAt.z = pz; rebuildInstances(); instDirty = false; flushNames();
   discard.center.value.set(px, pz); discard.radius.value = solidRadius(px, pz);
 }
 export function setBudget(ms) { frameBudget = ms; }
+// breakables.js: a prop's look for its debris, and a redraw once it's broken or respawned
+export const propLook = (name) => ({ geo: propGeometry(name), mat: name === 'streetlight_lens' ? LENS_MAT : PROP_MAT });
+export function refreshProps() { instDirty = true; instT = 0; }
 export function footprintsNear(x, z, r) {
   const out = [];
   for (const rec of built.values()) { const t = rec.t; if (Math.abs(t.ox + 100 - x) < r + 100 && Math.abs(t.oz + 100 - z) < r + 100) out.push(...rec.foot); }

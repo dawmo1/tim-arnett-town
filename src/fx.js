@@ -496,7 +496,7 @@ export function soundNitro() { burst(0.6, 900, 0.3); }
 const ENGINE = {
   car: [42, 160, 'sawtooth', 900, 0, 0.11], sports: [60, 260, 'sawtooth', 1800, 0.05, 0.12], muscle: [34, 150, 'sawtooth', 700, 0.5, 0.15],
   truck: [26, 90, 'sawtooth', 500, 0.15, 0.14], bike: [70, 330, 'square', 1500, 0.2, 0.09], scooter: [110, 420, 'square', 2200, 0, 0.06],
-  heli: [9, 18, 'sawtooth', 300, 0.9, 0.2], boat: [55, 210, 'square', 1200, 0.1, 0.08],
+  heli: [9, 18, 'sawtooth', 300, 0.9, 0.2], boat: [55, 210, 'square', 1200, 0.1, 0.08], plane: [28, 80, 'sawtooth', 650, 0.4, 0.15],
 };
 let eng = null;
 export function setEngine(kind, rpm, load) {

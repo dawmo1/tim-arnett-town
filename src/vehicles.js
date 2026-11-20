@@ -5,6 +5,7 @@ import { rng, clamp } from './util.js';
 import * as fx from './fx.js';
 import { sky } from './daynight.js';
 import { buildCarMesh, dent, crumple, unDent, GLASS } from './carmodel.js';
+import { stepPlane, planeMesh } from './planes.js';
 
 export const TYPES = [
   { name: 'Sedan', len: 4.4, wid: 1.9, hgt: 1.45, max: 32, acc: 13, turn: 1.9, grip: 7, mass: 1.2, hp: 100 },
@@ -34,8 +35,11 @@ export const TYPES = [
   // emergency
   { name: 'Ambulance', len: 6.2, wid: 2.3, hgt: 2.7, max: 32, acc: 11, turn: 1.5, grip: 6.5, mass: 2.6, hp: 200, cabbed: 'ambulance', siren: true },
   { name: 'Fire truck', len: 9.5, wid: 2.5, hgt: 3.2, max: 26, acc: 7, turn: 1.05, grip: 6, mass: 5, hp: 350, cabbed: 'fire', siren: true },
+  // planes (planes.js): wid is the fuselage + gear footprint for collisions, span the wings; stall in m/s
+  { name: 'Prop plane', len: 8.3, wid: 2.8, hgt: 2.7, max: 60, acc: 9, turn: 1, grip: 2, mass: 1.1, hp: 160, plane: true, span: 11, stall: 24 },
+  { name: 'Crop duster', len: 8.8, wid: 2.8, hgt: 2.8, max: 54, acc: 10, turn: 1.2, grip: 2, mass: 1.5, hp: 180, plane: true, duster: true, span: 13, stall: 20 },
 ];
-export const V = { SEDAN: 0, SPORTS: 1, TRUCK: 2, VAN: 3, BIKE: 4, SCOOTER: 5, POLICE: 6, BUS: 7, BOAT: 8, HELI: 9, HATCH: 10, SUV: 11, PICKUP: 12, MINIVAN: 13, MUSCLE: 14, CONVERTIBLE: 15, LIMO: 16, MONSTER: 17, TAXI: 18, GARBAGE: 19, TOW: 20, AMBULANCE: 21, FIRE: 22 };
+export const V = { SEDAN: 0, SPORTS: 1, TRUCK: 2, VAN: 3, BIKE: 4, SCOOTER: 5, POLICE: 6, BUS: 7, BOAT: 8, HELI: 9, HATCH: 10, SUV: 11, PICKUP: 12, MINIVAN: 13, MUSCLE: 14, CONVERTIBLE: 15, LIMO: 16, MONSTER: 17, TAXI: 18, GARBAGE: 19, TOW: 20, AMBULANCE: 21, FIRE: 22, PLANE: 23, DUSTER: 24 };
 export const BUS = 7, BOAT = 8, HELI = 9;
 export const POLICE = 6;
 // real-world car colours: lots of white, black, silver and grey, some blue and red, the odd bright one
@@ -59,6 +63,7 @@ function bx(g, c, sx, sy, sz, x, y, z, material) {
 
 export function makeVehicleMesh(T, color, dirt = 0, tiHint = -1) {
   const ti = tiHint >= 0 ? tiHint : TYPES.findIndex((t) => t === T || t.name === T.name);
+  if (T.plane) return planeMesh(T, color);
   const model = buildCarMesh(ti, color, { dirt });
   if (model) return model;
   curPaint = color;
@@ -603,7 +608,7 @@ export const tipLift = (T, fr, fp) => (fr || fp ? Math.max(lift1(fr, T.wid / 2, 
 // A hit tips the car: side hits roll it the way it's shoved (top-heavy, light cars most), frontal ones lift the rear.
 // share = how much of the closing speed this car takes (1 for a wall).
 function kick(v, nx, nz, imp, share) {
-  const T = v.T; if (T.bike || T.boat || T.heli || imp < 5 || v.mode === 'cop') return; // police.js poses cop cars itself (no tipping)
+  const T = v.T; if (T.bike || T.boat || T.heli || T.plane || imp < 5 || v.mode === 'cop') return; // police.js poses cop cars itself (no tipping)
   const right = -nx * Math.cos(v.h) + nz * Math.sin(v.h), fwd = nx * Math.sin(v.h) + nz * Math.cos(v.h);
   v.frV = (v.frV || 0) + right * imp * share * 0.11 * (T.hgt / T.wid) * Math.pow(1.2 / T.mass, 0.3);
   v.fpV = (v.fpV || 0) - fwd * imp * share * 0.012;
@@ -618,6 +623,7 @@ export function stepVehicle(v, inp, dt) {
   const T = v.T;
   if (T.boat) return stepBoat(v, inp, dt);
   if (T.heli) return stepHeli(v, inp, dt);
+  if (T.plane) return stepPlane(v, inp, dt, hitWalls);
   // nitro: a few seconds of extra push, refills slowly
   if (v.nitro === undefined) v.nitro = 1;
   const boosting = inp.nitro && v.nitro > 0 && inp.throttle > 0 && !T.bike;
@@ -699,14 +705,22 @@ export function stepVehicle(v, inp, dt) {
   } else {
     v.sinkT = 0;
     const floor = W.isLand(v.x, v.z) ? gh : -5;
-    // stick to the road over small dips (hills); real drops still send you flying
-    if (v.y > floor + (v.air > 0 ? 0.05 : 0.35) || (v.vy || 0) > 1.5) {
-      // take-off: the ramp's slope becomes the car's own tilt, and how fast it was tipping keeps it turning
-      if (!(v.air > 0) && !T.bike && v.mode !== 'cop') { v.fr = (v.fr || 0) + (v.gr || 0); v.fp = (v.fp || 0) + (v.gp || 0); v.frV = (v.frV || 0) + (v.grRate || 0) * 0.8; v.gr = v.gp = 0; }
+    // stick to the road over small dips (hills); real drops still send you flying. Rising fast only launches when the
+    // ballistic path would clear the ground (a crest or a ramp lip), so a steady climb keeps the wheels down.
+    const vy0 = v.vy || 0, fly = v.y + vy0 * dt - 11 * dt * dt;
+    // on the ground the allowed drop grows with the descent the car is already following (steep hill at a low frame rate)
+    if (v.y > floor + (v.air > 0 ? 0.05 : 0.35 + Math.max(0, -(v.lastStep || 0))) || (vy0 > 1.5 && fly > floor + 0.05)) {
+      // take-off: the ground's slope becomes the car's own tilt. Smooth terrain only gives a small, capped roll; a sharp
+      // one-sided ramp (fast change of the across-car slope) still launches it rolling.
+      if (!(v.air > 0) && !T.bike && v.mode !== 'cop') {
+        const gRate = v.grRate || 0, ramp = Math.abs(v.gr || 0) > 0.22 || Math.abs(gRate) > 2.5; // streets stay under ~20% across the car
+        v.fr = (v.fr || 0) + (v.gr || 0); v.fp = (v.fp || 0) + (v.gp || 0);
+        v.frV = (v.frV || 0) + (ramp ? gRate * 0.8 : clamp(gRate * 0.8, -0.3, 0.3)); v.gr = v.gp = 0;
+      }
       v.air = (v.air || 0) + dt;
       v.vy = (v.vy || 0) - 22 * dt;
       v.y += v.vy * dt;
-      if (v.y <= floor) { v.landed = -v.vy; v.y = floor; v.vy = 0; }
+      if (v.y <= floor) { v.landed = -v.vy; v.lastStep = Math.min(0, v.vy * dt); v.y = floor; v.vy = 0; v.lastAir = v.air; v.air = 0; }
     } else {
       const step = floor - v.y;
       v.vy = dt > 0 ? step / dt : 0;
@@ -730,7 +744,8 @@ function bodyMotion(v, inp, dt, tn, F, aLon, vr, alive) {
   const tr = drive ? clamp(v.w * v.speed * 0.0028 * k, -0.13, 0.13) : 0; // lean out of the turn
   const tp = drive ? (v.burnout ? -0.03 : clamp(-aLon * 0.0022 * k, -0.09, 0.09)) : 0; // nose dives braking, squats accelerating
   // bumps: curbs and dips jolt the body, rough ground shakes it, landings squash it
-  const gh = v.y, dg = gh - (v.lastGh ?? gh); v.lastGh = gh;
+  // dg = height change this frame minus last frame's: a steady climb or descent is ~0, only a step / kink in the ground shows
+  const gh = v.y, dy = gh - (v.lastGh ?? gh), dg = drive && v.lastDy !== undefined ? dy - v.lastDy : 0; v.lastGh = gh; v.lastDy = drive ? dy : undefined;
   if (drive && Math.abs(dg) > 0.03 && Math.abs(dg) < 0.7) { v.syV = (v.syV || 0) + dg * 9; v.spV = (v.spV || 0) - dg * 5; }
   if (drive && v.rough && Math.random() < dt * 7) { const s = Math.min(1, sp / 20); v.srV = (v.srV || 0) + (Math.random() - 0.5) * s; v.spV = (v.spV || 0) + (Math.random() - 0.5) * 0.8 * s; v.syV = (v.syV || 0) + (Math.random() - 0.5) * 0.7 * s; }
   if (v.landed > 2) { v.syV = (v.syV || 0) - Math.min(3, v.landed * 0.12); v.spV = (v.spV || 0) + (Math.random() - 0.5) * v.landed * 0.02; }
@@ -741,7 +756,7 @@ function bodyMotion(v, inp, dt, tn, F, aLon, vr, alive) {
   v.syV += (-(v.sy || 0) * K - v.syV * D) * dt; v.sy = clamp((v.sy || 0) + v.syV * dt, -0.15, 0.15);
   if (v.mode === 'cop') return 0;
   // tipping: a car sliding sideways that has started to go over trips and keeps rolling; tripping on a curb or dirt starts it
-  if (drive && Math.abs(vr) > 11) v.frV = (v.frV || 0) + vr * (dg > 0.05 ? 0.1 : v.rough ? 0.25 * dt : 0);
+  if (drive && Math.abs(vr) > 11) v.frV = (v.frV || 0) + vr * (dg > 0.06 ? 0.1 : v.rough ? 0.25 * dt : 0);
   if (v.upset && onGround) v.frV = (v.frV || 0) + Math.sign(vr) * Math.min(Math.abs(vr), 25) * 0.5 * dt;
   const steer = inp.steer || 0;
   if (!onGround) { // air: the nose gently follows the arc; A / D roll, W / S tip the nose a little
@@ -777,7 +792,7 @@ export function initFarCars(scene) {
 }
 export function farCarsBegin() { far.n = 0; }
 export function farCarAdd(v) {
-  if (!far.body || far.n >= 260 || v.T.heli || v.T.boat) return false;
+  if (!far.body || far.n >= 260 || v.T.heli || v.T.boat || v.T.plane) return false;
   const T = v.T, o = far.o, lo = T.bike ? 0.9 : 0.3 + T.hgt * 0.5;
   o.position.set(v.x, v.y + (T.monster ? 1 : 0.25), v.z); o.rotation.set(v.gp || 0, v.h, v.gr || 0, 'YXZ'); o.scale.set(T.bike ? 0.5 : T.wid, lo, T.len); o.updateMatrix();
   far.body.setMatrixAt(far.n, o.matrix); far.body.setColorAt(far.n, v.exploded ? far.c.setHex(0x2b2b2b) : far.c.setHex(v.color));
@@ -803,7 +818,9 @@ export function alignToGround(v, dt) {
   const hL = W.groundHeight(v.x + lx * hwd, v.z + lz * hwd), hR = W.groundHeight(v.x - lx * hwd, v.z - lz * hwd);
   const k = Math.min(1, dt * 10), gr0 = v.gr || 0;
   v.gp = (v.gp || 0) + (clamp(Math.atan2(hb - hf, hl * 2), -0.5, 0.5) - (v.gp || 0)) * k;
-  v.gr = gr0 + (clamp(Math.atan2(hL - hR, hwd * 2), -0.4, 0.4) - gr0) * k;
+  // a ledge (bridge-deck end, wall foot) under one side is not a slope you lean on: steeper than ~30° across, keep the lean
+  const across = (hL - hR) / (hwd * 2);
+  v.gr = gr0 + (Math.abs(across) > 0.6 ? 0 : clamp(Math.atan(across), -0.4, 0.4) - gr0) * k;
   v.grRate = dt > 0 ? (v.gr - gr0) / dt : 0; // a ramp under one side launches the car rolling
 }
 

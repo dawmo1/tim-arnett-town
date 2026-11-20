@@ -1,10 +1,13 @@
-// Three made-up street gangs, each holding a neighbourhood. They hang out on their corners in
+// Six made-up street gangs, each holding a neighbourhood (three in Davenport, one each in Rock Island, Moline and East Moline). They hang out on their corners in
 // their colours, deal, warn you off when you flash a weapon, fight you if you start something,
 // and now and then two crews clash. There's no turf war for you to win; it's their patch.
 export const GANGS = [
   { id: 'wolves', name: 'Westside Wolves', hood: 'West End', color: '#2aa7a2', cloth: 18, lat: 41.5195, lon: -90.6060, r: 520, cars: [14, 11] },
   { id: 'hounds', name: 'Hilltop Hounds', hood: 'Hilltop', color: '#e0782c', cloth: 15, lat: 41.5305, lon: -90.5760, r: 420, cars: [12, 14] },
   { id: 'kings', name: 'Kimberly Kings', hood: 'Kimberly Road', color: '#8a1f33', cloth: 8, lat: 41.5585, lon: -90.5870, r: 520, cars: [11, 16] },
+  { id: 'keystone', name: 'Keystone Crowns', hood: 'Keystone, Rock Island', color: '#e8c547', cloth: 14, lat: 41.4960, lon: -90.5660, r: 480, cars: [14, 12] },
+  { id: 'dukes', name: 'Deere Street Dukes', hood: 'Uptown Moline', color: '#2f7a3f', cloth: 9, lat: 41.4985, lon: -90.5210, r: 450, cars: [12, 0] },
+  { id: 'outlaws', name: 'Old Town Outlaws', hood: 'Old Town East Moline', color: '#6a3f99', cloth: 17, lat: 41.5105, lon: -90.4440, r: 420, cars: [11, 15] },
 ];
 // same projection as the map (src/city/data.js)
 const M_LAT = 110574, M_LON = 111320 * Math.cos((41.5236 * Math.PI) / 180);

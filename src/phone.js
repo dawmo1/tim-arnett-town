@@ -308,7 +308,7 @@ function tattler() {
 }
 // same headline each time you open the page for the same entry
 function pick2(a, e) { return a[(e.time.charCodeAt(4) + e.area.length) % a.length]; }
-const CARS = TYPES.map((T, ti) => ({ T, ti })).filter(({ T }) => !T.police && !T.boat && !T.heli);
+const CARS = TYPES.map((T, ti) => ({ T, ti })).filter(({ T }) => !T.police && !T.boat && !T.heli && !T.plane);
 const priceOf = (T) => Math.round((T.max * 30 + T.acc * 40 + T.hp * 4) / 50) * 50;
 function dealer() {
   return { title: "Tim's Discount Wheels", color: '#d6a82f', rows: CARS.map(({ T, ti }) => {

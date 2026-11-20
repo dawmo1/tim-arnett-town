@@ -166,7 +166,9 @@ export function setSpeedo(v, station = '', nitro = 0) {
   if (v !== lastVeh) { lastVeh = v; if (v) { el.vehName.textContent = v.T.name; replay(el.vehName, 'on'); } }
   if (!v) { el.speedo.hidden = true; return; }
   el.speedo.hidden = false;
-  const alt = v.T.heli ? `<span>Altitude ${Math.round((v.alt ?? v.y) * FT)} ft</span>` : '';
+  let alt = v.T.heli || v.T.plane ? `<span>Altitude ${Math.round((v.alt ?? v.y) * FT)} ft</span>` : '';
+  // planes: a little artificial horizon (the line tilts with the bank and moves with the pitch) + throttle
+  if (v.T.plane) alt += `<span style="display:flex;align-items:center;gap:8px;justify-content:flex-end">Throttle ${Math.round((v.thr || 0) * 100)}%<i style="position:relative;display:inline-block;width:44px;height:28px;overflow:hidden;border-radius:4px;background:#2b6fb3;box-shadow:0 0 0 1px rgba(0,0,0,.6)"><i style="position:absolute;left:-30px;right:-30px;top:50%;height:60px;background:#7a5a33;transform:translateY(${Math.round(Math.max(-0.8, Math.min(0.8, v.pitch || 0)) * 30)}px) rotate(${(-(v.roll || 0)).toFixed(2)}rad);transform-origin:50% 0"></i><i style="position:absolute;left:14px;right:14px;top:13px;height:2px;background:#ffd23f"></i></i></span>`;
   // damage meter: green when healthy, red when it's about to give up
   const hp = Math.max(0, Math.min(1, v.hp / v.T.hp)), hc = hp > 0.6 ? '#7cf29a' : hp > 0.3 ? '#ffc94a' : '#ff5e5b';
   const dm = `<div id="vdmg" title="Damage"><i style="width:${Math.round(hp * 100)}%;background:${hc}"></i></div>`;
@@ -237,7 +239,7 @@ export function wheelIndex(dx, dy, n) {
 // zoomed-in pause map draw crisp vector streets and loaded buildings on top.
 const mm = el.minimap.getContext('2d');
 const SCALE = 0.6; // minimap pixels per metre (before zoom)
-const BASE_S = 0.25;
+let BASE_S = 0.25; // shrunk for the whole region so the base canvas stays under 4096 px
 let minX = 0, minZ = 0, maxX = 1, maxZ = 1, base = null;
 // GTA V radar palette: slate land, translucent grey roads (wider on highways), blocks barely lighter than
 // the land, water a lighter blue-grey with a pale shoreline. Shared with the pause map. roads: [colour, width factor]
@@ -249,6 +251,7 @@ const ROAD_STYLE = MAP_COLORS.roads, WATER = MAP_COLORS.water, BLDG = MAP_COLORS
 export function drawMapBase() {
   const I = W.D.index;
   minX = I.tx0 * 200; maxX = (I.tx1 + 1) * 200; minZ = I.tz0 * 200; maxZ = (I.tz1 + 1) * 200;
+  BASE_S = Math.min(0.25, 4096 / (maxX - minX), 4096 / (maxZ - minZ));
   base = document.createElement('canvas');
   base.width = Math.ceil((maxX - minX) * BASE_S); base.height = Math.ceil((maxZ - minZ) * BASE_S);
   const g = base.getContext('2d');
@@ -274,8 +277,8 @@ export function drawMapBase() {
     const [color, k] = ROAD_STYLE[cls];
     g.strokeStyle = color; g.lineWidth = Math.max(1 / BASE_S, 0);
     g.beginPath();
-    for (const e of W.G.edges) { if (e.cls !== cls) continue; g.lineWidth = Math.max(5, e.width * k * 1.3); polyline(g, e.pts); }
-    g.lineWidth = cls === 'service' ? 4 : cls === 'residential' || cls === 'minor' ? 7 : 12;
+    for (const P of W.D.overview.roads?.[cls] || []) polyline(g, P); // major roads for the whole region (street chunks load on demand)
+    g.lineWidth = Math.max(cls === 'service' ? 4 : cls === 'residential' || cls === 'minor' ? 7 : 12, (cls === 'motor' || cls === 'trunk' ? 1.6 : 1.1) / BASE_S);
     g.stroke();
   }
   g.restore();
@@ -288,6 +291,7 @@ function drawVectors(g, x, z, r, pxPerM) {
   for (const f of W.footprintsNear(x, z, r)) { g.moveTo(f[0], f[1]); for (let i = 2; i < f.length; i += 2) g.lineTo(f[i], f[i + 1]); g.closePath(); }
   g.fill();
   g.lineCap = 'round'; g.lineJoin = 'round';
+  if (r < 3000) W.ensureRoads(x - r, z - r, x + r, z + r); // the streets you're looking at
   const ids = W.edgesNear(x, z, r), byCls = {};
   for (const id of ids) { const e = W.G.edges[id]; (byCls[e.cls] = byCls[e.cls] || []).push(e); }
   for (const cls of ['service', 'residential', 'minor', 'tertiary', 'secondary', 'primary', 'trunk', 'motor']) {

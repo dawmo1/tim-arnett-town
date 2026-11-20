@@ -11,6 +11,7 @@ import { ragdoll, ragPos } from './ragdoll.js';
 import * as nav from './nav.js';
 import * as fx from './fx.js';
 import { clamp, angDiff } from './util.js';
+import { hitByCar } from './breakables.js';
 
 export const cops = new Map();
 let scene, ctx, nextId = 0, spawnT = 0, syncT = 0;
@@ -99,6 +100,18 @@ function remove(id) {
 }
 // A patrol car that saw the crime joins the chase.
 export function adoptCar(v, target) { const u = spawnCar('c' + nextId++, v.x, v.z, v.h, 0, target, v); u.aimT = 0; return u; }
+// Attacked at (x, z) by player uid (rammed, shot at): parked cruisers, idle officers and cars heading home nearby
+// take the call, and the radio skips the usual wait so backup rolls out of the station right away. Host only.
+export function alert(x, z, uid) {
+  since[uid] = ctx.now() - 2500;
+  for (const u of cops.values()) {
+    if (isDown(u) || u.kind > 2) continue;
+    const P = posOf(u);
+    if (Math.hypot(P.x - x, P.z - z) > 90) continue;
+    if (u.parked) u.parked = null;
+    if (!u.target) { u.target = uid; u.aimT = 0; u.idle = 0; }
+  }
+}
 // ---------- stations & dispatch ----------
 // The OSM police stations. Units roll out from them and drive the streets to the suspect.
 const NAMES = { 'Davenport Police Department': 'Davenport Police HQ', 'Scott County Sheriffs Office': 'Scott County Sheriff' };
@@ -241,7 +254,7 @@ export function hostUpdate(dt, players) {
     // officers are out: wait parked, call them back when the suspect drives off
     if (u.deployed.length) {
       stepVehicle(v, { handbrake: true }, dt);
-      if (!p || p.inVeh || Math.hypot(p.x - v.x, p.z - v.z) > 70) u.recall = true;
+      if (!p || (p.inVeh && p.speed > 4) || Math.hypot(p.x - v.x, p.z - v.z) > 70) u.recall = true;
       if (u.recall) {
         u.waitT += dt;
         u.deployed = u.deployed.filter((id) => cops.has(id) && !cops.get(id).dead);
@@ -258,8 +271,8 @@ export function hostUpdate(dt, players) {
       p = { x: st[1].x, z: st[1].z, home: true, inVeh: true, speed: 0 };
     } else u.noTarget = 0;
     const dx = p.x - v.x, dz = p.z - v.z, dist = Math.hypot(dx, dz);
-    // suspect on foot and we're close: stop and get out
-    if (!p.inVeh && dist < 18 && Math.abs(v.speed) < 3 && u.deployCd <= 0 && (!p.sweeping || dist < 12)) {
+    // suspect on foot (or sitting in a stopped car at 2+ stars) and we're close: stop, get out, take cover, return fire
+    if ((!p.inVeh || (p.stars >= 2 && (p.speed || 0) < 3 && !p.home)) && dist < 18 && Math.abs(v.speed) < 3 && u.deployCd <= 0 && (!p.sweeping || dist < 12)) {
       const lx = Math.cos(v.h), lz = -Math.sin(v.h);
       const swat = u.id[0] === 's';
       for (const side of swat ? [1, -1, 1, -1] : [1, -1]) {
@@ -285,7 +298,7 @@ export function hostUpdate(dt, players) {
     }
     const ad = angDiff(v.h, Math.atan2(gx - v.x, gz - v.z));
     let inp = { throttle: Math.abs(ad) > 0.7 && v.speed > 13 ? 0 : 1, brake: Math.abs(ad) > 0.9 && v.speed > 15 ? 0.6 : 0, steer: clamp(ad * 2, -1, 1), handbrake: Math.abs(ad) > 1.3 && v.speed > 12 };
-    if (dist < (p.sweeping ? 6 : 10 + Math.abs(v.speed) * 0.9) && !p.inVeh) inp = { throttle: 0, brake: v.speed > 0.5 ? 1 : 0, steer: inp.steer };
+    if (dist < (p.sweeping ? 6 : 10 + Math.abs(v.speed) * 0.9) && (!p.inVeh || (p.stars >= 2 && (p.speed || 0) < 3 && !p.home))) inp = { throttle: 0, brake: v.speed > 0.5 ? 1 : 0, steer: inp.steer };
     if (p.home && (v.speed > 12 || dist < 15)) inp = { throttle: 0, brake: dist < 15 ? 1 : 0.3, steer: inp.steer }; // no hurry heading home
     if (u.revT > 0) { u.revT -= dt; inp = { throttle: 0, brake: 1, steer: -inp.steer }; }
     else if (inp.throttle > 0 && Math.abs(v.speed) < 1.5) {
@@ -297,6 +310,7 @@ export function hostUpdate(dt, players) {
     else if (Math.abs(v.speed) > 6) u.unstick = 0;
     else u.stuckT = 0;
     const imp = stepVehicle(v, inp, dt);
+    hitByCar(v); // cruisers in a chase knock over street props too
     if (imp > 10) v.hp -= (imp - 10) * 2;
     for (const o of vehicles) if (Math.abs(o.x - v.x) < 8 && Math.abs(o.z - v.z) < 8 && !o.exploded) collideVehicles(v, o, false);
     for (const o of cops.values()) if (o.kind < 2 && o.v !== v && Math.abs(o.v.x - v.x) < 8 && Math.abs(o.v.z - v.z) < 8) collideVehicles(v, o.v, false);

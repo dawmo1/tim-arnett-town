@@ -1,4 +1,4 @@
-// Ambient traffic on Davenport's real road graph. Each player simulates their own traffic around
+// Ambient traffic on the Quad Cities' real road graph (interstates with semis, quiet country roads). Each player simulates their own traffic around
 // them (only cars somebody interacts with get networked). Cars follow lanes with the IDM car-following
 // model, obey traffic lights (shared clock, so every player sees the same lights), take turns at
 // all-way stops, respect one-way streets, turn through junctions on smooth curves, change lanes,
@@ -47,8 +47,12 @@ export function signalState(k, heading, tSec) {
 
 // ---------- picking cars ----------
 const pick = (list, r) => { let t = 0; for (const [, w] of list) t += w; let x = r * t; for (const [v, w] of list) { x -= w; if (x <= 0) return v; } return list[0][0]; };
-function chooseType(x, z, night, r) {
+function chooseType(x, z, night, r, e = null) {
   const d = district(x, z);
+  // interstates: semis (the box truck stands in until there's a tractor-trailer type) among the cars
+  if (e && (e.cls === 'motor' || e.cls === 'trunk') && d !== 'downtown') return pick([[V.TRUCK, 7], [V.SEDAN, 6], [V.SUV, 6], [V.PICKUP, 5], [V.MINIVAN, 2], [V.VAN, 2], [V.BUS, 0.4], [V.SPORTS, 0.5]], r);
+  // country roads: pickups, farm trucks (and a tractor once vehicles.js has one), the odd car
+  if (d === 'rural') return pick([[V.PICKUP, 10], [V.TRUCK, 2.5], [V.SUV, 4], [V.SEDAN, 3], [V.VAN, 0.6], [V.MUSCLE, 0.4], [V.BIKE, 0.3]], r);
   const everyday = [[V.SEDAN, 10], [V.HATCH, 5], [V.SUV, 8], [V.PICKUP, d === 'north' || d === 'west' ? 7 : 4], [V.MINIVAN, 3], [V.SPORTS, 1], [V.TAXI, d === 'downtown' ? 3 : 0.3], [V.VAN, 1.5], [V.TRUCK, d === 'riverfront' ? 2 : 0.7], [V.BUS, d === 'downtown' ? 1 : 0.3]];
   const work = night ? [] : [[V.GARBAGE, 0.35], [V.TOW, 0.3]];
   const fun = [[V.MUSCLE, 0.6], [V.CONVERTIBLE, 0.5], [V.LIMO, d === 'downtown' ? 0.4 : 0.1], [V.MONSTER, 0.08], [V.BIKE, 0.7], [V.SCOOTER, d === 'village' || d === 'downtown' ? 0.5 : 0.1]];
@@ -79,7 +83,7 @@ export function joinTraffic(v) {
   return true;
 }
 // ---------- spawning ----------
-const drivable = (e) => e.cls !== 'service' && e.cls !== 'motor' && e.len > 25;
+const drivable = (e) => e.cls !== 'service' && e.cls !== 'track' && e.len > 25;
 function trySpawn(fx, fz, R, cam, night, patrol = false) {
   const ids = [...W.edgesNear(fx, fz, R)];
   for (let tries = 0; tries < 12; tries++) {
@@ -94,7 +98,7 @@ function trySpawn(fx, fz, R, cam, night, patrol = false) {
     // appear out of sight: behind the camera or far away
     if (cam && d < 220) { const dx = p.x - cam.x, dz = p.z - cam.z, l = Math.hypot(dx, dz) || 1; if ((dx * cam.fx + dz * cam.fz) / l > 0.35) continue; }
     if (ctx.vehicles().some((v) => Math.abs(v.x - p.x) < 14 && Math.abs(v.z - p.z) < 14)) continue;
-    const r = Math.random(), ti = patrol ? V.POLICE : chooseType(p.x, p.z, night, r);
+    const r = Math.random(), ti = patrol ? V.POLICE : chooseType(p.x, p.z, night, r, e);
     const v = makeVehicle(ctx.newId ? ctx.newId('t') : 't' + nextId++, ti, patrol ? 0xffffff : colorFor(ti, Math.random()), { x: p.x, z: p.z, h: p.h });
     v.mode = 'traffic'; v.patrol = patrol;
     v.ag = { e, dir, lane, s, off, offT: off, speed: e.speed * 0.6, phase: 'edge', temper: 0.85 + Math.random() * 0.25, next: null, blockT: 0, honkT: 0, drunk: night && Math.random() < 0.05 };
@@ -148,7 +152,8 @@ export function scareTraffic(x, z, r) { for (const v of traffic) if (v.ag && Mat
 
 // obs: [{x, z, r, person, speed}] things to stop for. sirens: [{x, z}] emergency vehicles with sirens on.
 export function updateTraffic(dt, focus, cam, obs, sirens, tSec, opts) {
-  const R = opts.radius, want = opts.count;
+  // out in the country the roads are quiet
+  const R = opts.radius, want = district(focus.x, focus.z) === 'rural' ? Math.ceil(opts.count * 0.3) : opts.count;
   // spawn / despawn
   spawnT -= dt;
   if (spawnT <= 0) {
@@ -328,10 +333,13 @@ function initSignals() {
   W.onStream('unloaded', () => { sigDirty = true; });
 }
 let sigDirty = false;
+// breakables.js: the poles you can knock down ({key, kind 'signal' | 'stop', x, y, z, h, armH, armLen}) and the broken ones
+export const sigPosts = [], sigBroken = new Set();
+export function setSignalBroken(key, on) { if (on) sigBroken.add(key); else sigBroken.delete(key); sigDirty = true; }
 function rebuildSignals() {
   const o = new THREE.Object3D();
   let np = 0, na = 0, nh = 0, nl = 0, ns = 0;
-  sigList.length = 0;
+  sigList.length = 0; sigPosts.length = 0;
   const loaded = (x, z) => W.builtTiles.has(`${Math.floor(x / 200)}_${Math.floor(z / 200)}`);
   const Nn = N();
   for (let k = 0; k < Nn.n; k++) {
@@ -345,8 +353,10 @@ function rebuildSignals() {
       const rx = -Math.cos(travelH), rz = Math.sin(travelH), side = e.width / 2 + 0.9;
       const px = p.x + rx * side, pz = p.z + rz * side, py = W.terrainHeight(px, pz);
       const face = travelH + Math.PI; // faces oncoming traffic
+      const key = k + ':' + id, armLen = Math.min(e.width * 0.6, 7);
+      if (sigBroken.has(key)) continue;
+      if (ctrl === 1 || ctrl === 2) sigPosts.push({ key, kind: ctrl === 1 ? 'signal' : 'stop', x: px, y: py, z: pz, h: face, armH: travelH - Math.PI / 2, armLen });
       if (ctrl === 1 && np < 600) {
-        const armLen = Math.min(e.width * 0.6, 7);
         o.position.set(px, py, pz); o.rotation.set(0, 0, 0); o.scale.set(1, 6.2, 1); o.updateMatrix(); sig.pole.setMatrixAt(np++, o.matrix);
         o.position.set(px, py + 6, pz); o.rotation.set(0, travelH - Math.PI / 2, 0); o.scale.set(1, 1, armLen); o.updateMatrix(); sig.arm.setMatrixAt(na++, o.matrix);
         const hx = px - rx * armLen, hz = pz - rz * armLen;

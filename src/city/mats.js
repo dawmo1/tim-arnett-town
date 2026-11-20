@@ -2,6 +2,7 @@
 // so a whole tile's buildings draw in one call; a small shader patch repeats a cell across a wall.
 import * as THREE from 'three';
 import { rng } from '../util.js';
+import { nameTexture } from './names.js';
 
 // atlas cells: [col, row]
 export const CELL = {
@@ -291,6 +292,47 @@ function weatherPatch(m, kind) {
   m.customProgramCacheKey = () => prevKey + 'wx-' + kind;
   return m;
 }
+// Crop rows (30-inch corn/soy rows, tinted per field by vertex colour); u runs across the rows, 1 unit = 1 row.
+function cropTex() {
+  const c = document.createElement('canvas'); c.width = 32; c.height = 64;
+  const g = c.getContext('2d'); g.fillStyle = '#6e5a46'; g.fillRect(0, 0, 32, 64);
+  g.fillStyle = '#ffffff'; g.fillRect(6, 0, 20, 64);
+  g.fillStyle = 'rgba(0,0,0,.18)'; for (let y = 0; y < 64; y += 4) g.fillRect(8 + ((y * 7) % 5), y, 16, 2);
+  const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
+  return t;
+}
+// House night life in one material: porch lamps, TV / lamp glow in windows, Christmas lights when it snows,
+// neon. Vertex 'atlas' = (kind, phase): 0 porch, 1 window glow, 2 Christmas bulbs (uv.x counts bulbs), 3 neon.
+export const GLOW = { night: { value: 0 }, time: { value: 0 } };
+function glowMaterial() {
+  const m = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
+  m.onBeforeCompile = (sh) => {
+    sh.uniforms.gNight = GLOW.night; sh.uniforms.gTime = GLOW.time; sh.uniforms.gSnow = WX.snow;
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute vec2 atlas; varying vec2 vK; varying vec2 vGUv;')
+      .replace('#include <uv_vertex>', '#include <uv_vertex>\nvK = atlas; vGUv = uv;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform float gNight; uniform float gTime; uniform float gSnow; varying vec2 vK; varying vec2 vGUv;')
+      .replace('#include <color_fragment>', `#include <color_fragment>
+      {
+        float k = vK.x, ph = vK.y; vec3 c = diffuseColor.rgb;
+        if (k < 0.5) { c = mix(c, vec3(1.0, 0.8, 0.5) * 2.2, gNight * step(ph, 0.85)); }
+        else if (k < 1.5) {
+          float on = gNight * step(ph, 0.55); if (on < 0.02) discard;
+          float fl = 0.65 + 0.35 * sin(gTime * 9.0 + ph * 40.0) * sin(gTime * 2.7 + ph * 17.0);
+          c = ph < 0.3 ? vec3(0.4, 0.6, 1.0) * 1.3 * fl : vec3(1.0, 0.78, 0.5) * 1.25;
+          c *= on;
+        } else if (k < 2.5) {
+          if (gSnow < 0.15) discard;
+          if (fract(vGUv.x) > 0.45) discard;
+          float i = mod(floor(vGUv.x), 5.0);
+          vec3 b = i < 1.0 ? vec3(1.0, 0.15, 0.1) : i < 2.0 ? vec3(0.1, 1.0, 0.25) : i < 3.0 ? vec3(0.2, 0.4, 1.0) : i < 4.0 ? vec3(1.0, 0.8, 0.15) : vec3(1.0, 0.3, 0.8);
+          c = b * (0.45 + gNight * 2.2 * (0.75 + 0.25 * sin(gTime * 3.0 + floor(vGUv.x) * 1.7)));
+        } else { c *= 0.5 + gNight * 1.8; }
+        diffuseColor.rgb = c;
+      }`);
+  };
+  m.customProgramCacheKey = () => 'houseGlow';
+  return m;
+}
 export const M = {};
 export function initMaterials(quality = 'medium') {
   if (M.building) return M;
@@ -308,7 +350,19 @@ export function initMaterials(quality = 'medium') {
   M.water = new THREE.MeshStandardMaterial({ color: 0x3f6f7a, roughness: 0.12, metalness: 0.1, transparent: true, opacity: 0.93 });
   M.far = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 });
   M.farBox = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, emissive: 0xffc070, emissiveIntensity: 0 });
+  // area-realism detail (src/city/areas.js): merged per tile, one draw call each
+  M.wire = new THREE.LineBasicMaterial({ color: 0x23211f });
+  M.crop = new THREE.MeshStandardMaterial({ vertexColors: true, map: cropTex(), roughness: 0.95, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 });
+  // every text panel in one material: vertex 'atlas'.x = 1 glows at night (neon / shop / pylon), 0 doesn't (street, ghost signs)
+  M.names = new THREE.MeshStandardMaterial({ map: nameTexture(), emissiveMap: nameTexture(), emissive: 0xffffff, emissiveIntensity: 0, alphaTest: 0.5, roughness: 0.55, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+  M.names.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute vec2 atlas; varying float vEm;').replace('#include <uv_vertex>', '#include <uv_vertex>\nvEm = atlas.x;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vEm;').replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance *= vEm;');
+  };
+  M.names.customProgramCacheKey = () => 'namesGlow';
+  M.namesLit = M.names;
+  M.glow = glowMaterial();
   WX.puddles.value = puddleTex();
-  weatherPatch(M.building, 'roof'); weatherPatch(M.terrain, 'ground'); weatherPatch(M.road, 'road'); weatherPatch(M.walk, 'walk'); weatherPatch(M.far, 'ground'); weatherPatch(M.farBox, 'roof');
+  weatherPatch(M.crop, 'ground'); weatherPatch(M.building, 'roof'); weatherPatch(M.terrain, 'ground'); weatherPatch(M.road, 'road'); weatherPatch(M.walk, 'walk'); weatherPatch(M.far, 'ground'); weatherPatch(M.farBox, 'roof');
   return M;
 }

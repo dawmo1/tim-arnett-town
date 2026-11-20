@@ -41,13 +41,16 @@ function raise(lvl, x, z, spotted) {
   else if (!wanted.search) { wanted.search = true; wanted.searchT = 0; wanted.lk = { x, z }; }
 }
 
-// type: assault | steal | carjack | gunfire | kill | hitcop | killcop | killheli
+// type: assault | steal | carjack | gunfire | kill | bumpcop | ramcop | hitcop | killcop | killheli
+// Crimes against the police always count, even at 0 stars: the cop it happened to is the witness.
 export function crime(type, x, y, z) {
   const seen = copSees(x, y + 1.2, z);
   switch (type) {
     case 'assault': case 'steal': if (seen) raise(1, x, z, true); break;
     case 'carjack': if (seen) raise(1, x, z, true); else civilianCall(x, z, 1); break;
-    case 'gunfire': if (seen || copNear(x, z, 80)) raise(1, x, z, seen); else if (Math.random() < 0.5) civilianCall(x, z, 1); break;
+    case 'gunfire': if (copNear(x, z, 35)) raise(2, x, z, true); else if (seen || copNear(x, z, 80)) raise(1, x, z, seen); else if (Math.random() < 0.5) civilianCall(x, z, 1); break;
+    case 'bumpcop': raise(1, x, z, true); break; // a tap on a cop car: they light up and chase
+    case 'ramcop': raise(2, x, z, true); break; // a real ram
     case 'kill': if (seen) raise(3, x, z, true); else civilianCall(x, z, 2); break;
     case 'hitcop': raise(3, x, z, true); break;
     case 'robbery': raise(2, x, z, seen); break; // the clerk's alarm calls it in
