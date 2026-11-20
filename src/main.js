@@ -7,7 +7,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import * as W from './world.js';
 import { makeCharacter, animateCharacter, placeCharacter, randomLook, nameTag, mat, initCharacters, normLook, setProp, muzzleOf, weaponModel } from './character.js';
 import { SKIN as SKIN_TONES, TOPS, BOTTOMS, HAIRS, HATS, CLOTH, HAIRC, SHOES, BEARDS, GLASSES, MASKS } from './people/looks.js';
-import { createAllVehicles, makeParked, makeVehicle, V, TYPES, initFarCars, farCarsBegin, farCarAdd, farCarsEnd, stepVehicle, collideVehicles, pushCharOut, circles, charVehicle, makeVehicleMesh, damageZone, applyDamageVisual, applyBump, animateDamage, tipLift } from './vehicles.js';
+import { createAllVehicles, makeParked, makeVehicle, V, TYPES, initFarCars, farCarsBegin, farCarAdd, farCarsEnd, stepVehicle, collideVehicles, pushCharOut, circles, charVehicle, damageZone, applyDamageVisual, repair, applyBump, animateDamage, tipLift } from './vehicles.js';
 import { initTraffic, updateTraffic as tickTraffic, bumpTraffic, scareTraffic, updateSignals, traffic, patrolViewers } from './traffic.js';
 import { initWalkers, updateWalkers, walkers, panicNear, spawnFleeing, scare, provoke, setNpcContext, cartNear, revive, incident } from './npc.js';
 import { joinTraffic } from './traffic.js';
@@ -16,7 +16,7 @@ import { initEmergency, updateEmergency, reportDown } from './emergency.js';
 import { initLandmarks, updateLandmarks, doors, closedCrossings, trainCars, bargeList } from './landmarks.js';
 import * as interior from './interiors.js';
 import { initVenues, useVenue, updateVenues } from './venues.js';
-import { initEvents, updateEvents, eventBlips } from './events.js';
+import { initEvents, updateEvents, eventBlips, toggleJob } from './events.js';
 import { say, line } from './npc.js';
 import { initDayNight, updateDayNight, sky as weather, clockText, view as fogView } from './daynight.js';
 import { initLife, updateLife, startle, updateAnimals } from './life.js';
@@ -35,10 +35,11 @@ import { clamp, angDiff, rayOBB, raySphere, fmtDist } from './util.js';
 import { wanted, crime, updateWanted as tickWanted, resetWanted, cones, initWanted } from './wanted.js';
 import { eco, initEconomy, addCash, spend, goalDone, checkCountGoals, GOALS, storeNear, dropCash, updateEconomy, stores } from './economy.js';
 import { updateRadio, nextStation, currentStation } from './radio.js';
-import { drunk, drunkPass, drinkItems, resetDrunk, updateDrunk, wobble, drunkSteer, swayCamera } from './drunk.js';
+import { drunk, drunkPass, drinkItems, resetDrunk, updateDrunk, wobble, drunkSteer, swayCamera, blackedOut } from './drunk.js';
 import * as garage from './garage.js';
 import { applyMods, horn as modHorn, armorMul } from './carmods.js';
 import * as phone from './phone.js';
+import * as minigames from './minigames/index.js';
 
 // Everyone owns every weapon (price is unused). mag/ammoPack: magazine size and rounds per purchase; ammoPrice: cost of one ammoPack
 const WEAPONS = [
@@ -296,18 +297,20 @@ addEventListener('keydown', (e) => {
   if (!playing) return;
   if (shopOpen && (e.key === 'Escape' || e.code === 'KeyE') && !e.repeat) { e.preventDefault(); closeShop(); return; }
   if (paused) { pauseKey(e); return; }
-  if (phone.key(e)) { e.preventDefault(); return; } // phone up: arrows / Enter / Backspace / Esc belong to it
+  if (blackedOut() && e.key !== 'Escape') { e.preventDefault(); return; } // passed out: no moving, shooting or using things
+  if (phone.key(e)) { e.preventDefault(); mouseDown = false; aiming = false; me.lockOn = null; return; } // phone up: arrows / Enter / Backspace / Esc belong to it; drop held fire/aim
   if (e.key === 'Escape' && !locked) { openPause(); return; }
   if (e.code === 'Space' || e.code === 'Tab' || e.code.startsWith('Arrow')) e.preventDefault();
   if (e.repeat) return;
   keys.add(e.code);
   if (e.code === 'KeyT') { e.preventDefault(); openChat(); }
-  if (e.code === 'Tab' || e.code === 'KeyQ') { e.preventDefault(); openWheel(); }
+  if ((e.code === 'Tab' || e.code === 'KeyQ') && !phone.isOpen()) { e.preventDefault(); openWheel(); }
   if (e.code === 'KeyM') { document.exitPointerLock?.(); openPause('map'); }
   if (e.code === 'KeyE') { const d = doorNear(); if (d) useDoor(d); else if (!useStore()) toggleVehicle(); }
   if (e.code === 'KeyR') startReload();
   if (e.code === 'KeyN' && me.veh && !me.veh.T.bike) { const st = nextStation(); ui.flashPrompt(st.sub ? `📻 ${st.name} · ${st.sub}` : st.name); }
   if (e.code === 'KeyP') callMechanic();
+  if (e.code === 'KeyJ' && !toggleJob()) ui.flashPrompt('No side job for this ride'); // taxi, ambulance, fire truck, police car, scooter
   if (e.code === 'KeyH' && me.veh && !me.dead) modHorn(me.veh); // horn (carmods.js: the car's own horn mod)
   else if (e.code === 'KeyG' || e.code === 'KeyH') talk(e.code === 'KeyG');
   if (e.code === 'KeyC' && playing && !me.veh && !me.dead && !typing) { me.crouch = !me.crouch; ui.flashPrompt(me.crouch ? 'Crouching (C to stand)' : 'Standing'); }
@@ -319,7 +322,7 @@ document.addEventListener('pointerlockchange', () => {
   locked = document.pointerLockElement === canvas;
   if (!locked) mouseDown = false;
   if (locked) closePause();
-  else if (playing && !typing && !wheelOpen && !shopOpen) openPause();
+  else if (playing && !typing && !wheelOpen && !shopOpen && !phone.unlocked() && !minigames.isOpen()) openPause(); // Esc with the phone up only backs the phone
 });
 addEventListener('mousemove', (e) => {
   if (!locked) return;
@@ -334,7 +337,7 @@ addEventListener('mousemove', (e) => {
   lastMouse = performance.now();
 });
 addEventListener('mousedown', (e) => {
-  if (!locked || wheelOpen) return;
+  if (!locked || wheelOpen || blackedOut() || phone.isOpen()) return; // no shooting, aiming or melee on the phone
   if (e.button === 0) { mouseDown = true; clicked = true; }
   if (e.button === 2) { aiming = true; me.lockOn = findLockTarget(); }
 });
@@ -624,9 +627,10 @@ net.handlers.vehicle = (id, rec) => {
   v.mode = 'free'; v.localSim = false;
   v.tgt = { x: rec.x, z: rec.z, h: rec.h, y: rec.y || 0 };
   v.hp = rec.hp; v.driver = rec.d || ''; v.burnAt = rec.b || 0; v.burnBy = rec.bb || '';
+  if (!v.burnAt && v.fire) { fx.stopFire(v.fire); v.fire = null; } // put out (extinguisher or a repair) on the owner's side
   if (rec.e) v.exploded = true;
   if (typeof rec.l === 'number') { const l = rec.l; v.sirenOn = !!(l & 1); v.netBrake = !!(l & 2); v.netRev = !!(l & 4); v.doorOpen = l & 8 ? 1 : 0; v.flat = !!(l & 16); v.brokenHead = !!(l & 32); v.brokenTail = !!(l & 64); }
-  if (Array.isArray(rec.dz)) { const [f, b, l, r] = rec.dz; if (f !== Math.round(v.dz.f) || b !== Math.round(v.dz.b) || l !== Math.round(v.dz.l) || r !== Math.round(v.dz.r)) { v.dz = { f, b, l, r }; applyDamageVisual(v); } }
+  if (Array.isArray(rec.dz)) { const [f, b, l, r] = rec.dz; if (f !== Math.round(v.dz.f) || b !== Math.round(v.dz.b) || l !== Math.round(v.dz.l) || r !== Math.round(v.dz.r)) { if (f + b + l + r === 0) { repair(v); applyMods(v); } else { v.dz = { f, b, l, r }; applyDamageVisual(v); } } } // all zero = repaired at Arnett Auto
 };
 net.handlers.vehicleGone = (id) => { const v = vehById.get(id); if (v) resetVehicle(v); };
 net.handlers.event = (e) => {
@@ -865,7 +869,7 @@ function knockMe(vel, getUp = 2.2) {
   return !!ragdoll(me.ch, vel, { getUp, onUp: (p, h) => { me.x = p.x; me.z = p.z; me.h = h; me.y = W.isLand(p.x, p.z) ? W.groundHeight(p.x, p.z) : W.SWIM_Y; me.vy = 0; } });
 }
 function die() {
-  closeWheel(false);
+  closeWheel(false); minigames.close(); // shot at the card table: the bet on the table comes back
   me.hp = 0; me.dead = true; me.deadT = 5; me.deadAt = performance.now();
   fx.soundWasted();
   if (me.veh) ejectMe();
@@ -1422,7 +1426,7 @@ function updateVehicles(dt, tSec, nowMs) {
       if (!v.fire) v.fire = fx.startFire(v.mesh);
       if (nowMs - v.burnAt > 12000 && (v.burnBy === net.uid || (isHost && nowMs - v.burnAt > 16000))) explodeVehicle(v);
     }
-    if (v.exploded && !v.charred) { v.charred = true; fx.stopFire(v.fire); v.fire = null; charVehicle(v); }
+    if (v.exploded && !v.charred) { v.charred = true; fx.stopFire(v.fire); v.fire = null; charVehicle(v); if (v.mesh.userData.neon) v.mesh.userData.neon.visible = false; } // no neon glow under a burnt-out shell
     if (v.doorCloseAt && performance.now() > v.doorCloseAt) { v.doorOpen = 0; v.doorCloseAt = 0; }
     const dl = v.mesh.userData.parts && v.mesh.userData.parts.doorL;
     if (dl) { v.doorAng = (v.doorAng || 0) + ((v.doorOpen ? 1.15 : 0) - (v.doorAng || 0)) * Math.min(1, dt * 9); dl.rotation.y = -v.doorAng; }
@@ -1830,7 +1834,8 @@ function leaveRoom() {
 }
 // drank past the limit: black out, come to outside the store or a few steps away, half sobered
 function passOut() {
-  drunk.lvl = 0.6;
+  drunk.lvl = 0.6; drunk.out = performance.now() + 2500;
+  keys.clear(); mouseDown = false; aiming = false; me.lockOn = null; // frozen until you come to
   fadeEl.style.opacity = '1';
   ui.addFeed('Everything goes dark...');
   setTimeout(() => {
@@ -1881,9 +1886,9 @@ function gunShopItems(basic = false) {
   return items;
 }
 // Arnett Auto: the mod shop and personal cars live in garage.js, the looks and horns in carmods.js (v.mods)
-function rebuildCar(v) { scene.remove(v.mesh); v.mesh = makeVehicleMesh(v.T, v.color, 0, v.ti); scene.add(v.mesh); applyDamageVisual(v); applyMods(v); v.headFor = ''; }
 function bodyShop(v) { shopOpen = true; paused = true; keys.clear(); mouseDown = false; document.exitPointerLock?.(); garage.openModShop(v); }
-function repairCar(v) { v.hp = v.T.hp; v.dz = { f: 0, b: 0, l: 0, r: 0 }; v.burnAt = 0; v.flat = false; v.brokenHead = v.brokenTail = false; rebuildCar(v); writeVeh(v, true); }
+// fixed in place (same mesh: plate, rims, neon stay); repair() straightens panels, refits lost parts, glass and lamps, applyMods puts the tint back
+function repairCar(v) { v.hp = v.T.hp; v.burnAt = 0; v.burnBy = ''; fx.stopFire(v.fire); v.fire = null; v.flat = false; repair(v); applyMods(v); writeVeh(v, true); }
 garage.initGarage({ spawn: (ti, c, label) => deliverCar(ti, label, c), remove: (v) => { removeVehicle(v.id); resetVehicle(v); }, vehicles: () => vehicles, myVeh: () => me.veh, repair: repairCar, writeVeh: (v) => writeVeh(v, true), close: closeShop });
 // ---- clothing store: Tim's Threads (outfits, a barber, tattoos and masks)
 const COLS = [['White', 0], ['Black', 1], ['Grey', 2], ['Navy', 4], ['Blue', 5], ['Red', 7], ['Maroon', 8], ['Green', 9], ['Olive', 10], ['Khaki', 11], ['Brown', 12], ['Gold', 14], ['Orange', 15], ['Pink', 16], ['Purple', 17], ['Teal', 18]];
@@ -2134,6 +2139,7 @@ phone.initPhone({
   deliver: (ti, label) => deliverCar(ti, label),
   ammoItems: () => gunShopItems(),
   heal: () => { me.hp = 100; },
+  busy: () => paused || shopOpen || !loader.hidden || !!document.querySelector('body > .mg'), // pause / shop / loading / minigame: phone goes away
 });
 initEvents({
   newId,
@@ -2143,6 +2149,7 @@ initEvents({
   alarm: (v) => { v.alarmUntil = performance.now() / 1000 + 4.5; let n = 0; const iv = setInterval(() => { fx.soundHorn(distCam(v.x, v.z)); if (++n > 6) clearInterval(iv); }, 600); },
   // street events (src/events/*.js): the scene for markers/props, you, your aim, car removal, the fire crew's extinguish
   scene, me: () => me, threat: () => threatState, remove: (v) => resetVehicle(v), feed: (t) => ui.addFeed(t), now: () => net.now(),
+  collide: (v) => collideAround(v, true), // street racers crash into traffic, free cars and you like any car
   extinguish: (v) => { v.burnAt = 0; v.burnBy = ''; fx.stopFire(v.fire); v.fire = null; v.hp = Math.max(v.hp, -v.T.hp * 0.3); writeVeh(v, true); },
 });
 initLandmarks(scene, {

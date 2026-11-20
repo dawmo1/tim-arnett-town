@@ -23,18 +23,23 @@ export async function loadData() {
   D.coarse = { ...c, heights: b64(c.heights, Int16Array), kind: b64(c.kind, Uint8Array) };
   D.tileSet = new Set(index.tiles);
   buildGraph(roads);
+  // economy.js plans the store lots before any tile is built; the tile data it reads is kept for fetchTile
+  const tileB = (tx, tz) => { const k = tileKey(tx, tz); if (!D.tileSet.has(k)) return Promise.resolve([]); if (!early.has(k)) early.set(k, getJSON(`tiles/${k}.json`)); return early.get(k).then((j) => j.b, () => []); };
+  lots.list = [...(lots.plan ? await lots.plan(tileB) : []), ...lots.extra];
 }
 
 // ---------- tile data (fetched on demand, kept in a small cache) ----------
 export const tiles = new Map(); // key -> {key, tx, tz, ox, oz, h:Int16Array, c:Uint8Array, b, t, k, e}
 const pending = new Map();
+const early = new Map(); // key -> tile JSON promise fetched by the lot planning, handed over on the first fetchTile
 export const tileKey = (tx, tz) => `${tx}_${tz}`;
 export const inRange = (tx, tz) => D.index && tx >= D.index.tx0 && tx <= D.index.tx1 && tz >= D.index.tz0 && tz <= D.index.tz1;
 export function fetchTile(tx, tz) {
   const key = tileKey(tx, tz);
   if (tiles.has(key)) return Promise.resolve(tiles.get(key));
   if (pending.has(key)) return pending.get(key);
-  const p = getJSON(`tiles/${key}.json`).then((j) => {
+  const j0 = early.get(key); early.delete(key);
+  const p = (j0 || getJSON(`tiles/${key}.json`)).then((j) => {
     const t = { key, tx, tz, ox: tx * TILE, oz: tz * TILE, h: b64(j.h, Int16Array), c: b64(j.c, Uint8Array), b: clearLots(j.b, tx * TILE, tz * TILE), t: j.t, k: j.k, e: j.e, used: performance.now() };
     tiles.set(key, t); pending.delete(key);
     return t;
@@ -43,23 +48,25 @@ export function fetchTile(tx, tz) {
   return p;
 }
 export const isFetching = (key) => pending.has(key);
-// Lots kept clear for the walk-in stores: economy.js sets `plan` (run once, before the first tile arrives) to
-// return [{x, z, fx, fz, hw, hd}] rectangles (centre, unit vector into the lot, half width, half depth).
-// A building touching a lot is dropped from its tile's data, so its mesh, walls, roof and footprint all go.
+// Lots kept clear for the walk-in stores: economy.js sets `plan`, which loadData awaits once before any tile is built:
+// plan(tileB) (tileB(tx, tz) -> that tile's raw building records) returns [{x, z, fx, fz, hw, hd}] rectangles
+// (centre, unit vector into the lot, half width, half depth).
+// A building touching a lot (lotHits) is dropped from its tile's data, so its mesh, walls, roof and footprint all go.
 // landmarks.js pushes the Blender landmarks' footprints into `extra` (same shape) at import time.
 export const lots = { plan: null, list: null, extra: [] };
 const inPoly = (x, z, p) => { let c = false; for (let i = 0, j = p.length - 2; i < p.length; j = i, i += 2) if ((p[i + 1] > z) !== (p[j + 1] > z) && x < ((p[j] - p[i]) * (z - p[i + 1])) / (p[j + 1] - p[i + 1]) + p[i]) c = !c; return c; };
+// shortcut: tests corners + edge midpoints of the building and corners + centre of the lot, so a thin wall crossing a lot without touching any of them survives
+export function lotHits(L, rel, ox, oz) {
+  const inL = (x, z) => { const dx = x - L.x, dz = z - L.z; return Math.abs(dx * L.fz - dz * L.fx) < L.hw && Math.abs(dx * L.fx + dz * L.fz) < L.hd; };
+  for (let i = 0; i < rel.length; i += 2) { const j = (i + 2) % rel.length; if (inL(rel[i] + ox, rel[i + 1] + oz) || inL((rel[i] + rel[j]) / 2 + ox, (rel[i + 1] + rel[j + 1]) / 2 + oz)) return true; }
+  return [[0, 0], [1, 1], [1, -1], [-1, 1], [-1, -1]].some(([a, f]) => inPoly(L.x + L.fz * a * L.hw + L.fx * f * L.hd - ox, L.z - L.fx * a * L.hw + L.fz * f * L.hd - oz, rel));
+}
+// the tiles clearLots checks a lot against (their centre within TILE / 2 + 30 m of the lot's centre)
+export const lotNear = (L, ox, oz) => Math.abs(L.x - ox - TILE / 2) < TILE / 2 + 30 && Math.abs(L.z - oz - TILE / 2) < TILE / 2 + 30;
 function clearLots(b, ox, oz) {
-  if (!lots.list) lots.list = [...(lots.plan ? lots.plan() : []), ...lots.extra];
-  const near = (lots.list || []).filter((L) => Math.abs(L.x - ox - TILE / 2) < TILE / 2 + 30 && Math.abs(L.z - oz - TILE / 2) < TILE / 2 + 30);
+  const near = (lots.list || lots.extra).filter((L) => lotNear(L, ox, oz));
   if (!near.length) return b;
-  // shortcut: tests corners + edge midpoints of the building and corners + centre of the lot, so a thin wall crossing a lot without touching any of them survives
-  const onLot = (rel) => near.some((L) => {
-    const inL = (x, z) => { const dx = x - L.x, dz = z - L.z; return Math.abs(dx * L.fz - dz * L.fx) < L.hw && Math.abs(dx * L.fx + dz * L.fz) < L.hd; };
-    for (let i = 0; i < rel.length; i += 2) { const j = (i + 2) % rel.length; if (inL(rel[i] + ox, rel[i + 1] + oz) || inL((rel[i] + rel[j]) / 2 + ox, (rel[i + 1] + rel[j + 1]) / 2 + oz)) return true; }
-    return [[0, 0], [1, 1], [1, -1], [-1, 1], [-1, -1]].some(([a, f]) => inPoly(L.x + L.fz * a * L.hw + L.fx * f * L.hd - ox, L.z - L.fx * a * L.hw + L.fz * f * L.hd - oz, rel));
-  });
-  return b.filter((rec) => !onLot(rec[0]));
+  return b.filter((rec) => !near.some((L) => lotHits(L, rec[0], ox, oz)));
 }
 
 // ---------- heights ----------

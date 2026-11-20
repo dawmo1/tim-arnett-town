@@ -183,6 +183,6 @@ export default function roulette(ctx) {
       if (e.code === 'KeyC') { clear(); return true; }
       return false;
     },
-    close() { if (!spinning && staked()) ctx.pay(staked()); }, // unspun chips go back
+    close() { if (staked()) ctx.pay(staked()); }, // chips still on the table go back (mid-spin only on a forced close)
   };
 }

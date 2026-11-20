@@ -52,7 +52,7 @@ function waterFrom(x, z, dx, dz, max = 800) { for (let d = 0; d < max; d += 4) i
 // ---------- Blender landmarks (assets/src/landmarks.py -> assets/models/landmarks/<file>.glb) ----------
 // Each model is built around its anchor (game x/z), base at y, facing as in the city. The OSM buildings
 // under `clear` ([cx, cz, half x, half z]) are dropped from the tile data (city/data.js lots), `solid`
-// ([cx, cz, half x, half z, height, base above y]) are its walls. Models stream in within LOAD m and out past DROP m.
+// ([cx, cz, half x, half z, height, base above y, heading (default the model's)]) are its walls. Models stream in within LOAD m and out past DROP m.
 const MODELS = [
   { file: 'blackhawk', x: 451.6, z: 96.5, y: 7.5, clear: [[451.6, 96.5, 21, 18]], solid: [[451.6, 96.5, 24.5, 22.3, 50]] },
   { file: 'adler', x: 342.4, z: 91.2, y: 8.6, clear: [[342.4, 91.2, 18, 16.5]], solid: [[342.4, 91.2, 19.7, 18.7, 27]] },
@@ -61,7 +61,12 @@ const MODELS = [
   { file: 'putnam', x: 189.5, z: 215.7, y: 6.3, clear: [[189.5, 215.7, 8.5, 20.5]], solid: [[189.5, 215.7, 10.2, 22.1, 49]] },
   { file: 'cityhall', x: 81.5, z: -27.5, y: 12.6, clear: [[81.7, -27.5, 21, 15]], solid: [[81.7, -27.5, 22.9, 17.2, 52]] },
   { file: 'bandshell', x: -180, z: 530, y: 2.7, clear: [[-180, 530, 3, 6]], solid: [[-187.5, 530, 1.6, 4, 5]] }, // Bix bandshell, opens east to the lawn
-  { file: 'ballpark', x: -400, z: 520, y: 3.0, clear: [[-431, 530, 3, 10], [-414, 545, 3, 8]], solid: [[-436, 527, 6, 24, 14], [-415, 489, 15, 7, 14], [-356, 490, 30, 7, 14]] }, // Modern Woodmen Park grandstand
+  // Modern Woodmen Park grandstand: one box per stretch of the curved bowl, from just outside the brick wall to just
+  // short of the field wall (made from the outer/field outlines in landmarks.py; 7th value = box heading)
+  { file: 'ballpark', x: -400, z: 520, y: 3.0, clear: [[-431, 530, 3, 10], [-414, 545, 3, 8]], solid: [[-427.2, 541.1, 6.1, 13.8, 14.5, 0, 1.836], [-426.5, 533.1, 6.2, 15.5, 14.5, 0, 1.571],
+    [-425.1, 524.3, 6.2, 16.1, 14.5, 0, 1.395], [-421.8, 517.7, 6.2, 17.3, 14.5, 0, 1.126], [-416.9, 510.8, 6.2, 17.9, 14.5, 0, 0.937], [-411.4, 506.2, 6.2, 18.8, 14.5, 0, 0.687],
+    [-405, 502.3, 6.2, 18.9, 14.5, 0, 0.46], [-397.3, 499.1, 6.2, 18.7, 14.5, 0, 0.278], [-391.7, 497.5, 6.2, 17.8, 14.5, 0, -0.049], [-379.8, 496.8, 6.2, 16.6, 14.5, 0, -0.03],
+    [-368.1, 495.5, 6.2, 14.9, 14.5, 0, -0.03], [-356.4, 493.9, 6.2, 13, 14.5, 0, -0.032], [-344.8, 493.1, 6.2, 11.8, 14.5, 0, -0.038], [-333.2, 492.5, 6.2, 10.8, 14.5, 0, -0.038]] },
   { file: 'ambrose', x: -287, z: -1693, y: 45.7, clear: [[-287, -1693, 3, 3]], solid: [[-286.6, -1688, 42.5, 12, 24], [-261, -1702, 17, 7, 16]] },
   { file: 'conservatory', x: 196, z: -2394, y: 37.4, clear: [[196, -2394, 15, 8]], solid: [[173, -2394, 14, 12, 8], [200, -2394, 12, 12, 15], [221.5, -2394, 8.5, 8, 8]] },
   { file: 'northpark', x: 132, z: -4257, y: 36.9, h: -0.277, clear: [], solid: [[130.6, -4252.2, 15, 5, 17]] }, // the mall's south entrance (the mall is OSM)
@@ -82,8 +87,10 @@ function lmMats() {
 }
 function initModels() {
   for (const L of MODELS) {
-    const ux = Math.cos(L.h || 0), uz = -Math.sin(L.h || 0);
-    addBoxes('lm-' + L.file, L.solid.map(([x, z, hx, hz, h, up = 0]) => (up ? makeBox(x, z, ux, uz, hx, hz, L.y + up, h) : makeBox(x, z, ux, uz, hx, hz, L.y - 3, h + 3))));
+    addBoxes('lm-' + L.file, L.solid.map(([x, z, hx, hz, h, up = 0, a = L.h || 0]) => {
+      const ux = Math.cos(a), uz = -Math.sin(a);
+      return up ? makeBox(x, z, ux, uz, hx, hz, L.y + up, h) : makeBox(x, z, ux, uz, hx, hz, L.y - 3, h + 3);
+    }));
   }
 }
 // L.h: heading (rotation.y); L.len: stretch a 100 m bridge module to this length; L.load: own load radius.
@@ -172,16 +179,21 @@ function buildSkybridge() { // glass tube over River Drive with lift towers (lan
 // ---------- Modern Woodmen Park: field, grandstand, light towers, Ferris wheel ----------
 function buildBallpark(cx, cz) {
   const y = terrainHeight(cx, cz) + 0.15, h = -0.6; // home plate up-river, outfield toward the bridge
-  const g = group(cx, y, cz, h);
-  // (the stadium building itself comes from the map data)
-  // light towers
-  for (const [lx, lz] of [[-40, 0], [40, 0], [-62, 45], [62, 45], [-30, 80], [30, 80]]) {
-    box(g, 0x777777, 0.6, 32, 0.6, lx, 16, lz);
-    const bank = box(g, 0, 4, 2.4, 0.6, lx, 32, lz, glow(0xfff8e1, 2)); bank.lookAt(cx, y, cz + 30);
+  const g = group(cx, y, cz, h), wg = group(0, 0, 0); // wg: placed in world x/z
+  // (the grandstand is landmarks/ballpark.glb, MODELS above: home plate ~(-390, 535), the bowl wraps it to the
+  // north-west, foul lines run south and east). Light towers stand outside the field like the real park's: two
+  // behind the stands along the baselines, two past the outfield corners, two in the power alleys.
+  const towers = [[-447, 538], [-345, 475], [-387, 645], [-281, 516], [-335, 647], [-266, 566]];
+  for (const [x, z] of towers) {
+    const ty = terrainHeight(x, z);
+    box(wg, 0x777777, 0.6, 33, 0.6, x, ty + 16.5, z);
+    const bank = box(wg, 0, 4, 2.4, 0.6, x, ty + 33, z, glow(0xfff8e1, 2)); bank.lookAt(-343, y, 573); // aimed at the middle of the field
   }
-  // Ferris wheel beyond left field
-  const fw = new THREE.Group(); fw.position.set(-58, 18, 74); g.add(fw);
-  box(g, 0x9e9e9e, 0.5, 19, 0.5, -60, 9, 72).rotation.z = 0.25; box(g, 0x9e9e9e, 0.5, 19, 0.5, -56, 9, 76).rotation.z = -0.25;
+  addBoxes('ballpark-towers', towers.map(([x, z]) => makeBox(x, z, 1, 0, 0.45, 0.45, terrainHeight(x, z) - 1, 34)));
+  // Ferris wheel in foul ground past the third-base stands, clear of the bridge ramp to the west
+  const fy = terrainHeight(-438, 600) - y; // group-local (-31, 71) = world (-438, 600)
+  const fw = new THREE.Group(); fw.position.set(-31, 18 + fy, 71); g.add(fw);
+  box(g, 0x9e9e9e, 0.5, 19, 0.5, -33, 9 + fy, 69).rotation.z = 0.25; box(g, 0x9e9e9e, 0.5, 19, 0.5, -29, 9 + fy, 73).rotation.z = -0.25;
   const wheel = new THREE.Group(); fw.add(wheel);
   const rim = new THREE.Mesh(new THREE.TorusGeometry(15, 0.35, 6, 40), glow(0xffeb3b, 1.5)); wheel.add(rim);
   for (let i = 0; i < 12; i++) {
@@ -190,7 +202,8 @@ function buildBallpark(cx, cz) {
     const car = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.4, 1.6), mat([0xe53935, 0x1e88e5, 0xfdd835, 0x43a047][i % 4])); car.position.set(Math.cos(a) * 15, Math.sin(a) * 15 - 1, 0); wheel.add(car); car.userData.gondola = true;
   }
   ferris = wheel;
-  const sg = signMesh(['MODERN WOODMEN PARK'], 18, 2.2, { bg: '#0d2a4a', fg: '#ffffff', size: 60, w: 1024, h: 128 }); sg.position.set(0, 9, -12); g.add(sg);
+  // the name over the arches on the grandstand's straight north wall, facing River Drive
+  const sg = signMesh(['MODERN WOODMEN PARK'], 18, 2.2, { bg: '#0d2a4a', fg: '#ffffff', size: 60, w: 1024, h: 128 }); sg.position.set(-369.5, 3.0 + 11.5, 481.1); sg.rotation.y = Math.PI; wg.add(sg);
   return true;
 }
 function buildFountain(x, z) {

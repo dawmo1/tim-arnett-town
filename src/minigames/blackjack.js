@@ -120,5 +120,6 @@ export default function blackjack(ctx) {
       if (e.code === 'KeyD') { double(); return true; }
       return false;
     },
+    close(forced) { if (stake) forced ? ctx.pay(stake) : ctx.result(false); }, // walking away forfeits the hand
   };
 }

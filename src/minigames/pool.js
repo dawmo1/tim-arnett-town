@@ -7,8 +7,11 @@ import('../drunk.js').then((m) => { drunk = m.drunk; }).catch(() => {});
 
 // table units: playing surface L x H, ball radius R
 export const L = 100, H = 50, R = 1.25;
-const FRICTION = 10, MAXV = 125, E_BALL = 0.94, E_RAIL = 0.76, CORNER_GAP = 3, SIDE_GAP = 2.4;
-const POCKETS = [[-0.4, -0.4, 2.9], [L / 2, -1, 2.25], [L + 0.4, -0.4, 2.9], [-0.4, H + 0.4, 2.9], [L / 2, H + 1, 2.25], [L + 0.4, H + 0.4, 2.9]];
+const FRICTION = 10, E_BALL = 0.97, E_RAIL = 0.85, CORNER_GAP = 3, SIDE_GAP = 2.4;
+export const MAXV = 125, BREAK = 2.5; // the break hits 2.5x a normal full-power shot
+// a ball drops once it hangs over the drawn hole (radius + 0.3) by 40% of its width, so nothing rests in the jaws
+const LIP = 0.3 + 0.6 * R;
+export const POCKETS = [[-0.4, -0.4, 2.9], [L / 2, -1, 2.25], [L + 0.4, -0.4, 2.9], [-0.4, H + 0.4, 2.9], [L / 2, H + 1, 2.25], [L + 0.4, H + 0.4, 2.9]];
 const AIMS = [[0.8, 0.8], [L / 2, 0.1], [L - 0.8, 0.8], [0.8, H - 0.8], [L / 2, H - 0.1], [L - 0.8, H - 0.8]];
 const COLORS = ['#f4f1e8', '#f2c12e', '#1d4fb8', '#d32a2a', '#5b2a86', '#f07a1a', '#127a3a', '#7a1f1f', '#111'];
 const typeOf = (n) => (n === 8 ? 'eight' : n < 8 ? 'solid' : 'stripe');
@@ -31,7 +34,7 @@ export function step(balls, h, ev) {
       if (b.y < R) { b.y = R; if (b.vy < 0) { ev.rail?.(-b.vy); b.vy *= -E_RAIL; b.vx *= 0.97; } }
       else if (b.y > H - R) { b.y = H - R; if (b.vy > 0) { ev.rail?.(b.vy); b.vy *= -E_RAIL; b.vx *= 0.97; } }
     }
-    if (POCKETS.some(([px, py, pr]) => Math.hypot(b.x - px, b.y - py) < pr) || b.x < -3 || b.x > L + 3 || b.y < -3 || b.y > H + 3) {
+    if (POCKETS.some(([px, py, pr]) => Math.hypot(b.x - px, b.y - py) < pr + LIP) || b.x < -3 || b.x > L + 3 || b.y < -3 || b.y > H + 3) {
       b.in = true; b.vx = b.vy = 0; ev.pot?.(b);
     }
   }
@@ -176,7 +179,7 @@ export default function pool(ctx) {
     if (!isBreak) say(); else if (turn === 0) ctx.say('Place the cue ball behind the line and break', '');
   }
   function placeOk(x, y) {
-    if (x < R || x > L - R || y < R || y > H - R || (isBreak && x > L * 0.25)) return false;
+    if (x < R || x > L - R || y < R || y > H - R || (isBreak && x > L * 0.25) || POCKETS.some(([qx, qy, pr]) => Math.hypot(x - qx, y - qy) < pr + LIP + 0.2)) return false;
     return balls.every((b) => b.in || b.n === 0 || Math.hypot(b.x - x, b.y - y) > 2 * R + 0.05);
   }
   function placeCue(x, y) {
@@ -185,7 +188,7 @@ export default function pool(ctx) {
     ang = Math.atan2(mouse[1] - y, mouse[0] - x);
   }
   function shoot(a, p) {
-    const v = p * MAXV * (isBreak ? 2 : 1); // the break gets the whole body behind it
+    const v = p * MAXV * (isBreak ? BREAK : 1); // the break gets the whole body behind it
     Object.assign(cue(), { vx: Math.cos(a) * v, vy: Math.sin(a) * v });
     firstHit = null; potted = []; power = 0; rollT = 0; phase = 'roll'; ctx.busy = true; sfx.clack(0.4 + p * 0.6);
   }
@@ -373,6 +376,6 @@ export default function pool(ctx) {
   return {
     frame,
     key(e) { if (e.code === 'Space' || e.key === 'Enter') { newRack(); return true; } return false; },
-    close() { gen++; if (phase !== 'ready' && phase !== 'over') ctx.result(false); },
+    close(forced) { gen++; if (phase !== 'ready' && phase !== 'over') forced ? ctx.pay(stake) : ctx.result(false); },
   };
 }

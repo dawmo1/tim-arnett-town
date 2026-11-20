@@ -1,6 +1,7 @@
 // Street events: little stories happening around you, local to each player. A registry of event
 // types lives in src/events/*.js (crime, chaos, help, races and side jobs); each one is
-//   { id, theme, name, weight, when(c) -> weight factor (time / weather / area), trigger(c) (vehicle side jobs),
+//   { id, theme, name, weight, when(c) -> weight factor (time / weather / area), trigger(c) (vehicle side jobs:
+//     you're in the right vehicle; job = its name, ready?(c) / wait = extra condition and its line),
 //     variants: [...], start(ev) -> bool, update(ev, dt), end?(ev), seeR?, life? }
 // This file picks what happens next (weighted, never the same type twice within RECENT events, and the
 // same variant rarely twice), spawns it out of sight 60-150 m away, shows its goal once you're close,
@@ -8,7 +9,7 @@
 import { sky } from './daynight.js';
 import * as W from './world.js';
 import { walkers, dropScripted } from './npc.js';
-import { K, unseen, dP, mission, clearMission, tickMission, pulseMarkers, dropMarker, move, fail, carGone } from './events/kit.js';
+import { K, unseen, dP, mission, clearMission, tickMission, pulseMarkers, dropMarker, move, fail, carGone, dropOff } from './events/kit.js';
 import crime from './events/crime.js';
 import chaos from './events/chaos.js';
 import help from './events/help.js';
@@ -18,11 +19,12 @@ const TYPES = [...crime, ...chaos, ...help, ...jobs];
 const RECENT = 12; // a type can't come back until this many others have played
 const events = [];
 export const activeEvents = events;
-let nextT = 25, clock = 0, jobCool = 0, vehT = 0, lastVeh = null, trigT = 0;
+let nextT = 25, clock = 0, jobCool = 0, trigT = 0;
+let shift = null; // the side job switched on with J: { T, earned, offT, n }
 const recent = [], lastV = new Map();
 export function initEvents(c) { K.ctx = c; }
 
-const conditions = () => ({ hour: sky.hour ?? 12, night: sky.night > 0.5, rain: sky.rain > 0.2 || sky.snowing > 0.2, district: W.district(K.P.x, K.P.z), foot: K.P.foot, veh: K.P.veh, vehT });
+const conditions = () => ({ hour: sky.hour ?? 12, night: sky.night > 0.5, rain: sky.rain > 0.2 || sky.snowing > 0.2, district: W.district(K.P.x, K.P.z), foot: K.P.foot, veh: K.P.veh });
 // a variant this type hasn't shown lately
 function pickVariant(T) {
   const n = T.variants.length, used = lastV.get(T.id) || [];
@@ -39,7 +41,7 @@ function launch(T) {
   if (!ok) { cleanup(ev); return false; }
   events.push(ev);
   recent.push(T.id); if (recent.length > RECENT) recent.shift();
-  if (ev.job) { ev.seen = true; ev.seenT = 0; if (ev.goal) mission(ev, ev.goal, 8); }
+  if (ev.job) { ev.seen = true; ev.seenT = 0; const first = shift?.T === T && !shift.n++; if (ev.goal) mission(ev, first ? `${T.job}: ${ev.goal}` : ev.goal, 8); }
   return true;
 }
 function spawnAmbient(c) {
@@ -64,21 +66,27 @@ export function updateEvents(dt, focus, cam, quiet) {
   const m = K.ctx.me ? K.ctx.me() : null, veh = m ? m.veh : null, P = K.P;
   P.x = focus.x; P.z = focus.z; P.veh = veh; P.dead = !!(m && m.dead); P.foot = !veh && !P.dead; P.speed = veh ? Math.abs(veh.speed || 0) : (m && m.moveSpeed) || 0;
   K.cam = cam; clock += dt;
-  vehT = veh && veh === lastVeh ? vehT + dt : 0; lastVeh = veh;
   tickMission(); pulseMarkers(clock);
   const jobOn = events.some((e) => e.job && !e.done);
   // something new now and then: one at a time at first, up to two later; a little busier as the session goes on
   nextT -= dt;
-  if (nextT <= 0 && !quiet && !jobOn && !P.dead && events.filter((e) => !e.done && !e.job).length < (clock > 300 ? 2 : 1)) {
+  if (nextT <= 0 && !quiet && !jobOn && !shift && !P.dead && events.filter((e) => !e.done && !e.job).length < (clock > 300 ? 2 : 1)) {
     nextT = (35 + Math.random() * 40) * Math.max(0.6, 1 - clock / 9000);
     if (!spawnAmbient(conditions())) nextT = 8;
   }
-  // side jobs start a few seconds after you get in the right vehicle (taxi, ambulance, fire truck, police car, scooter)
-  if ((trigT -= dt) <= 0) {
-    trigT = 1;
-    if (veh && !quiet && !jobOn && clock > jobCool) {
-      const c = conditions();
-      for (const T of TYPES) if (T.trigger && T.trigger(c)) { if (!launch(T)) jobCool = clock + 10; break; }
+  // the side job you switched on (J): the next fare / patient / fire / suspect / delivery once the last one's over.
+  // Out of the vehicle for 12 s (or dead) ends it.
+  if (shift) {
+    const c = { veh };
+    shift.offT = veh && shift.T.trigger(c) ? 0 : shift.offT + dt;
+    if (shift.offT > 12 || P.dead) endShift();
+    else if ((trigT -= dt) <= 0) {
+      trigT = 1;
+      if (!shift.offT && !quiet && !jobOn && clock > jobCool) {
+        if (shift.T.ready && !shift.T.ready(c)) { if (!shift.told) { shift.told = true; mission(shift, `${shift.T.job}: ${shift.T.wait}`, 8); } } // e.g. back to a restaurant for the next order
+        else if (launch(shift.T)) shift.told = false;
+        else jobCool = clock + 5;
+      }
     }
   }
   for (const ev of [...events]) step(ev, dt);
@@ -100,7 +108,7 @@ function step(ev, dt) {
     if (ev.done) {
       for (const mk of [...ev.marks]) dropMarker(ev, mk);
       ev.dest = null;
-      if (ev.job) jobCool = clock + (ev.ok ? 5 : 30);
+      if (ev.job) { jobCool = clock + (ev.ok ? 5 : 10); if (ev.ok && shift?.T === ev.T) shift.earned += ev.cash || 0; }
     }
     return;
   }
@@ -137,6 +145,26 @@ function cleanup(ev) {
   clearMission(ev);
 }
 
+// J: start the side job of the vehicle you're in (taxi, ambulance, fire truck, police car, scooter), or quit it
+export function toggleJob() {
+  if (shift) { endShift(); return true; }
+  const m = K.ctx?.me?.(), veh = m ? m.veh : K.P.veh, c = { veh }, T = veh && !K.P.dead && TYPES.find((t) => t.trigger && t.trigger(c));
+  if (!T) return false;
+  shift = { T, earned: 0, offT: 0, n: 0, told: false }; jobCool = 0; trigT = 0;
+  mission(shift, `${T.job} started.`, 4); // replaced by the first fare / call as soon as it's set up
+  return true;
+}
+function endShift() {
+  const s = shift; shift = null;
+  for (const ev of events) {
+    if (ev.T !== s.T || ev.done) continue;
+    if (ev.ride) dropOff(ev); // the passenger gets out
+    fail(ev, '');
+    for (const mk of [...ev.marks]) dropMarker(ev, mk);
+    ev.dest = null;
+  }
+  mission(s, `${s.T.job} ended · $${s.earned} earned`, 5);
+}
 // map blips: the event itself (orange !), or where you're headed (yellow) during a ride, a delivery or a race
 export function eventBlips() {
   const out = [];

@@ -2,7 +2,7 @@
 // (nothing is saved between sessions).
 import * as THREE from 'three';
 import * as W from './world.js';
-import { lots } from './city/data.js';
+import { lots, lotHits, lotNear, pointOnEdge, TILE } from './city/data.js';
 
 export const eco = { cash: 200, robbed: 0, jacked: 0, copCars: 0, done: new Set() };
 let scene, hooks = { announce() {}, sound() {}, feed() {} };
@@ -50,38 +50,94 @@ const BAR_NAMES = ["Tim's Tap", 'The Rusty Barge', 'Quad City Swill', 'The Leaky
   'Pint of No Return', 'The Barge Inn', 'Palmer Spine & Stein', 'The Hawkeye Hiccup', 'Credit Island Tab', 'Duck Creek Dive', 'The Fog Horn', 'Two Rivers Too Many',
   'Kimberly Road Rage', 'The Sinking Paddlewheel', 'Iowa Nice & Icy', 'Village Idiot Pub', 'The Corn Mash', 'Centennial Bridge Burner'];
 // a sidewalk spot in front of a point of interest: {x, z} to stand on, door toward the building
+const street = (e) => e.cls !== 'service' && !e.bridge;
+const spot = (e, qx, qz, nx, nz) => { const off = e.width / 2 + 1.6, x = qx + nx * off, z = qz + nz * off; return { x, z, doorX: x + nx * 2.2, doorZ: z + nz * 2.2, face: Math.atan2(nx, nz) }; };
 function frontOf(px, pz) {
-  const q = W.nearestEdge(px, pz, 80, (e) => e.cls !== 'service' && !e.bridge);
+  const q = W.nearestEdge(px, pz, 80, street);
   if (!q) return null;
-  const dx = px - q.x, dz = pz - q.z, l = Math.hypot(dx, dz) || 1, off = q.e.width / 2 + 1.6;
-  const x = q.x + (dx / l) * off, z = q.z + (dz / l) * off;
-  return { x, z, doorX: x + (dx / l) * 2.2, doorZ: z + (dz / l) * 2.2, face: Math.atan2(dx, dz) };
+  const dx = px - q.x, dz = pz - q.z, l = Math.hypot(dx, dz) || 1;
+  return spot(q.e, q.x, q.z, dx / l, dz / l);
 }
-let planned = false;
-function planStores() {
-  if (planned) return; planned = true;
+// spots for a walk-in store: in front of (px, pz), then slid 10..60 m along that road on the same side;
+// `far` (Arnett Arms, Tim's Threads) then tries the roads round points 60 and 120 m away
+function* spots(px, pz, far) {
+  const q = W.nearestEdge(px, pz, 80, street);
+  if (q) {
+    yield frontOf(px, pz);
+    const side = Math.sign((px - q.x) * Math.cos(q.h) - (pz - q.z) * Math.sin(q.h)) || 1;
+    for (let off = 10; off <= 60; off += 10) for (const s of [q.s + off, q.s - off]) {
+      if (s < 0 || s > q.e.len) continue;
+      const p = pointOnEdge(q.e, s);
+      yield spot(q.e, p.x, p.z, side * Math.cos(p.h), -side * Math.sin(p.h));
+    }
+  }
+  if (far) for (const r of [60, 120]) for (let a = 0; a < 8; a++) yield* spots(px + r * Math.cos(a * Math.PI / 4), pz + r * Math.sin(a * Math.PI / 4), false);
+}
+// a walk-in store's lot: front wall 2 m behind the sidewalk spot, door facing the street, 1 m spare round it
+const lotOf = (s) => ({ x: s.cx, z: s.cz, fx: Math.sin(s.face), fz: Math.cos(s.face), hw: s.w / 2 + 1, hd: s.d / 2 + 1 });
+const corners = (L) => [[1, 1], [1, -1], [-1, -1], [-1, 1]].map(([a, f]) => [L.x + L.fz * a * L.hw + L.fx * f * L.hd, L.z - L.fx * a * L.hw + L.fz * f * L.hd]);
+const apart = (A, B) => [[A.fz, -A.fx, A.hw], [A.fx, A.fz, A.hd]].some(([ax, az, h]) => { const p = corners(B).map(([x, z]) => (x - A.x) * ax + (z - A.z) * az); return Math.min(...p) >= h || Math.max(...p) <= -h; });
+const overlaps = (A, B) => !apart(A, B) && !apart(B, A);
+const polyArea = (p) => { let a = 0; for (let i = 0, j = p.length - 2; i < p.length; j = i, i += 2) a += p[j] * p[i + 1] - p[i] * p[j + 1]; return Math.abs(a) / 2; };
+// the store's walls must stay off every road (centreline + half width; service lanes too, bridges pass over)
+function onRoad(s) {
+  const fx = Math.sin(s.face), fz = Math.cos(s.face);
+  for (const id of W.edgesNear(s.cx, s.cz, 30)) {
+    const e = W.G.edges[id], { pts } = e, r = e.width / 2;
+    if (e.bridge) continue;
+    for (let i = 2; i < pts.length; i += 2) {
+      const n = Math.ceil(Math.hypot(pts[i] - pts[i - 2], pts[i + 1] - pts[i - 1]));
+      for (let k = 0; k <= n; k++) {
+        const dx = pts[i - 2] + ((pts[i] - pts[i - 2]) * k) / n - s.cx, dz = pts[i - 1] + ((pts[i + 1] - pts[i - 1]) * k) / n - s.cz;
+        if (Math.abs(dx * fz - dz * fx) < s.w / 2 + r && Math.abs(dx * fx + dz * fz) < s.d / 2 + r) return true;
+      }
+    }
+  }
+  return false;
+}
+// tiles whose buildings city/data.js checks against lot L
+const lotTiles = (L) => { const out = []; for (let tx = Math.floor((L.x - 230) / TILE); tx <= Math.floor((L.x + 30) / TILE); tx++) for (let tz = Math.floor((L.z - 230) / TILE); tz <= Math.floor((L.z + 30) / TILE); tz++) if (lotNear(L, tx * TILE, tz * TILE)) out.push([tx, tz]); return out; };
+// a lot is fine when it misses roads, other lots and landmarks, and every OSM building it would knock down is
+// small (under 2.5x the lot): a big block or mall next to a store stays, the store moves along the street instead
+async function fits(s, tileB) {
+  const L = lotOf(s), big = 2.5 * 4 * L.hw * L.hd;
+  if (onRoad(s) || [...stores.filter((o) => o.w).map(lotOf), ...lots.extra].some((o) => overlaps(L, o))) return false;
+  for (const [tx, tz] of lotTiles(L)) for (const rec of await tileB(tx, tz)) if (lotHits(L, rec[0], tx * TILE, tz * TILE) && polyArea(rec[0]) > big) return false;
+  return true;
+}
+// the first spot near (px, pz) whose lot fits; no spot -> no store (there are plenty)
+async function place(store, px, pz, tileB, far = false) {
+  for (const f of spots(px, pz, far)) {
+    const s = { ...store, ...f, cooldown: 0, progress: 0 };
+    [s.w, s.d] = WALK_IN[s.kind];
+    s.cx = s.x + Math.sin(s.face) * (2 + s.d / 2); s.cz = s.z + Math.cos(s.face) * (2 + s.d / 2);
+    if (await fits(s, tileB)) { stores.push(s); return; }
+  }
+}
+async function planStores(tileB) {
   const poi = W.D.index.poi;
   const spaced = (list, minD) => { const out = []; for (const p of list) if (!out.some((o) => Math.hypot(o.x - p.x, o.z - p.z) < minD)) out.push(p); return out; };
   const rob = spaced(poi.filter((p) => ['fuel', 'convenience', 'alcohol'].includes(p.kind)), 220);
-  rob.slice(0, 15).forEach((p, i) => { const f = frontOf(p.x, p.z); if (f) stores.push({ name: ROB_NAMES[i % ROB_NAMES.length], kind: 'rob', ...f, cooldown: 0, progress: 0 }); });
+  const bars = poi.filter((p) => p.kind === 'bar' || p.kind === 'pub');
   // Arnett Arms downtown and by NorthPark; Tim's Threads downtown + NorthPark, Arnett Auto on Brady St
-  for (const [x, z, name, kind] of [[60, -330, 'Arnett Arms', 'guns'], [300, -3990, 'Arnett Arms', 'guns'], [-30, -1450, 'Arnett Auto', 'body'], [230, 40, "Tim's Threads", 'clothes'], [420, -4200, "Tim's Threads", 'clothes']]) { const f = frontOf(x, z); if (f) stores.push({ name, kind, ...f, cooldown: 0, progress: 0 }); }
+  const fixed = [[60, -330, 'Arnett Arms', 'guns'], [300, -3990, 'Arnett Arms', 'guns'], [-30, -1450, 'Arnett Auto', 'body'], [230, 40, "Tim's Threads", 'clothes'], [420, -4200, "Tim's Threads", 'clothes']];
   // two more Arnett Arms at real shop spots on the far east and west sides (so every part of town has one)
   const spare = rob.slice(15), ends = spare.length ? [spare.reduce((a, b) => (b.x > a.x ? b : a)), spare.reduce((a, b) => (b.x < a.x ? b : a))] : [];
-  for (const p of ends) { const f = frontOf(p.x, p.z); if (f) stores.push({ name: 'Arnett Arms', kind: 'guns', ...f, cooldown: 0, progress: 0 }); }
+  // fetch the tiles round every spot at once (the checks below then wait on them one by one)
+  await Promise.all([...rob, ...bars, ...fixed.map(([x, z]) => ({ x, z }))].flatMap((p) => lotTiles({ x: p.x, z: p.z, hw: 0, hd: 0 })).map(([tx, tz]) => tileB(tx, tz)));
+  for (const [i, p] of rob.slice(0, 15).entries()) await place({ name: ROB_NAMES[i % ROB_NAMES.length], kind: 'rob' }, p.x, p.z, tileB);
+  for (const [x, z, name, kind] of fixed) {
+    if (WALK_IN[kind]) await place({ name, kind }, x, z, tileB, true);
+    else { const f = frontOf(x, z); if (f) stores.push({ name, kind, ...f, cooldown: 0, progress: 0 }); }
+  }
+  for (const p of ends) await place({ name: 'Arnett Arms', kind: 'guns' }, p.x, p.z, tileB, true);
   for (const h of W.D.index.hospitals) { const f = frontOf(h.x, h.z); if (f) stores.push({ name: 'Hospital pharmacy', kind: 'meds', ...f }); }
-  // walk-in stores get their own lot: front wall 2 m behind the sidewalk spot, door facing the street
-  poi.filter((p) => p.kind === 'bar' || p.kind === 'pub').forEach((p, i) => { const f = frontOf(p.x, p.z); if (f) stores.push({ name: BAR_NAMES[i % BAR_NAMES.length], kind: 'bar', ...f, cooldown: 0, progress: 0 }); });
-  for (const s of stores) if (WALK_IN[s.kind]) { [s.w, s.d] = WALK_IN[s.kind]; s.cx = s.x + Math.sin(s.face) * (2 + s.d / 2); s.cz = s.z + Math.cos(s.face) * (2 + s.d / 2); }
-  // downtown bars sit door to door: drop a bar whose lot could overlap a walk-in store or bar already placed (circles round each lot)
-  const r = (s) => Math.hypot(s.w, s.d) / 2 + 1, keep = [];
-  for (const s of stores) if (s.kind !== 'bar' || !keep.some((o) => o.w && Math.hypot(o.cx - s.cx, o.cz - s.cz) < r(o) + r(s))) keep.push(s);
-  stores.splice(0, stores.length, ...keep);
+  // downtown bars sit door to door: a bar slides along the street past the stores and bars already placed
+  for (const [i, p] of bars.entries()) await place({ name: BAR_NAMES[i % BAR_NAMES.length], kind: 'bar' }, p.x, p.z, tileB);
 }
-// city/data.js drops any OSM building on these lots as tiles arrive (the first tile fetch runs this)
-lots.plan = () => { planStores(); return stores.filter((s) => s.w).map((s) => ({ x: s.cx, z: s.cz, fx: Math.sin(s.face), fz: Math.cos(s.face), hw: s.w / 2 + 1, hd: s.d / 2 + 1 })); };
+// city/data.js loadData awaits this before any tile is built, and drops any OSM building on these lots
+lots.plan = async (tileB) => { await planStores(tileB); return stores.filter((s) => s.w).map(lotOf); };
 function markStores() {
-  planStores();
   // a soft glowing ring on the sidewalk for the walk-up counters (pharmacy, body shop); walk-in stores are buildings (interiors.js)
   const ringGeo = new THREE.RingGeometry(0.7, 0.9, 28).rotateX(-Math.PI / 2);
   const COL = { body: 0x4aa3ff, meds: 0xffffff };

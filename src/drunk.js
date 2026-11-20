@@ -3,7 +3,8 @@
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import * as ui from './ui.js';
 
-export const drunk = { lvl: 0, t: 0, lurch: 0, dir: 1, steer: 0 };
+export const drunk = { lvl: 0, t: 0, lurch: 0, dir: 1, steer: 0, out: 0 }; // out = performance.now() the blackout ends
+export const blackedOut = () => performance.now() < drunk.out;
 const SOBER_RATE = 1 / 150; // 1.0 -> 0 in 150 s
 const LEVELS = [[0.25, 'You feel tipsy'], [0.5, "You're drunk"], [0.8, "You're wasted. Maybe stop?"]];
 
@@ -38,7 +39,7 @@ export const drinkItems = () => [
   { label: 'Whiskey', sub: 'Hits hard', price: 20, buy: () => drink(0.45) },
 ];
 
-export function resetDrunk() { drunk.lvl = 0; drunk.lurch = 0; drunk.steer = 0; drunkPass.enabled = false; }
+export function resetDrunk() { drunk.lvl = 0; drunk.lurch = 0; drunk.steer = 0; drunk.out = 0; drunkPass.enabled = false; }
 
 export function updateDrunk(dt) {
   if (drunk.lvl <= 0) return;

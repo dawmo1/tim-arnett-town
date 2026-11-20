@@ -1,6 +1,6 @@
 // Races and side jobs. Street races and car meets wait at a start line; stunt jumps and package
-// pickups wait on the street. Driving a taxi, an ambulance, a fire truck or a police car (or riding a
-// scooter up to a restaurant) starts that vehicle's side job (fares, patients, fires, suspects, pizzas).
+// pickups wait on the street. In a taxi, an ambulance, a fire truck, a police car or on a scooter, J
+// switches that vehicle's side job on or off (fares, patients, fires, suspects, deliveries; src/events.js).
 import * as W from '../world.js';
 import { V } from '../vehicles.js';
 import { spend, eco } from '../economy.js';
@@ -9,7 +9,7 @@ import { angDiff } from '../util.js';
 import { K, pick, rnd, chance, dP, money, fresh, shout, chatter, spot, lane, destination, hospital, LANDMARKS, person, pose, face, live, car, drive, carGone, carStopped, carSide,
   prop, PROPS, marker, moveMarker, dropMarker, mission, timer, win, fail, text, pickup, riding, dropOff, dented, inCar, goal, timeLeft, fx } from './kit.js';
 
-const inA = (c, f) => !!c.veh && f(c.veh.T) && c.vehT > 3;
+const inA = (c, f) => !!c.veh && f(c.veh.T);
 const FOOD = new Set(['restaurant', 'fast_food']);
 const nearFood = (v) => (W.D.index.poi || []).some((p) => FOOD.has(p.kind) && Math.abs(p.x - v.x) < 35 && Math.abs(p.z - v.z) < 35);
 const ORD = ['1st', '2nd', '3rd', '4th', '5th'];
@@ -61,8 +61,31 @@ function project(rt, x, z, s0) {
 function placeRacer(rt, r, dt) {
   const v = r.v, p = at(rt, r.s, r), ox = v.x, oz = v.z;
   v.x = p.x - Math.cos(p.h) * r.lat; v.z = p.z + Math.sin(p.h) * r.lat;
-  v.h += angDiff(v.h, p.h) * Math.min(1, dt * 6); v.y = W.groundHeight(v.x, v.z);
+  const mh = r.spd > 3 ? Math.atan2(v.x - ox, v.z - oz) : p.h; // face where it's going (lane changes too)
+  v.h += angDiff(v.h, mh) * Math.min(1, dt * 6); v.y = W.groundHeight(v.x, v.z);
   v.vx = dt > 0 ? (v.x - ox) / dt : 0; v.vz = dt > 0 ? (v.z - oz) / dt : 0; v.speed = r.spd;
+}
+// look ahead along the route for slower cars in this racer's line: swing out past them on whichever
+// side is clear (closest to its own lane first), else brake behind them. r.lat = offset from the route.
+const LATMAX = 5;
+function dodge(r, a, dt) {
+  const v = r.v, fx = Math.sin(a.h), fz = Math.cos(a.h), rx = -Math.cos(a.h), rz = Math.sin(a.h), look = 12 + r.spd * 1.8, near = [];
+  for (const o of K.ctx.vehicles()) {
+    if (o === v || o.exploded || o.sinkT > 0 || Math.abs(o.x - v.x) > look + 5 || Math.abs(o.z - v.z) > look + 5) continue;
+    const dx = o.x - v.x, dz = o.z - v.z, along = dx * fx + dz * fz;
+    if (along < -4 || along > look) continue;
+    near.push({ along, lat: r.lat + dx * rx + dz * rz, half: (v.T.wid + o.T.wid) / 2 + 0.7, spd: (o.vx || 0) * fx + (o.vz || 0) * fz });
+  }
+  const clear = (lat) => Math.abs(lat) <= LATMAX && !near.some((n) => n.spd < r.spd + 2 && Math.abs(n.lat - lat) < n.half);
+  let block = null;
+  for (const n of near) if (n.along > 2 && n.spd < r.spd - 0.5 && Math.abs(n.lat - r.tLat) < n.half && (!block || n.along < block.along)) block = n;
+  r.cap = Infinity;
+  if (block) {
+    const side = [block.lat - block.half - 0.2, block.lat + block.half + 0.2].sort((x, y) => Math.abs(x - r.lat0) - Math.abs(y - r.lat0)).find(clear);
+    if (side !== undefined) { r.tLat = side; r.holdT = 1.6; }
+    else if (block.along < 6 + (r.spd * r.spd - Math.max(0, block.spd) ** 2) / 28) r.cap = Math.max(0, block.spd); // stopping distance at ~14 m/s²
+  } else if ((r.holdT -= dt) <= 0 && clear(r.lat0)) r.tLat = r.lat0;
+  r.lat += Math.max(-4 * dt, Math.min(4 * dt, r.tLat - r.lat));
 }
 // checkpoints every ~200 m; the last one is the finish
 function startRace(ev, rt, racers) {
@@ -71,7 +94,7 @@ function startRace(ev, rt, racers) {
   ev.cps.push(rt.total);
   ev.cp = 0; ev.phase = 'count'; ev.goT = ev.t + 3.2; ev.job = true; ev.label = 'Race';
   const p = at(rt, ev.cps[0], {}); ev.cpMark = marker(ev, p.x, p.z, 0xffd23f, 7, 9); ev.dest = { x: p.x, z: p.z };
-  for (const r of racers) { r.v.mode = 'race'; r.v.npcDriver = true; r.v.keep = true; r.s = r.s ?? project(rt, r.v.x, r.v.z, 0); r.spd = 0; r.i = 0; r.done = false; }
+  for (const r of racers) { r.v.mode = 'race'; r.v.npcDriver = true; r.v.keep = true; r.s = r.s ?? project(rt, r.v.x, r.v.z, 0); r.spd = 0; r.i = 0; r.done = false; r.lat0 = r.tLat = r.lat; r.holdT = 0; r.cap = Infinity; }
 }
 function updateRace(ev, dt) {
   const P = K.P;
@@ -87,7 +110,7 @@ function updateRace(ev, dt) {
     ev.cp++; fx.soundClick();
     if (ev.cp >= ev.cps.length) { // finished
       const place = 1 + ev.racers.filter((r) => r.done).length;
-      for (const r of ev.racers) if (r.v.mode === 'race') { r.v.mode = 'parked'; if (!drive(r.v, 2)) r.v.npcDriver = false; }
+      release(ev);
       return place === 1 ? win(ev, ev.prize, `You won the ${ev.V.name}`, 'RACE WON') : fail(ev, `You finished ${ORD[place - 1] || 'last'}.`);
     }
     const n = at(ev.rt, ev.cps[ev.cp], {}); moveMarker(ev.cpMark, n.x, n.z); ev.dest = { x: n.x, z: n.z };
@@ -101,20 +124,30 @@ function updateRace(ev, dt) {
     if (r.done || r.out) continue;
     if (v.mode !== 'race') { // knocked off the line: back on once it stops
       if (v === P.veh || carGone(v) || v.exploded || v.hp <= 0) { r.out = true; continue; }
-      if (!v.localSim && Math.abs(v.speed || 0) < 0.5) { r.s = project(ev.rt, v.x, v.z, r.s); r.spd = 0; v.mode = 'race'; v.npcDriver = true; }
+      if (!v.localSim && Math.abs(v.speed || 0) < 0.5) {
+        r.s = project(ev.rt, v.x, v.z, r.s); r.spd = 0; v.mode = 'race'; v.npcDriver = true;
+        const p = at(ev.rt, r.s, {}); // pick up from where it stopped (no snapping back into the lane)
+        r.lat = r.tLat = Math.max(-LATMAX, Math.min(LATMAX, -(v.x - p.x) * Math.cos(p.h) + (v.z - p.z) * Math.sin(p.h))); r.holdT = 0;
+      }
       continue;
     }
     const a = at(ev.rt, r.s, {}), b = at(ev.rt, Math.min(ev.rt.total, r.s + 28), {});
     let cap = r.top * (1 - Math.min(0.65, Math.abs(angDiff(a.h, b.h)) / 1.7));
     if (r.s - pS > 140) cap *= 0.82; else if (pS - r.s > 90) cap *= 1.12; // keep it close
-    r.spd += Math.max(-12 * dt, Math.min(7 * dt, Math.max(8, cap) - r.spd));
+    dodge(r, a, dt);
+    r.spd += Math.max((r.cap < r.spd ? -16 : -12) * dt, Math.min(7 * dt, Math.min(r.cap, Math.max(8, cap)) - r.spd));
     r.s += r.spd * dt;
-    if (r.s >= ev.rt.total) { r.done = true; r.s = ev.rt.total; v.mode = 'parked'; v.vx = v.vz = 0; v.speed = 0; continue; }
+    if (r.s >= ev.rt.total) { r.done = true; r.s = ev.rt.total; v.vx = v.vz = 0; v.speed = 0; if (!drive(v, 0)) { v.mode = 'parked'; v.npcDriver = false; } continue; } // finished: back into traffic, not parked mid-road
     placeRacer(ev.rt, r, dt);
+    // the same car-on-car crash as traffic and free cars; a real hit knocks it loose (a physics car until it stops)
+    if (K.ctx.collide?.(v) > 3) { v.mode = 'free'; v.localSim = true; }
   }
-  if (!P.veh) { ev.offT = (ev.offT || 0) + dt; if (ev.offT > 10) return fail(ev, 'You left the race.'); } else ev.offT = 0;
+  if (!P.veh) { ev.offT = (ev.offT || 0) + dt; if (ev.offT > 10) fail(ev, 'You left the race.'); } else ev.offT = 0;
   if (dP(cpP.x, cpP.z) > 600 || ev.t - ev.raceT > 300) fail(ev, 'You left the race.');
+  if (ev.done) release(ev); // nobody updates them after this: drive off instead of freezing mid-road
 }
+// the race is over: whoever's still on the route drives off into traffic
+function release(ev) { for (const r of ev.racers) if (r.v.mode === 'race') { r.v.mode = 'parked'; if (!drive(r.v, 2)) r.v.npcDriver = false; } }
 function raceEnd(ev) { for (const r of ev.racers || []) if (r.v.mode === 'race') { r.v.mode = 'parked'; r.v.npcDriver = false; } }
 // pull into the start marker (in a car) to race; bets are paid up front
 function atStart(ev, dt) {
@@ -265,7 +298,7 @@ export default [
     },
   },
   { // ---------- taxi fares ----------
-    id: 'taxi', theme: 'job', name: 'Fare', trigger: (c) => inA(c, (T) => T.taxi),
+    id: 'taxi', theme: 'job', name: 'Fare', job: 'Taxi job', trigger: (c) => inA(c, (T) => T.taxi),
     variants: [
       { cash: 25, chat: ['Step on it!', 'I tip in cash.', 'Do you know a shortcut?', "I'm late for a very important date!"] },
       { cash: 30, chat: ['Nice cab. Smells like pine trees.', 'My ex lives on this street. Drive faster.', 'Can you turn the radio up?', 'Are you even a real cabbie?'] },
@@ -288,7 +321,7 @@ export default [
     },
   },
   { // ---------- ambulance: pick up the patient, rush to the hospital ----------
-    id: 'ambulance', theme: 'job', name: 'Patient', trigger: (c) => inA(c, (T) => T.cabbed === 'ambulance'),
+    id: 'ambulance', theme: 'job', name: 'Patient', job: 'Paramedic job', trigger: (c) => inA(c, (T) => T.cabbed === 'ambulance'),
     variants: [{ why: 'Chest pains', cash: 220 }, { why: 'Broken leg', cash: 180 }, { why: 'Allergic reaction', cash: 240 }, { why: 'Fell off a roof', cash: 260 }, { why: 'Ate the whole cornfield challenge', cash: 200 }],
     start(ev) {
       const p = spot(90, 280); if (!p) return false;
@@ -306,7 +339,7 @@ export default [
     },
   },
   { // ---------- fire truck: reach the fire and put it out ----------
-    id: 'firejob', theme: 'job', name: 'Fire', trigger: (c) => inA(c, (T) => T.cabbed === 'fire'),
+    id: 'firejob', theme: 'job', name: 'Fire', job: 'Firefighter job', trigger: (c) => inA(c, (T) => T.cabbed === 'fire'),
     variants: [{ kind: 'car', what: 'car fire', cash: 260 }, { kind: 'dumpster', what: 'dumpster fire', cash: 180 }, { kind: 'trash', what: 'trash fire', cash: 160 }, { kind: 'van', what: 'food truck fire', cash: 300 }],
     start(ev) {
       const L = lane(180, 450); if (!L) return false;
@@ -337,7 +370,7 @@ export default [
     end(ev) { if (ev.fire) { fx.stopFire(ev.fire); ev.fire = null; } },
   },
   { // ---------- police car: run down a fleeing suspect ----------
-    id: 'vigilante', theme: 'job', name: 'Suspect', trigger: (c) => inA(c, (T) => T.police),
+    id: 'vigilante', theme: 'job', name: 'Suspect', job: 'Vigilante job', trigger: (c) => inA(c, (T) => T.police),
     variants: [{ what: 'robbery suspect', cash: 300 }, { what: 'stolen car', cash: 260 }, { what: 'hit-and-run driver', cash: 320 }, { what: 'drug dealer', cash: 350 }, { what: 'guy who stole a parrot', cash: 240 }],
     start(ev) {
       const L = lane(120, 220); if (!L) return false;
@@ -355,13 +388,14 @@ export default [
     },
   },
   { // ---------- scooter: pizza (and friends) delivery ----------
-    id: 'pizza', theme: 'job', name: 'Delivery', trigger: (c) => inA(c, (T) => T.name === 'Scooter') && nearFood(c.veh), // only when you ride up to a restaurant (scooters are everywhere)
+    id: 'pizza', theme: 'job', name: 'Delivery', job: 'Pizza job', trigger: (c) => inA(c, (T) => T.name === 'Scooter'),
+    ready: (c) => nearFood(c.veh), wait: 'ride up to a *restaurant* for an order.', // each order starts at a restaurant
     variants: [{ what: 'pizza', from: "Tim's Pizza", cash: 30 }, { what: 'tacos', from: 'Taco Tim', cash: 28 }, { what: 'noodles', from: 'Wok n Roll', cash: 32 }, { what: 'wings', from: 'Wing Arnett', cash: 34 }, { what: 'sushi', from: 'Mississushi', cash: 40 }],
     start(ev) {
       ev.to = destination(250, 750); if (!ev.to) return false;
       ev.job = true;
       goal(ev, ev.to, `Deliver the *${ev.V.what}* from ${ev.V.from}.`, dP(ev.to.x, ev.to.z) * 1.35 / 12 + 20);
-      ev.x = ev.to.x; ev.z = ev.to.z; ev.goal = '';
+      ev.x = ev.to.x; ev.z = ev.to.z; ev.goal = `Deliver the *${ev.V.what}* from ${ev.V.from}.`;
       return true;
     },
     update(ev, dt) {

@@ -164,7 +164,7 @@ export function applyMods(v) {
   if (root) { if (root.userData.baseY === undefined) root.userData.baseY = root.position.y; root.position.y = root.userData.baseY - 0.03 * (m.suspension || 0); }
   // neon: emissive strips under the sills plus one additive glow on the road (no real lights)
   if (v.mesh.userData.neon) { v.mesh.remove(v.mesh.userData.neon); v.mesh.userData.neon.traverse((o) => o.geometry && o.geometry.dispose()); v.mesh.userData.neon = null; }
-  if (m.neon !== null && m.neon !== undefined && !v.T.bike && !v.T.boat && !v.T.heli) {
+  if (m.neon !== null && m.neon !== undefined && !v.exploded && !v.T.bike && !v.T.boat && !v.T.heli) {
     const { strip, pool } = neonMats(m.neon), L = v.T.len, Wd = v.T.wid, g = new THREE.Group();
     const s = new THREE.Mesh(mergeGeometries([-1, 1].map((k) => new THREE.BoxGeometry(0.04, 0.03, L * 0.7).translate(k * (Wd / 2 - 0.15), 0.16, 0))), strip);
     const q = new THREE.Mesh(new THREE.PlaneGeometry(Wd + 1.4, L + 1.2).rotateX(-Math.PI / 2).translate(0, 0.05, 0), pool);

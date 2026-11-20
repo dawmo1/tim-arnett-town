@@ -217,12 +217,16 @@ function dial(name, answer) {
 }
 function callScreen() { return { title: call ? call.name : '', color: call ? colorOf(call.name) : '#333', rows: [{ label: call ? call.text : '', big: true }, { label: 'Hang up', act: back, cls: 'hang' }] }; }
 // hang up, put the phone away, then act (so overlays like the mechanic's menu aren't covered)
-const thenClose = (f, ms = 1100) => later(() => { close(); f(); }, ms);
+const thenClose = (f, ms = 1100) => later(() => { close(); if (!ctx.player().dead) f(); }, ms);
 
 function mechanic() { thenClose(() => ctx.mechanic()); return 'Mechanic here. Which ride do you want dropped off?'; }
 async function arnettAuto() {
   const g = await garage();
-  if (g && g.deliver) { thenClose(() => g.deliver()); return "Arnett Auto. Your car's on the way, follow the GPS."; }
+  if (g && g.deliver) {
+    if (!g.cars().length) return 'No personal vehicle yet: save one at Arnett Auto';
+    if (g.blips().length) return "Your car is already out — it's on your map";
+    thenClose(() => g.deliver()); return "Arnett Auto. Your car's on the way, follow the GPS.";
+  }
   return "Arnett Auto: Garage coming soon. We're still sweeping the floor.";
 }
 function taxi() {
@@ -316,7 +320,7 @@ async function buyCar(ti, name, price) {
   if (!spend(price)) { note('Not enough cash'); return; }
   fx.soundCash();
   const g = await garage();
-  if (g && g.addCar) { g.addCar(ti); text("Tim's Discount Wheels", `Your ${name} is in your garage at Arnett Auto. Thanks for buying from Tim!`); }
+  if (g && g.addCar && g.addCar(ti) >= 0) { text("Tim's Discount Wheels", `Your ${name} is in your garage at Arnett Auto. Thanks for buying from Tim!`); }
   else { ctx.deliver(ti, name); text("Tim's Discount Wheels", `Your ${name} has been dropped off nearby. Follow the GPS. Thanks for buying from Tim!`); }
   render();
 }
@@ -465,9 +469,14 @@ function move(d) {
 }
 
 // main.js keydown hook: returns true when the phone used the key (so it doesn't drive or walk)
+// Esc with the mouse captured: the browser frees the pointer (and may or may not send the keydown).
+// key() and unlocked() both see that one Esc; whichever comes first backs the phone, the other just swallows it.
+let escAt = -1e9;
+const sameEsc = () => performance.now() - escAt < 300;
 export function key(e) {
+  if (e.key === 'Escape' && sameEsc()) return true;
   if (!open) {
-    if (e.key !== 'ArrowUp' || e.repeat || ctx.player().dead) return false;
+    if (e.key !== 'ArrowUp' || e.repeat || ctx.player().dead || ctx.busy()) return false;
     openPhone(); return true;
   }
   const home = stack.length === 1;
@@ -479,20 +488,26 @@ export function key(e) {
     case 'ArrowLeft': if (home) move(-1); return true;
     case 'ArrowRight': if (home) move(1); return true;
     case 'Enter': if (!e.repeat) choose(); return true;
-    case 'Backspace': case 'Escape': if (!e.repeat) back(); return true;
+    case 'Backspace': case 'Escape': if (e.key === 'Escape') escAt = performance.now(); if (!e.repeat) back(); return true;
   }
   return false;
 }
 export const isOpen = () => open;
+// main.js pointerlockchange: true = the phone took this unlock, don't open the pause menu
+export function unlocked() {
+  if (sameEsc()) return true;
+  if (!open) return false;
+  escAt = performance.now(); back(); return true;
+}
 
 // per-frame from main.js: random texts over time and reactions to what you do
 let textT = 60 + Math.random() * 90, clockT = 0, last = null;
 export function update(dt) {
-  const p = ctx.player();
-  textT -= dt;
+  const p = ctx.player(), busy = ctx.busy(); // pause menu, shop, minigame or loading screen up
+  if (!busy) textT -= dt;
   if (textT <= 0) { textT = 120 + Math.random() * 180; const n = pick(NAMES); text(n, pick(CHARS[n].texts)); }
   if (open && (clockT -= dt) <= 0) { clockT = 1; root.querySelector('.t').textContent = clockText(); }
-  if (p.dead && open) close();
+  if (open && (p.dead || busy)) close();
   const now = { stars: wanted.stars, robbed: eco.robbed, dead: p.dead, drunk: drunk.lvl > 0.75, speed: p.inVeh ? p.speed : 0 };
   if (last) {
     if (now.stars > 0 && last.stars === 0) log('wanted', p.x, p.z);

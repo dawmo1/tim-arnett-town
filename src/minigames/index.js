@@ -17,8 +17,11 @@ const GAMES = {
   pool: { make: pool, title: '8-Ball', sub: 'Pool · solids and stripes', bets: [0, 10, 50, 100, 500] },
 };
 
-let cur = null;
+let cur = null; // { kind, leave }
+// main.js checks this so the pointer unlock a minigame causes doesn't open the pause menu
 export const isOpen = () => !!cur;
+// Force-close whatever is open (player died, got arrested...): bets still on the table or mid-round are refunded.
+export function close() { cur?.leave(true); }
 
 export function start(kind, opts = {}) {
   const def = GAMES[kind];
@@ -81,14 +84,14 @@ function open(kind, def, opts, resolve) {
     if (e.code === 'Space') e.preventDefault();
   };
   const onKeyUp = (e) => game.keyup?.(e);
-  const swallowLock = (e) => { e.stopImmediatePropagation(); }; // main.js would open the pause menu
   const stop = (e) => e.stopPropagation();
   addEventListener('keydown', onKey, true);
   addEventListener('keyup', onKeyUp, true);
-  addEventListener('pointerlockchange', swallowLock, true);
   for (const t of ['mousedown', 'mouseup', 'click', 'mousemove', 'wheel', 'contextmenu', 'pointerdown', 'pointerup']) root.addEventListener(t, stop);
   root.addEventListener('contextmenu', (e) => e.preventDefault());
-  $('.mg-leave').addEventListener('click', leave);
+  // clicked buttons don't keep focus, or the next Space would press them again (Space after clicking Hit = another hit)
+  root.addEventListener('mousedown', (e) => { if (e.target.closest('button')) e.preventDefault(); });
+  $('.mg-leave').addEventListener('click', () => leave());
 
   dispatchEvent(new Event('blur')); // main.js clears held keys and the fire button on blur
   document.exitPointerLock?.();
@@ -103,24 +106,20 @@ function open(kind, def, opts, resolve) {
     raf = requestAnimationFrame(frame);
   };
   raf = requestAnimationFrame(frame);
-  cur = { kind };
+  cur = { kind, leave };
 
-  function leave() {
-    if (ctx.busy) { ctx.say('Hang on, let it finish', 'bad', 1500); return; }
+  function leave(forced = false) {
+    if (ctx.closed) return;
+    if (ctx.busy && !forced) { ctx.say('Hang on, let it finish', 'bad', 1500); return; }
     ctx.closed = true;
-    game.close?.(); // refunds unplayed chips, forfeits a game in progress
+    game.close?.(forced); // refunds unplayed chips; Esc forfeits a game in progress, a forced close refunds it
     cancelAnimationFrame(raf); clearTimeout(msgTimer);
     removeEventListener('keydown', onKey, true);
     removeEventListener('keyup', onKeyUp, true);
     root.remove(); cur = null;
-    // give the mouse back to the game; if the browser refuses (no user gesture), let main.js
-    // see the unlock it missed so it shows the pause menu with its Resume button
-    const canvas = document.getElementById('game');
-    try { canvas?.requestPointerLock?.()?.catch?.(() => {}); } catch { /* not allowed here */ }
-    setTimeout(() => {
-      removeEventListener('pointerlockchange', swallowLock, true);
-      document.dispatchEvent(new Event('pointerlockchange')); // main.js re-reads the real lock state
-    }, 350);
+    // give the mouse back to the game. Leave-button clicks get it; Esc isn't a user gesture so the browser refuses,
+    // and the next click on the game canvas grabs it (main.js) instead of a pause menu popping up
+    if (!forced) try { document.getElementById('game')?.requestPointerLock?.()?.catch?.(() => {}); } catch { /* not allowed here */ }
     resolve({ won: wins > losses || (wins === losses && net > 0), net });
   }
 }

@@ -319,9 +319,9 @@ export function clearMission(ev) { if (box && owner === ev) { lineEl.hidden = tr
 // ---------- outcomes ----------
 export function win(ev, cash, text, title = 'GOOD SAMARITAN') {
   if (ev.done) return;
-  ev.done = true; ev.ok = true;
+  ev.done = true; ev.ok = true; ev.cash = Math.max(0, Math.round(cash));
   clearMission(ev);
-  K.ctx.reward(Math.max(0, Math.round(cash)), text, title);
+  K.ctx.reward(ev.cash, text, title);
 }
 export function fail(ev, text) {
   if (ev.done) return;

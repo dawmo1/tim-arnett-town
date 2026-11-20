@@ -187,7 +187,7 @@ export default function darts(ctx) {
     if (phase === 'ready' || phase === 'over') {
       g.fillStyle = 'rgba(0,0,0,.55)'; g.fillRect(0, C - 40, S, 80);
       g.fillStyle = '#fff'; g.font = `38px ${PD}`; g.textAlign = 'center'; g.textBaseline = 'middle';
-      g.fillText(phase === 'ready' ? 'Press Space to throw' : 'Space for a rematch', C, C); g.textBaseline = 'alphabetic';
+      g.fillText(phase === 'ready' ? 'Press Space to play' : 'Space for a rematch', C, C); g.textBaseline = 'alphabetic';
     }
   }
   function reticle(x, y, col) {
@@ -206,6 +206,6 @@ export default function darts(ctx) {
       return false;
     },
     keyup(e) { if (e.key === 'Shift') steady = false; },
-    close() { if (phase === 'play' || phase === 'npc' || phase === 'between') { gen++; ctx.result(false); } },
+    close(forced) { if (phase === 'play' || phase === 'npc' || phase === 'between') { gen++; forced ? ctx.pay(stake) : ctx.result(false); } },
   };
 }

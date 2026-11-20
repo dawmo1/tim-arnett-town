@@ -60,7 +60,7 @@ const swatch = (c) => `<i class="sw" style="background:#${c.toString(16).padStar
 function menu(v) {
   const bike = v.T.bike;
   const cats = [
-    { label: 'Repair', price: 150, info: 'Fix the body, engine and glass', ok: () => v.hp < v.T.hp || v.flat || v.dz.f + v.dz.b + v.dz.l + v.dz.r > 0, act: () => ctx.repair(v) },
+    { label: 'Repair', price: 150, info: 'Fix the body, engine, tires and glass', no: 'Nothing to repair', ok: () => v.hp < v.T.hp || v.flat || v.dz.f + v.dz.b + v.dz.l + v.dz.r > 0, act: () => ctx.repair(v) },
     { label: 'Respray', view: 'orbit', items: [
       { label: 'Primary colour', items: PALETTE.map(([n, c]) => opt(swatch(c) + n, 'paint.c1', c, 100)) },
       { label: 'Secondary colour', items: [opt('Factory', 'paint.c2', null, 0), ...PALETTE.map(([n, c]) => opt(swatch(c) + n, 'paint.c2', c, 80))], info: 'Stripes, roof and trim on cars that have them' },
@@ -137,7 +137,7 @@ function preview() {
 }
 function move(d) { const T = top(); if (!d) return; T.sel = (T.sel + d + T.items.length) % T.items.length; preview(); render(); }
 function buy(it, after) {
-  if (it.ok && !it.ok()) return;
+  if (it.ok && !it.ok()) { if (it.no) ui.flashPrompt(it.no); return; }
   if (it.price && !spend(it.price)) { ui.flashPrompt(`Not enough cash (need $${it.price - eco.cash} more)`); return; }
   if (it.price) { fx.soundCash(); ui.setCash(eco.cash); }
   after();

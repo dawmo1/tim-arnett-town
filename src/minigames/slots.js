@@ -200,5 +200,6 @@ export default function slots(ctx) {
   return {
     frame,
     key(e) { if (e.code === 'Space' || e.key === 'Enter') { spin(); return true; } return false; },
+    close() { if (spinning) ctx.pay(ctx.bet); }, // only a forced close can interrupt a spin: the bet comes back
   };
 }
