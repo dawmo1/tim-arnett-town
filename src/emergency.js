@@ -4,7 +4,7 @@
 // Local to each player, like traffic.
 import * as W from './world.js';
 import { makeVehicle, stepVehicle, V } from './vehicles.js';
-import { makeCharacter, animateCharacter, placeCharacter, disposeCharacter } from './character.js';
+import { makeCharacter, animateCharacter, placeCharacter, disposeCharacter , roleLook } from './character.js';
 import { angDiff, clamp } from './util.js';
 import * as fx from './fx.js';
 
@@ -58,8 +58,8 @@ function crewOut(u, n, look) {
     u.crew.push({ ch, x, z, h: v.h });
   }
 }
-const medicLook = () => [[0xf1c27d, 0xe0ac69, 0xc68642, 0x8d5524][Math.floor(Math.random() * 4)], 0x1e88e5, 0x1a237e, 0x3b2314, 8 | 64];
-const fireLook = () => [[0xf1c27d, 0xe0ac69, 0xc68642, 0x8d5524][Math.floor(Math.random() * 4)], 0x5d4037, 0x3e2723, 0x111111, 1 | 8 | 64 | (5 << 9)];
+const medicLook = () => roleLook('medic');
+const fireLook = () => roleLook('fire');
 // walk crew member c toward (x, z); true when there
 function walkTo(c, x, z, dt, near = 0.9) {
   const dx = x - c.x, dz = z - c.z, d = Math.hypot(dx, dz);

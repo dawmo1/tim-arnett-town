@@ -4,7 +4,8 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import * as W from './world.js';
-import { makeCharacter, animateCharacter, placeCharacter, randomLook, nameTag, mat } from './character.js';
+import { makeCharacter, animateCharacter, placeCharacter, randomLook, nameTag, mat, initCharacters, normLook, setProp } from './character.js';
+import { SKIN as SKIN_TONES, TOPS, BOTTOMS, HAIRS, HATS, CLOTH, HAIRC, SHOES, BEARDS, GLASSES, MASKS } from './people/looks.js';
 import { createAllVehicles, makeParked, makeVehicle, V, TYPES, initFarCars, farCarsBegin, farCarAdd, farCarsEnd, stepVehicle, collideVehicles, pushCharOut, circles, charVehicle, makeVehicleMesh, damageZone, applyDamageVisual, applyBump } from './vehicles.js';
 import { initTraffic, updateTraffic as tickTraffic, bumpTraffic, scareTraffic, updateSignals, traffic, patrolViewers } from './traffic.js';
 import { initWalkers, updateWalkers, walkers, panicNear, spawnFleeing, scare, provoke, setNpcContext, cartNear, revive } from './npc.js';
@@ -178,6 +179,7 @@ initSettingsUi();
 const playBtn = document.getElementById('playBtn');
 playBtn.disabled = true; playBtn.textContent = 'Loading models…';
 await loadAssets((p) => { playBtn.textContent = `Loading models… ${Math.round(p * 100)}%`; });
+initCharacters(activeQuality);
 playBtn.textContent = 'Loading Davenport…';
 await W.initWorld(scene);
 await W.preload(W.places.menu.x, W.places.menu.z, 320, (p) => { playBtn.textContent = `Loading Davenport… ${Math.round(p * 100)}%`; });
@@ -1180,7 +1182,7 @@ function updateVehicles(dt, tSec, nowMs) {
         if (v.driver && v.headFor !== v.driver) {
           v.headFor = v.driver;
           const look = v.driver === net.uid ? me.look : net.players[v.driver]?.c;
-          if (Array.isArray(look)) head.material = mat(look[0]);
+          if (Array.isArray(look)) { const L = normLook(look); head.material = mat(SKIN_TONES[L[3]]); }
         }
       }
 
@@ -1572,9 +1574,13 @@ function autoItems(v) {
     { label: 'Bulletproof tires', sub: 'Gunfire barely scratches it', price: 500, ok: () => !done('bp'), buy: mod('bp', (T) => { T.bulletproof = true; }) },
   ];
 }
-// ---- clothing store
-const SHIRT_COLS = [['Red', 0xe74c3c], ['Blue', 0x3498db], ['Black', 0x222222], ['White', 0xffffff], ['Green', 0x2ecc71], ['Purple', 0x9b59b6], ['Orange', 0xff7f50], ['Hawkeye Gold', 0xf1c40f]];
-const PANTS_COLS = [['Jeans', 0x1f3a93], ['Black', 0x111111], ['Khaki', 0xd2b48c], ['Grey', 0x7f8c8d], ['Brown', 0x8b5a2b]];
+// ---- clothing store: Tim's Threads (outfits, a barber, tattoos and masks)
+const COLS = [['White', 0], ['Black', 1], ['Grey', 2], ['Navy', 4], ['Blue', 5], ['Red', 7], ['Maroon', 8], ['Green', 9], ['Olive', 10], ['Khaki', 11], ['Brown', 12], ['Gold', 14], ['Orange', 15], ['Pink', 16], ['Purple', 17], ['Teal', 18]];
+const HAIR_COLS = [['Black', 0], ['Dark brown', 1], ['Brown', 3], ['Auburn', 4], ['Blonde', 6], ['Grey', 7], ['Pink', 10], ['Blue', 11]];
+const NAMES = { tee: 'T-shirt', tank: 'Tank top', polo: 'Polo', shirt_s: 'Short-sleeve shirt', shirt_l: 'Dress shirt & tie', hoodie: 'Hoodie', zip: 'Zip jacket', suit: 'Suit jacket', sweater: 'Sweater', flannel: 'Flannel', track: 'Track jacket', blouse: 'Blouse', varsity: 'Varsity jacket', coat: 'Winter coat', hivis: 'Hi-vis vest',
+  jeans: 'Jeans', slacks: 'Slacks', shorts: 'Shorts', cargo: 'Cargo pants', sweats: 'Sweatpants', skirt: 'Skirt', sneaker: 'Sneakers', dress: 'Dress shoes', boot: 'Boots',
+  short: 'Short', crew: 'Crew cut', buzz: 'Buzz cut', curly: 'Curly', afro: 'Afro', mohawk: 'Mohawk', balding: 'Bald patch', long: 'Long', bob: 'Bob', shoulder: 'Shoulder length', pony: 'Ponytail', bun: 'Bun', dreads: 'Dreadlocks',
+  cap: 'Baseball cap', beanie: 'Beanie', hard: 'Hard hat', full: 'Full beard', goatee: 'Goatee', mustache: 'Mustache', shades: 'Sunglasses', clear: 'Glasses', ski: 'Ski mask', tim: 'Tim Arnett mask' };
 function setLook(look) {
   me.look = look;
   const g = me.ch.g, pos = g.position.clone(), rot = g.rotation.y;
@@ -1582,17 +1588,30 @@ function setLook(look) {
   netSetLook(look);
 }
 function clothingItems() {
-  const L = () => me.look.slice(), st = () => me.look[4] | 0;
-  const items = [];
-  for (const [n, c] of SHIRT_COLS) items.push({ label: `Shirt: ${n}`, price: 40, buy: () => { const l = L(); l[1] = c; setLook(l); } });
-  for (const [n, c] of PANTS_COLS) items.push({ label: `Pants: ${n}`, price: 40, buy: () => { const l = L(); l[2] = c; setLook(l); } });
-  items.push({ label: 'Shorts', sub: 'For the hot days', price: 30, buy: () => { const l = L(); l[4] = st() | 4; setLook(l); } });
-  items.push({ label: 'Long pants', price: 30, buy: () => { const l = L(); l[4] = st() & ~4; setLook(l); } });
-  items.push({ label: 'Baseball cap', price: 25, buy: () => { const l = L(); l[4] = (st() & ~3) | 1; setLook(l); } });
-  items.push({ label: 'Beanie', price: 25, buy: () => { const l = L(); l[4] = (st() & ~3) | 2; setLook(l); } });
-  items.push({ label: 'No hat', price: 0, buy: () => { const l = L(); l[4] = st() & ~3; setLook(l); } });
-  items.push({ label: 'Sunglasses', price: 20, buy: () => { const l = L(); l[4] = st() & ~(3 << 3); setLook(l); } });
-  items.push({ label: 'No sunglasses', price: 0, buy: () => { const l = L(); l[4] = (st() & ~(3 << 3)) | (1 << 3); setLook(l); } });
+  const L = () => normLook(me.look).slice();
+  const items = [], put = (label, price, k, v, sub) => items.push({ label, sub, price, buy: () => { const l = L(); for (let i = 0; i < k.length; i++) l[k[i]] = v[i]; setLook(l); } });
+  for (const n of ['tee', 'tank', 'polo', 'shirt_s', 'shirt_l', 'hoodie', 'zip', 'suit', 'sweater', 'flannel', 'track', 'blouse', 'varsity', 'coat', 'hivis']) put(`Top: ${NAMES[n]}`, 40, [6], [TOPS.indexOf(n)]);
+  for (const [n, c] of COLS) put(`Top colour: ${n}`, 10, [7], [c]);
+  for (const [n, c] of COLS) put(`Second colour: ${n}`, 10, [8], [c], 'Stripes, collars, the shirt under a jacket');
+  for (const n of ['jeans', 'slacks', 'shorts', 'cargo', 'sweats', 'skirt']) put(`Bottoms: ${NAMES[n]}`, 40, [9], [BOTTOMS.indexOf(n)]);
+  for (const [n, c] of [['Denim', 4], ['Light denim', 19], ['Black', 1], ['Grey', 2], ['Khaki', 11], ['Brown', 13], ['Olive', 10], ['White', 0]]) put(`Bottoms colour: ${n}`, 10, [10], [c]);
+  for (const n of ['sneaker', 'dress', 'boot']) put(`Shoes: ${NAMES[n]}`, 30, [11], [SHOES.indexOf(n)]);
+  for (const [n, c] of [['White', 0], ['Black', 1], ['Brown', 12], ['Red', 7], ['Blue', 5]]) put(`Shoe colour: ${n}`, 10, [12], [c]);
+  for (const n of ['cap', 'beanie', 'hard']) put(`Hat: ${NAMES[n]}`, 25, [13], [HATS.indexOf(n)]);
+  for (const [n, c] of COLS.slice(0, 8)) put(`Hat colour: ${n}`, 5, [14], [c]);
+  put('No hat', 0, [13], [0]);
+  for (const n of ['shades', 'clear']) put(NAMES[n], 20, [15], [GLASSES.indexOf(n)]);
+  put('No glasses', 0, [15], [0]);
+  for (const n of ['short', 'crew', 'buzz', 'curly', 'afro', 'mohawk', 'long', 'bob', 'shoulder', 'pony', 'bun', 'dreads', 'balding']) put(`Barber: ${NAMES[n]}`, 25, [4], [HAIRS.indexOf(n)]);
+  put('Barber: Shave it all off', 15, [4], [0]);
+  for (const [n, c] of HAIR_COLS) put(`Hair dye: ${n}`, 15, [5], [c]);
+  for (const n of ['full', 'goatee', 'mustache']) put(`Barber: ${NAMES[n]}`, 15, [16], [BEARDS.indexOf(n)]);
+  put('Barber: Clean shave', 10, [16], [0]);
+  put('Tattoo: Arm sleeves', 120, [17], [1], 'Shows with short sleeves');
+  put('Laser tattoo removal', 60, [17], [0]);
+  put('Mask: Ski mask', 60, [18], [MASKS.indexOf('ski')], 'Witnesses can\'t describe you... well, they can describe the mask');
+  put('Mask: Tim Arnett', 80, [18], [MASKS.indexOf('tim')], 'Vote Tim');
+  put('Take off the mask', 0, [18], [0]);
   return items;
 }
 // ---- phone: call a mechanic to drop a car off near you

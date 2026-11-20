@@ -36,6 +36,7 @@ def mat(name, color=(0.8, 0.8, 0.8), rough=0.7, metal=0.0, emit=None, alpha=1.0)
     b.inputs['Base Color'].default_value = (*color, 1)
     b.inputs['Roughness'].default_value = rough
     b.inputs['Metallic'].default_value = metal
+    m.diffuse_color = (*color, 1)  # what the quick previews show
     if emit:
         b.inputs['Emission Color'].default_value = (*emit, 1)
         b.inputs['Emission Strength'].default_value = 1.0
@@ -131,3 +132,30 @@ def export_glb(name, objs=None, anims=False):
                               export_materials='EXPORT', export_animations=anims, export_skins=True,
                               export_extras=False, export_cameras=False, export_lights=False)
     return os.path.getsize(path) // 1024
+
+
+def preview(path, target=(0, 0, 1), dist=3.0, yaw=20, pitch=8, size=(640, 640), lens=50, engine='BLENDER_WORKBENCH'):
+    """Render a quick look at the scene from a camera orbiting `target` (yaw 0 = from the front, -Y)."""
+    sc = bpy.context.scene
+    cam = bpy.data.objects.get('_cam')
+    if cam is None:
+        cam = bpy.data.objects.new('_cam', bpy.data.cameras.new('_cam'))
+        sc.collection.objects.link(cam)
+    cam.data.lens = lens
+    y, p = math.radians(yaw), math.radians(pitch)
+    tx, ty, tz = target
+    cam.location = (tx + math.sin(y) * math.cos(p) * dist, ty - math.cos(y) * math.cos(p) * dist, tz + math.sin(p) * dist)
+    d = Vector(target) - cam.location
+    cam.rotation_euler = d.to_track_quat('-Z', 'Y').to_euler()
+    sc.camera = cam
+    sc.render.engine = engine
+    if engine == 'BLENDER_WORKBENCH':
+        sh = sc.display.shading
+        sh.light = 'STUDIO'
+        sh.color_type = 'MATERIAL'
+        sh.show_cavity = True
+    sc.render.resolution_x, sc.render.resolution_y = size
+    sc.render.film_transparent = False
+    sc.render.filepath = path
+    bpy.ops.render.render(write_still=True)
+    return path

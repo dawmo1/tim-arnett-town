@@ -10,7 +10,7 @@ import * as W from './world.js';
 import { G, pointOnEdge, district } from './city/data.js';
 import { nodeRadius } from './city/tile.js';
 import { angDiff } from './util.js';
-import { makeCharacter, randomLook, animateCharacter, placeCharacter, mat, disposeCharacter } from './character.js';
+import { makeCharacter, randomLook, roleLook, animateCharacter, placeCharacter, mat, disposeCharacter, setProp } from './character.js';
 import { ragdoll, release, ragPos } from './ragdoll.js';
 import { signalState } from './traffic.js';
 import { sky } from './daynight.js';
@@ -41,19 +41,8 @@ function makeDog(color) {
 }
 
 // ---------- looks by role ----------
-const SKIN = [0xf1c27d, 0xe0ac69, 0xc68642, 0x8d5524, 0xffdbac, 0x5c3a1e];
-const HAIR = [0x111111, 0x3b2314, 0x8b4513, 0xd4a017, 0x777777];
-function lookFor(role) {
-  const hair = Math.random() < 0.5 ? 32 : 0;
-  switch (role) {
-    case 'office': return [pick(SKIN), pick([0xffffff, 0xdfe8f2, 0xb3c7e6, 0xe8e8e8, 0x8aa1b8]), pick([0x1c1d22, 0x2c3e50, 0x3a3a3a, 0x4a4036]), pick(HAIR), 8 | 64 | hair];
-    case 'worker': return [pick(SKIN), pick([0xff8f00, 0xd4e157, 0xff6d00]), pick([0x2c3e50, 0x3e4a57, 0x5d4632]), pick(HAIR), 1 | 64 | (5 << 9)];
-    case 'mail': return [pick(SKIN), 0x7d9ec2, 0x1f3a5f, pick(HAIR), 1 | 8 | 64 | (1 << 9)];
-    case 'jogger': return [pick(SKIN), pick([0xff4081, 0x00b0ff, 0x76ff03, 0xffffff, 0x212121, 0xffea00]), pick([0x111111, 0x263238, 0x37474f]), pick(HAIR), 4 | 256 | hair | (Math.random() < 0.5 ? 8 : 0)];
-    case 'vendor': return [pick(SKIN), 0xfafafa, 0x37474f, pick(HAIR), 1 | 64 | (3 << 9)];
-    default: return randomLook();
-  }
-}
+const ROLE_LOOK = { office: 'office', worker: 'worker', mail: 'mail', jogger: 'jogger', vendor: 'vendor', student: 'student', shopper: null, bar: 'bar' };
+const lookFor = (role) => roleLook(ROLE_LOOK[role] || role);
 
 // ---------- props ----------
 const PROP = {};
@@ -68,10 +57,10 @@ function propMats() {
 function box(parent, c, sx, sy, sz, x, y, z, m) { const b = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), m || mat(c)); b.position.set(x, y, z); b.castShadow = true; parent.add(b); return b; }
 function propGroup(x, z, h) { const g = new THREE.Group(); g.position.set(x, W.groundHeight(x, z), z); g.rotation.y = h; scene.add(g); return g; }
 const holdProps = {
-  bag: (ch) => box(ch.shL, pick([0xffffff, 0xc62828, 0x6d4c41, 0x1565c0]), 0.3, 0.35, 0.12, 0, -0.85, 0.02),
-  backpack: (ch) => box(ch.body, pick([0x263238, 0xc62828, 0x1565c0, 0x2e7d32, 0x6a1b9a]), 0.42, 0.45, 0.2, 0, 1.2, -0.26),
-  mailbag: (ch) => box(ch.body, 0x5d4037, 0.16, 0.36, 0.4, 0.32, 1.0, 0),
-  guitar: (ch) => { const gt = new THREE.Group(); gt.position.set(0, 1.12, 0.22); gt.rotation.z = 0.9; ch.body.add(gt); box(gt, 0x8d5524, 0.42, 0.55, 0.12, 0, -0.1, 0); box(gt, 0x3e2723, 0.08, 0.6, 0.06, 0, 0.45, 0); return gt; },
+  bag: (ch) => setProp(ch, 'bag'),
+  backpack: (ch) => setProp(ch, 'backpack'),
+  mailbag: (ch) => setProp(ch, 'mailbag'),
+  guitar: (ch) => setProp(ch, 'guitar'),
   bike: (ch) => { const b = new THREE.Group(); ch.g.add(b); const col = pick([0xc62828, 0x1565c0, 0x212121, 0x2e7d32, 0xf9a825]); box(b, col, 0.06, 0.06, 1.0, 0, 0.62, 0); box(b, col, 0.06, 0.5, 0.06, 0, 0.45, 0.35); box(b, col, 0.06, 0.45, 0.06, 0, 0.48, -0.1); for (const zz of [0.55, -0.5]) { const w = new THREE.Mesh(new THREE.TorusGeometry(0.32, 0.04, 6, 14), mat(0x111111)); w.rotation.y = Math.PI / 2; w.position.set(0, 0.34, zz); b.add(w); } box(b, 0x111111, 0.45, 0.04, 0.04, 0, 0.98, 0.42); return b; },
   mower: (ch) => { const m = new THREE.Group(); m.position.set(0, 0, 0.9); ch.g.add(m); box(m, 0xc62828, 0.55, 0.28, 0.6, 0, 0.22, 0); box(m, 0x212121, 0.05, 0.6, 0.05, 0.2, 0.55, -0.35).rotation.x = -0.6; box(m, 0x212121, 0.05, 0.6, 0.05, -0.2, 0.55, -0.35).rotation.x = -0.6; return m; },
 };
