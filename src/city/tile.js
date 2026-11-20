@@ -217,6 +217,53 @@ function pointInPoly(x, z, pts) {
   }
   return c;
 }
+// a quad facing n (corners in order round the quad), with per-corner uvs
+function face(B, P, n, tint, at, uv) {
+  const id = P.map((p, k) => B.v(p[0], p[1], p[2], n[0], n[1], n[2], tint[0], tint[1], tint[2], uv[k][0], uv[k][1], at[0], at[1]));
+  const ax = P[1][0] - P[0][0], ay = P[1][1] - P[0][1], az = P[1][2] - P[0][2], bx = P[2][0] - P[0][0], by = P[2][1] - P[0][1], bz = P[2][2] - P[0][2];
+  const d = (ay * bz - az * by) * n[0] + (az * bx - ax * bz) * n[1] + (ax * by - ay * bx) * n[2];
+  if (d > 0) B.quad(id[0], id[1], id[2], id[3]); else B.quad(id[3], id[2], id[1], id[0]);
+}
+// a box turned to (ax, az): half-length ha along it, half-depth hp across, from y0 to y1
+function obox(B, x, z, ax, az, ha, hp, y0, y1, tint, at, S = 4, bottom = false) {
+  const px = -az, pz = ax;
+  const C = (sa, sp, y) => [x + ax * ha * sa + px * hp * sp, y, z + az * ha * sa + pz * hp * sp];
+  const side = (a0, p0, a1, p1, nx, nz, w) => face(B, [C(a0, p0, y0), C(a1, p1, y0), C(a1, p1, y1), C(a0, p0, y1)], [nx, 0, nz], tint, at, [[0, y0 / S], [w / S, y0 / S], [w / S, y1 / S], [0, y1 / S]]);
+  side(-1, 1, 1, 1, px, pz, 2 * ha); side(-1, -1, 1, -1, -px, -pz, 2 * ha);
+  side(1, -1, 1, 1, ax, az, 2 * hp); side(-1, -1, -1, 1, -ax, -az, 2 * hp);
+  const top = [C(-1, -1, y1), C(1, -1, y1), C(1, 1, y1), C(-1, 1, y1)];
+  face(B, top, [0, 1, 0], tint, at, top.map((p) => [p[0] / S, p[2] / S]));
+  if (bottom) { const bt = [C(-1, -1, y0), C(1, -1, y0), C(1, 1, y0), C(-1, 1, y0)]; face(B, bt, [0, -1, 0], tint, at, bt.map((p) => [p[0] / S, p[2] / S])); }
+}
+// outward normals per edge and the polygon pushed out by o (mitred corners)
+function outline(pts) {
+  const n = pts.length / 2; let area = 0;
+  for (let i = 0; i < n; i++) { const j = (i + 1) % n; area += pts[i * 2] * pts[j * 2 + 1] - pts[j * 2] * pts[i * 2 + 1]; }
+  const N = [];
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n, dx = pts[j * 2] - pts[i * 2], dz = pts[j * 2 + 1] - pts[i * 2 + 1], L = Math.hypot(dx, dz) || 1;
+    N.push(area > 0 ? [dz / L, -dx / L] : [-dz / L, dx / L]);
+  }
+  const off = (o) => { const Q = []; for (let i = 0; i < n; i++) { const a = N[(i + n - 1) % n], b = N[i]; let mx = a[0] + b[0], mz = a[1] + b[1]; const ml = Math.hypot(mx, mz) || 1; mx /= ml; mz /= ml; const k = o / Math.max(0.35, mx * b[0] + mz * b[1]); Q.push([pts[i * 2] + mx * k, pts[i * 2 + 1] + mz * k]); } return Q; };
+  return { N, off };
+}
+// a projecting band round the building (ledge or cornice); with a parapet it also caps the roof edge
+function band(B, pts, ol, y0, y1, o, tint, at, parapet = 0) {
+  const n = pts.length / 2, Q = ol.off(o), P = parapet ? ol.off(-parapet) : null;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n, nn = ol.N[i];
+    const w0 = [pts[i * 2], pts[i * 2 + 1]], w1 = [pts[j * 2], pts[j * 2 + 1]], q0 = Q[i], q1 = Q[j], L = Math.hypot(q1[0] - q0[0], q1[1] - q0[1]);
+    if (L < 0.05) continue;
+    face(B, [[q0[0], y0, q0[1]], [q1[0], y0, q1[1]], [q1[0], y1, q1[1]], [q0[0], y1, q0[1]]], [nn[0], 0, nn[1]], tint, at, [[0, 0], [L / 4, 0], [L / 4, (y1 - y0) / 4], [0, (y1 - y0) / 4]]);
+    face(B, [[w0[0], y0, w0[1]], [w1[0], y0, w1[1]], [q1[0], y0, q1[1]], [q0[0], y0, q0[1]]], [0, -1, 0], tint.map((c) => c * 0.7), at, [[0, 0], [L / 4, 0], [L / 4, 0.1], [0, 0.1]]);
+    const i0 = P ? P[i] : w0, i1 = P ? P[j] : w1;
+    face(B, [[i0[0], y1, i0[1]], [i1[0], y1, i1[1]], [q1[0], y1, q1[1]], [q0[0], y1, q0[1]]], [0, 1, 0], tint, at, [[0, 0], [L / 4, 0], [L / 4, 0.1], [0, 0.1]]);
+    if (P) face(B, [[i0[0], y0, i0[1]], [i1[0], y0, i1[1]], [i1[0], y1, i1[1]], [i0[0], y1, i0[1]]], [-nn[0], 0, -nn[1]], tint.map((c) => c * 0.85), at, [[0, 0], [L / 4, 0], [L / 4, (y1 - y0) / 4], [0, (y1 - y0) / 4]]);
+  }
+}
+const AWNING = [0x9e2a2b, 0x2f5d3a, 0x1f3a5f, 0x5c1f2e, 0xc9a66b, 0x222222, 0x8a5a2b, 0x2a6f75].map(lin);
+const DOORS = [0x7a1f1f, 0x1f3550, 0x2b4a2e, 0x3b2a1f, 0xe9e4d8, 0x111111, 0x6b5a2a].map(lin);
+const TRIM = lin(0xf2efe8), CONCRETE = lin(0x9d9a93), WOOD = lin(0x8a7560);
 function buildBuildings(t, B, boxes, foot, SB, GB, junk) {
   t.b.forEach((rec, bi) => {
     const [rel, baseY, hgt, pitched, style, name, kind = 0] = rec;
@@ -249,7 +296,9 @@ function buildBuildings(t, B, boxes, foot, SB, GB, junk) {
     const yb = baseY - 2.5, top = baseY + hgt;
     // walls
     let along = hash(seed + 6) * 16;
+    const wallAlong = [];
     for (let i = 0; i < n; i++) {
+      wallAlong.push(along);
       const x0 = pts[i * 2], z0 = pts[i * 2 + 1], x1 = pts[((i + 1) % n) * 2], z1 = pts[((i + 1) % n) * 2 + 1];
       const dx = x1 - x0, dz = z1 - z0, L = Math.hypot(dx, dz); if (L < 0.05) continue;
       let ox = dz / L, oz = -dx / L; // one of the two normals; flip so it points out
@@ -266,19 +315,95 @@ function buildBuildings(t, B, boxes, foot, SB, GB, junk) {
       along += L;
       if (L > 0.5) boxes.push(makeBox((x0 + x1) / 2 - ox * 0.6, (z0 + z1) / 2 - oz * 0.6, ox, oz, 0.6, L / 2 + 0.05, yb, top - yb + (pitched ? 1.5 : 0)));
     }
-    // a lit sign with a made-up name over the shop fronts, on the wall facing the street
-    if (store && SB && hash(seed + 9) < 0.85) {
-      const q = nearestEdge(cx, cz, 70);
-      if (q) {
-        let best = null, bd = 0.3;
+    // the wall that faces the nearest street (shop signs, awnings, front doors, porches)
+    let area2 = 0; for (let i = 0; i < n; i++) { const j = (i + 1) % n; area2 += pts[i * 2] * pts[j * 2 + 1] - pts[j * 2] * pts[i * 2 + 1]; }
+    const house = pitched && hgt >= 4.2 && hgt < 12 && Math.abs(area2) / 2 < 320 && (cell === 'siding' || cell.startsWith('brick'));
+    let best = null, road = null;
+    if (store || house) {
+      road = nearestEdge(cx, cz, 70);
+      if (road) {
+        let bd = 0.3;
         for (let i = 0; i < n; i++) {
           const x0 = pts[i * 2], z0 = pts[i * 2 + 1], x1 = pts[((i + 1) % n) * 2], z1 = pts[((i + 1) % n) * 2 + 1], L = Math.hypot(x1 - x0, z1 - z0);
-          if (L < 5) continue;
+          if (L < (house ? 4 : 5)) continue;
           let ox = (z1 - z0) / L, oz = -(x1 - x0) / L;
           if (pointInPoly((x0 + x1) / 2 + ox * 0.3, (z0 + z1) / 2 + oz * 0.3, pts)) { ox = -ox; oz = -oz; }
-          const tx = q.x - (x0 + x1) / 2, tz = q.z - (z0 + z1) / 2, tl = Math.hypot(tx, tz) || 1, d = (ox * tx + oz * tz) / tl;
-          if (d > bd) { bd = d; best = { x0, z0, x1, z1, L, ox, oz }; }
+          const tx = road.x - (x0 + x1) / 2, tz = road.z - (z0 + z1) / 2, tl = Math.hypot(tx, tz) || 1, d = (ox * tx + oz * tz) / tl;
+          if (d > bd) { bd = d; best = { x0, z0, x1, z1, L, ox, oz, i }; }
         }
+      }
+    }
+    const pl = atl(CELL.plain), ol = outline(pts);
+    // canvas awnings over each shop front (the store texture repeats three 6 m shops)
+    if (store && best) {
+      const ux = (best.x1 - best.x0) / best.L, uz = (best.z1 - best.z0) / best.L, a0 = wallAlong[best.i];
+      for (let k = Math.floor(a0 / 6); k * 6 < a0 + best.L; k++) {
+        const s0 = Math.max(0.4, k * 6 - a0 + 0.35), s1 = Math.min(best.L - 0.4, k * 6 + 5.65 - a0);
+        if (s1 - s0 < 2 || hash(seed + k * 13) > 0.72) continue;
+        const tint = AWNING[Math.floor(hash(seed + k * 17) * AWNING.length)], dk = tint.map((c) => c * 0.55);
+        const P = (sa, out, y) => [best.x0 + ux * sa + best.ox * out, baseY + y, best.z0 + uz * sa + best.oz * out];
+        const d = 1.35, nt = [best.ox * 0.35, 0.94, best.oz * 0.35];
+        face(B, [P(s0, 0.02, 3.2), P(s1, 0.02, 3.2), P(s1, d, 2.7), P(s0, d, 2.7)], nt, tint, pl, [[0, 0], [1, 0], [1, 1], [0, 1]]);
+        face(B, [P(s0, 0.02, 3.19), P(s1, 0.02, 3.19), P(s1, d, 2.69), P(s0, d, 2.69)], [-nt[0], -nt[1], -nt[2]], dk, pl, [[0, 0], [1, 0], [1, 1], [0, 1]]);
+        face(B, [P(s0, d, 2.38), P(s1, d, 2.38), P(s1, d, 2.7), P(s0, d, 2.7)], [best.ox, 0, best.oz], tint, pl, [[0, 0], [1, 0], [1, 1], [0, 1]]);
+        for (const [sx, sgn] of [[s0, -1], [s1, 1]]) face(B, [P(sx, 0.02, 3.2), P(sx, d, 2.7), P(sx, d, 2.38), P(sx, 0.02, 2.38 + 0.5)], [ux * sgn, 0, uz * sgn], dk, pl, [[0, 0], [1, 0], [1, 1], [0, 1]]);
+      }
+      band(B, pts, ol, baseY + 4.2, baseY + 4.5, 0.16, TRIM.map((c) => c * 0.85), pl);
+    }
+    // houses: front door, a porch with steps and posts, gutters, a chimney, a driveway to the street
+    const baseYb = baseY;
+    if (house && best) {
+      const ux = (best.x1 - best.x0) / best.L, uz = (best.z1 - best.z0) / best.L, ox = best.ox, oz = best.oz;
+      const porch = best.L > 6 && hash(seed + 31) < 0.75, ph = porch ? 0.35 : 0.15;
+      const df = 0.3 + hash(seed + 32) * 0.4, dx = best.x0 + ux * best.L * df, dz = best.z0 + uz * best.L * df;
+      const door = DOORS[Math.floor(hash(seed + 33) * DOORS.length)];
+      const baseY = Math.max(baseYb, terrainHeight(dx + ox * 1.5, dz + oz * 1.5)); // the porch sits on the ground in front, not the lowest corner
+      obox(B, dx + ox * 0.03, dz + oz * 0.03, ux, uz, 0.62, 0.03, baseY + ph, baseY + ph + 2.3, TRIM, pl);
+      obox(B, dx + ox * 0.06, dz + oz * 0.06, ux, uz, 0.48, 0.03, baseY + ph, baseY + ph + 2.12, door, pl);
+      if (porch) {
+        const hw = Math.min(best.L * 0.42, 3.6), pc = Math.max(hw + 0.3, Math.min(best.L - hw - 0.3, best.L * df)), px = best.x0 + ux * pc, pz = best.z0 + uz * pc, dep = 2.2;
+        obox(B, px + ox * dep / 2, pz + oz * dep / 2, ux, uz, hw, dep / 2, baseY - 0.6, baseY + ph, WOOD, pl);
+        for (const sx of [-hw + 0.12, hw - 0.12]) obox(B, px + ux * sx + ox * (dep - 0.12), pz + uz * sx + oz * (dep - 0.12), ux, uz, 0.08, 0.08, baseY + ph, baseY + 2.85, TRIM, pl);
+        obox(B, px + ox * (dep + 0.1) / 2, pz + oz * (dep + 0.1) / 2, ux, uz, hw + 0.15, (dep + 0.1) / 2, baseY + 2.85, baseY + 3.0, TRIM, pl, 4, true);
+        obox(B, dx + ox * (dep + 0.2), dz + oz * (dep + 0.2), ux, uz, 0.7, 0.2, baseY - 0.4, baseY + ph * 0.5, CONCRETE, pl);
+        // rails either side of the steps
+        for (const [a, b] of [[-hw + 0.1, (df * best.L - pc) - 0.75], [(df * best.L - pc) + 0.75, hw - 0.1]]) if (b - a > 0.3) obox(B, px + ux * (a + b) / 2 + ox * (dep - 0.12), pz + uz * (a + b) / 2 + oz * (dep - 0.12), ux, uz, (b - a) / 2, 0.04, baseY + ph + 0.8, baseY + ph + 0.9, TRIM, pl);
+      } else obox(B, dx + ox * 0.45, dz + oz * 0.45, ux, uz, 0.75, 0.4, baseY - 0.4, baseY + ph, CONCRETE, pl);
+      // a flower bed under the front windows, a fence or hedge along the front of the yard
+      if (junk) {
+        const fs = df < 0.5 ? Math.min(best.L - 1.2, best.L * df + 2.2) : Math.max(1.2, best.L * df - 2.2);
+        if (hash(seed + 35) < 0.55) junk.push({ kind: hash(seed + 36) < 0.6 ? 'flowers' : 'hedge', x: best.x0 + ux * fs + ox * (porch ? 2.7 : 0.6), z: best.z0 + uz * fs + oz * (porch ? 2.7 : 0.6), y: baseY, h: Math.atan2(ox, oz) });
+        if (road) {
+          const front = (road.x - dx) * ox + (road.z - dz) * oz - (road.e.width || 7) / 2 - WALK_W - 0.6;
+          const r = hash(seed + 37), kindF = dist === 'west' && r < 0.5 ? 'chainlink' : r < 0.45 ? 'picket' : r < 0.65 ? 'hedge' : null;
+          if (kindF && front > 3.5 && front < 14) {
+            const seg = kindF === 'chainlink' ? 3 : kindF === 'hedge' ? 2 : 2.4, a0 = -3, a1 = best.L + 3;
+            const gate = best.L * df, drive = df < 0.5 ? best.L * 0.85 : best.L * 0.15, hasDrive = hash(seed + 34) < 0.6;
+            for (let a = a0; a + seg <= a1 + 0.01; a += seg) {
+              const mid = a + seg / 2;
+              if (Math.abs(mid - gate) < seg * 0.5 || (hasDrive && Math.abs(mid - drive) < seg * 0.5 + 1.4)) continue;
+              const fx = best.x0 + ux * mid + ox * front, fz = best.z0 + uz * mid + oz * front;
+              junk.push({ kind: kindF, x: fx, z: fz, y: terrainHeight(fx, fz), h: Math.atan2(ox, oz) });
+            }
+          }
+        }
+      }
+      // driveway on the far side from the door, out to the kerb
+      if (road && hash(seed + 34) < 0.6) {
+        const f = df < 0.5 ? 0.85 : 0.15, sx = best.x0 + ux * best.L * f + ox * 0.1, sz = best.z0 + uz * best.L * f + oz * 0.1;
+        const len = (road.x - sx) * ox + (road.z - sz) * oz - (road.e.width || 7) / 2;
+        if (len > 2 && len < 24) {
+          const segs = Math.ceil(len / 4);
+          for (let k = 0; k < segs; k++) {
+            const a = (k / segs) * len, b = ((k + 1) / segs) * len, Pd = (o, w) => { const x = sx + ox * o + ux * w, z = sz + oz * o + uz * w; return [x, terrainHeight(x, z) + 0.05, z]; };
+            face(B, [Pd(a, -1.4), Pd(a, 1.4), Pd(b, 1.4), Pd(b, -1.4)], [0, 1, 0], CONCRETE, pl, [[0, 0], [1, 0], [1, 1], [0, 1]]);
+          }
+        }
+      }
+    }
+    // a lit sign with a made-up name over the shop fronts, on the wall facing the street
+    if (store && SB && hash(seed + 9) < 0.85) {
+      {
         if (best) {
           const w = Math.min(best.L * 0.6, 9), mx = (best.x0 + best.x1) / 2 + best.ox * 0.14, mz = (best.z0 + best.z1) / 2 + best.oz * 0.14;
           const ux = (best.x1 - best.x0) / best.L, uz = (best.z1 - best.z0) / best.L, y0 = baseY + 3.25, y1 = baseY + 4.15;
@@ -329,11 +454,56 @@ function buildBuildings(t, B, boxes, foot, SB, GB, junk) {
     if (!pitched) {
       const g = 0.8 + hash(seed + 7) * 0.25;
       flatRoof(top, R, [g, g, g * 0.98]);
+      if (kind === 1 || hgt < 4) return;
+      // cornice and parapet: heavy stone ones on old brick and stone blocks, a thin metal cap on glass
+      const old = cell.startsWith('brick') || cell === 'stone' || cell === 'church';
+      const trim = cell === 'stone' ? lin(0xd8ccb0) : old ? lin([0xe8dcc0, 0xd9cdb5, 0xbfb3a0, 0x8f4a3a][Math.floor(hash(seed + 41) * 4)]) : cell === 'glass' || cell === 'office' ? lin(0x8c949a) : lin(0xd5d0c6);
+      if (old) {
+        const big = hgt > 14;
+        band(B, pts, ol, top - (big ? 0.75 : 0.45), top + (big ? 0.7 : 0.4), big ? 0.42 : 0.24, trim, pl, 0.25);
+        if (!store && hgt > 8) band(B, pts, ol, baseY + 3.25, baseY + 3.45, 0.1, trim, pl);
+        if (big) band(B, pts, ol, top - 3.6, top - 3.4, 0.08, trim, pl);
+      } else band(B, pts, ol, top - 0.25, top + (cell === 'metal' ? 0.15 : 0.55), cell === 'metal' ? 0.05 : 0.08, trim, pl, 0.18);
+      // the roof: a mechanical penthouse on towers, AC units, water tanks on old blocks
+      if (junk) {
+        const inside = (x, z, r) => pointInPoly(x, z, pts) && pointInPoly(x + r, z + r, pts) && pointInPoly(x - r, z - r, pts) && pointInPoly(x + r, z - r, pts) && pointInPoly(x - r, z + r, pts);
+        let lx = 1, lz = 0, lb = 0;
+        for (let i = 0; i < n; i++) { const ddx = pts[((i + 1) % n) * 2] - pts[i * 2], ddz = pts[((i + 1) % n) * 2 + 1] - pts[i * 2 + 1], l = Math.hypot(ddx, ddz); if (l > lb) { lb = l; lx = ddx / l; lz = ddz / l; } }
+        const rh = Math.atan2(lx, lz);
+        if (hgt > 45 && inside(cx, cz, 7)) {
+          // a stepped crown on the tall towers, with a mast on the very top
+          const A2 = atl(CELL[cell]), w0 = Math.min(9, lb * 0.32);
+          obox(B, cx, cz, lx, lz, w0, w0 * 0.75, top, top + 6.6, tint, A2, 16);
+          band(B, [cx - lx * w0 + lz * w0 * 0.75, cz - lz * w0 - lx * w0 * 0.75, cx + lx * w0 + lz * w0 * 0.75, cz + lz * w0 - lx * w0 * 0.75, cx + lx * w0 - lz * w0 * 0.75, cz + lz * w0 + lx * w0 * 0.75, cx - lx * w0 - lz * w0 * 0.75, cz - lz * w0 + lx * w0 * 0.75], outline([cx - lx * w0 + lz * w0 * 0.75, cz - lz * w0 - lx * w0 * 0.75, cx + lx * w0 + lz * w0 * 0.75, cz + lz * w0 - lx * w0 * 0.75, cx + lx * w0 - lz * w0 * 0.75, cz + lz * w0 + lx * w0 * 0.75, cx - lx * w0 - lz * w0 * 0.75, cz - lz * w0 + lx * w0 * 0.75]), top + 6.4, top + 7.0, 0.2, trim, pl, 0.15);
+          obox(B, cx, cz, lx, lz, w0 * 0.55, w0 * 0.4, top + 6.6, top + 10.5, lin(0xb9bcbe), atl(CELL.metal));
+          obox(B, cx, cz, lx, lz, 0.15, 0.15, top + 10.5, top + 18 + hash(seed + 60) * 10, lin(0x9a9c9e), pl);
+        } else if (hgt > 16 && inside(cx, cz, 4)) obox(B, cx, cz, lx, lz, Math.min(4, lb * 0.16), 2.6, top, top + 3.2, lin(0xb9bcbe), atl(CELL.metal));
+        const nAc = Math.floor(hash(seed + 42) * (hgt > 16 ? 5 : 3));
+        for (let k = 0; k < nAc; k++) {
+          const ax = cx + (hash(seed + k * 5 + 43) - 0.5) * lb * 0.6, az = cz + (hash(seed + k * 5 + 44) - 0.5) * lb * 0.6;
+          if (inside(ax, az, 1.3) && Math.hypot(ax - cx, az - cz) > 4.5) junk.push({ kind: 'ac', x: ax, z: az, y: top, h: rh + (k % 2) * Math.PI / 2 });
+        }
+        if (old && hgt > 9 && (dist === 'downtown' || dist === 'village' || dist === 'west') && hash(seed + 45) < 0.35) {
+          const tx = cx + (hash(seed + 46) - 0.5) * lb * 0.4, tz = cz + (hash(seed + 47) - 0.5) * lb * 0.4;
+          if (inside(tx, tz, 2.2)) junk.push({ kind: 'tank', x: tx, z: tz, y: top, h: hash(seed + 48) * 6 });
+        }
+        // fire escape down a side wall of old walk-ups
+        if (old && !store && hgt > 9 && hgt < 40 && hash(seed + 49) < 0.55) {
+          for (let i = 0; i < n; i++) {
+            if (best && i === best.i) continue;
+            const x0 = pts[i * 2], z0 = pts[i * 2 + 1], x1 = pts[((i + 1) % n) * 2], z1 = pts[((i + 1) % n) * 2 + 1], L = Math.hypot(x1 - x0, z1 - z0);
+            if (L < 8) continue;
+            const nn = ol.N[i], f = 0.3 + hash(seed + 50) * 0.4, fx = x0 + (x1 - x0) * f + nn[0] * 0.05, fz = z0 + (z1 - z0) * f + nn[1] * 0.05, fh = Math.atan2(nn[0], nn[1]);
+            for (let y = baseY + 3.3; y < top - 2.5; y += 3.3) junk.push({ kind: 'fesc', x: fx, z: fz, y, h: fh });
+            break;
+          }
+        }
+      }
       return;
     }
     // gable roof over the footprint's oriented box
-    let best = 0, ux = 1, uz = 0;
-    for (let i = 0; i < n; i++) { const dx = pts[((i + 1) % n) * 2] - pts[i * 2], dz = pts[((i + 1) % n) * 2 + 1] - pts[i * 2 + 1], l = Math.hypot(dx, dz); if (l > best) { best = l; ux = dx / l; uz = dz / l; } }
+    let longest = 0, ux = 1, uz = 0;
+    for (let i = 0; i < n; i++) { const dx = pts[((i + 1) % n) * 2] - pts[i * 2], dz = pts[((i + 1) % n) * 2 + 1] - pts[i * 2 + 1], l = Math.hypot(dx, dz); if (l > longest) { longest = l; ux = dx / l; uz = dz / l; } }
     const vx = -uz, vz = ux;
     let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
     for (let i = 0; i < n; i++) { const pu = (pts[i * 2] - cx) * ux + (pts[i * 2 + 1] - cz) * uz, pv = (pts[i * 2] - cx) * vx + (pts[i * 2 + 1] - cz) * vz; u0 = Math.min(u0, pu); u1 = Math.max(u1, pu); v0 = Math.min(v0, pv); v1 = Math.max(v1, pv); }
@@ -362,6 +532,17 @@ function buildBuildings(t, B, boxes, foot, SB, GB, junk) {
       if (cr > 0) B.i.push(a, b, c); else B.i.push(b, a, c);
     }
     flatRoof(top - 0.2, R, [0.6, 0.6, 0.6]); // ceiling under the gable (fills odd footprints)
+    if (hgt >= 4.2) {
+      const pl = atl(CELL.plain), gut = hash(seed + 51) < 0.5 ? TRIM : lin(0x6e6a64);
+      for (const va of [v0, v1]) { const [gx, gz] = W((u0 + u1) / 2, va); obox(B, gx, gz, ux, uz, (u1 - u0) / 2, 0.07, ey - 0.16, ey - 0.02, gut, pl, 4, true); }
+      const [dx0, dz0] = W(u0 + 0.1, v0 + 0.1); obox(B, dx0, dz0, ux, uz, 0.05, 0.05, baseY, ey - 0.1, gut, pl);
+      const [dx1, dz1] = W(u1 - 0.1, v1 - 0.1); obox(B, dx1, dz1, ux, uz, 0.05, 0.05, baseY, ey - 0.1, gut, pl);
+      if (hash(seed + 52) < 0.45 && u1 - u0 > 5) {
+        const cu = hash(seed + 53) < 0.5 ? u0 + 1.2 : u1 - 1.2, [chx, chz] = W(cu, vm + 0.5);
+        obox(B, chx, chz, ux, uz, 0.42, 0.32, top, ry + 0.9, lin(BRICK_TINTS[0]), atl(CELL.brick3), 4);
+        obox(B, chx, chz, ux, uz, 0.5, 0.4, ry + 0.9, ry + 1.05, lin(0x8c8a86), pl);
+      }
+    }
   });
 }
 
@@ -383,6 +564,41 @@ function streetLights(t) {
     }
   }
   return out;
+}
+
+// ---------- street furniture along the sidewalks (deterministic per edge) ----------
+function streetProps(t, junk, boxes) {
+  for (const id of t.e) {
+    const e = G.edges[id];
+    if (!SIDEWALK(e) || e.len < 30) continue;
+    const dist = district(e.pts[0], e.pts[1]), busy = dist === 'downtown' || dist === 'village', big = e.cls === 'primary' || e.cls === 'secondary';
+    const put = (kind, s, side, off, extra = {}) => {
+      const p = pointOnEdge(e, s), x = p.x + Math.cos(p.h) * off * side, z = p.z - Math.sin(p.h) * off * side;
+      if (!inTile(t, x, z)) return null;
+      const j = { kind, x, z, y: terrainHeight(x, z), h: p.h + (side > 0 ? -Math.PI / 2 : Math.PI / 2), ...extra };
+      junk.push(j); return j;
+    };
+    const kerb = e.width / 2 + 0.55, back = e.width / 2 + WALK_W - 0.35;
+    // hydrants every block or so, near the start of the edge
+    if (hash(id * 3.7) < 0.8) put('hydrant', 9 + hash(id) * 6, hash(id * 1.3) < 0.5 ? 1 : -1, kerb);
+    // a bus stop on bigger roads now and then (with a bench inside)
+    if (big && e.len > 60 && hash(id * 5.1) < (busy ? 0.35 : 0.25)) {
+      const side = hash(id * 2.9) < 0.5 ? 1 : -1, s = e.len * (0.35 + hash(id * 7.7) * 0.3);
+      const j = put('busstop', s, side, e.width / 2 + 1.25);
+      if (j) { j.busStop = true; boxes.push(makeBox(j.x - Math.sin(j.h) * 0.6, j.z - Math.cos(j.h) * 0.6, Math.cos(j.h), -Math.sin(j.h), 1.6, 0.1, j.y, 2.5)); }
+    }
+    if (busy || dist === 'riverfront') {
+      for (let s = 16 + hash(id * 9.1) * 20, k = 0; s < e.len - 14; s += 34 + hash(id + k) * 30, k++) {
+        const side = (k + id) % 2 ? 1 : -1, r = hash(id * 13 + k);
+        if (r < 0.3) put('bench', s, side, back);
+        else if (r < 0.55) put('bin', s, side, kerb + 0.1);
+        else if (r < 0.7 && busy) { put('newsbox', s, side, back + 0.05); put('newsbox', s + 0.6, side, back + 0.05); }
+        else if (r < 0.78) put('mailbox', s, side, kerb + 0.2);
+      }
+      // parking meters along downtown kerbs
+      if (busy && e.cls !== 'primary') for (let s = 14, k = 0; s < e.len - 14; s += 7.5, k++) if (hash(id * 17 + k) < 0.8) { put('meter', s, 1, kerb - 0.15); put('meter', s + 3, -1, kerb - 0.15); }
+    } else if (hash(id * 11.3) < 0.25) put(hash(id * 4.1) < 0.6 ? 'bin' : 'bench', e.len * 0.5, (id % 2) ? 1 : -1, hash(id) < 0.5 ? kerb + 0.1 : back);
+  }
 }
 
 // ---------- railway track (ballast + two rails), cut into tiles like the roads ----------
@@ -430,6 +646,7 @@ export function buildTile(t) {
     trees.push({ x, z, y: terrainHeight(x, z), kind: t.t[i + 2], s: t.t[i + 3] / 10, seed: hash(x * 3.1 + z) });
     boxes.push(makeBox(x, z, 1, 0, 0.22 * t.t[i + 3] / 10, 0.22 * t.t[i + 3] / 10, terrainHeight(x, z) - 1, 6));
   }
+  streetProps(t, junk, boxes);
   const lights = streetLights(t);
   for (const l of lights) boxes.push(makeBox(l.x, l.z, 1, 0, 0.12, 0.12, l.y - 0.5, 8));
   return { group, boxes, trees, lights, foot, junk };

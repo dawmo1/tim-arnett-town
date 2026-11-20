@@ -12,9 +12,9 @@ export const SWIM_Y = WATER_Y - 0.8; // where a swimmer's feet are
 export const env = { glowSpots: [] };
 export const places = {};
 
-export async function initWorld(scene) {
+export async function initWorld(scene, quality) {
   await loadData();
-  initStream(scene);
+  initStream(scene, quality);
   env.buildings = M.building; env.signs = M.signs; env.ground = M.terrain; env.roads = M.road; env.water = M.water; env.lampMat = M.lamp; env.poolMat = M.lpool; env.farBox = M.farBox;
   places.hospitals = D.index.hospitals; places.police = D.index.police; places.fire = D.index.fire;
   places.menu = { x: -40, z: 120 }; // looking over the riverfront downtown

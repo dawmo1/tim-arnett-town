@@ -130,16 +130,20 @@ def export_glb(name, objs=None, anims=False):
     import io, contextlib, logging
     logging.disable(logging.INFO)
     with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-        _export(path)
+        _export(path, anims)
     logging.disable(logging.NOTSET)
     return os.path.getsize(path) // 1024
 
 
-def _export(path):
-    bpy.ops.export_scene.gltf(filepath=path, export_format='GLB', use_selection=True, export_apply=True,
-                              export_yup=True, export_texcoords=True, export_normals=True,
-                              export_materials='EXPORT', export_animations=anims, export_skins=True,
-                              export_extras=False, export_cameras=False, export_lights=False)
+def _export(path, anims=False):
+    kw = dict(filepath=path, export_format='GLB', use_selection=True, export_apply=True,
+              export_yup=True, export_texcoords=True, export_normals=True,
+              export_materials='EXPORT', export_animations=anims, export_skins=True,
+              export_extras=False, export_cameras=False, export_lights=False)
+    try:  # baked vertex colours (props) go out as COLOR_0
+        bpy.ops.export_scene.gltf(**kw, export_vertex_color='ACTIVE')
+    except TypeError:
+        bpy.ops.export_scene.gltf(**kw)
 
 
 def preview(path, target=(0, 0, 1), dist=3.0, yaw=20, pitch=8, size=(640, 640), lens=50, engine='BLENDER_WORKBENCH'):

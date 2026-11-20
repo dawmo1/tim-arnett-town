@@ -6,6 +6,7 @@ import { D, TILE, WATER_Y, tiles, fetchTile, isFetching, inRange, tileKey, terra
 import { addBoxes, removeBoxes, makeBox } from './collide.js';
 import { buildTile } from './tile.js';
 import { M, initMaterials } from './mats.js';
+import { gltf } from '../assets.js';
 
 let scene;
 const built = new Map(); // key -> {t, group, trees, lights, foot}
@@ -108,31 +109,72 @@ function hideFar(key, hide) {
 // ---------- trees + street lights (instanced, rebuilt when the loaded set changes) ----------
 const inst = {};
 let instDirty = false, instT = 0;
+const instAt = { x: 0, z: 0 };
+// how far away each kind of prop is still drawn (m)
+const PROP_FAR = { fesc: 260, ac: 240, tank: 320, busstop: 220, dumpster: 150, bag: 110, picket: 150, chainlink: 150, hedge: 160, flowers: 110, bench: 140, bin: 120, newsbox: 100, hydrant: 120, meter: 90, mailbox: 110 };
+// Blender props (assets/models/props.glb): every prop kind is one instanced mesh with baked colours.
+export const WIND = { value: 0 };
+const PROP_GEO = new Map();
+function propGeometry(name) {
+  if (PROP_GEO.has(name)) return PROP_GEO.get(name);
+  if (name.endsWith('_trunk_far')) { const g = propGeometry(name.replace('_far', '')); PROP_GEO.set(name, g); return g; }
+  let geo = null; const g = gltf('props');
+  if (g) g.scene.traverse((o) => { if (!geo && o.isMesh && o.name === 'p_' + name) geo = o.geometry; });
+  PROP_GEO.set(name, geo);
+  return geo;
+}
+// leaves sway with the wind: the higher up the tree, the more it moves; each tree on its own phase
+function swayPatch(m, amt) {
+  m.onBeforeCompile = (sh) => {
+    sh.uniforms.uWind = WIND;
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform float uWind;')
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        { float h = max(0.0, position.y - 1.5); vec3 ip = instanceMatrix[3].xyz; float ph = ip.x * 0.13 + ip.z * 0.11;
+          float sw = sin(uWind * 1.3 + ph) * 0.6 + sin(uWind * 2.9 + ph * 1.7) * 0.25;
+          transformed.x += sw * ${amt} * h; transformed.z += cos(uWind * 1.05 + ph) * ${amt * 0.7} * h;
+          transformed += normal * sin(uWind * 7.0 + dot(position, vec3(3.1, 2.3, 2.7))) * 0.04; }`);
+  };
+  m.customProgramCacheKey = () => 'sway' + amt;
+  return m;
+}
+let PROP_MAT, LEAF_MAT, LENS_MAT;
+const SHADOW = new Set(['dumpster', 'tank', 'fesc', 'busstop', 'streetlight', 'bench', 'ac']);
+function propMesh(name, cap = 16) {
+  const geo = propGeometry(name); if (!geo) return null;
+  const leaves = name.includes('_leaves'), mat = leaves ? LEAF_MAT : name === 'streetlight_lens' ? LENS_MAT : PROP_MAT;
+  const m = new THREE.InstancedMesh(geo, mat, cap); m.count = 0;
+  m.castShadow = leaves || name.endsWith('_trunk') || SHADOW.has(name); m.receiveShadow = !leaves; m.frustumCulled = false;
+  scene.add(m); inst[name] = m;
+  return m;
+}
 function makeInstanced() {
-  const trunk = new THREE.CylinderGeometry(0.16, 0.24, 1, 6).translate(0, 0.5, 0);
-  const leafy = new THREE.IcosahedronGeometry(1, 1);
-  const cone = new THREE.ConeGeometry(1, 1, 8).translate(0, 0.5, 0);
-  const round = new THREE.IcosahedronGeometry(1, 0);
-  const leafMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, flatShading: true });
-  const barkMat = new THREE.MeshStandardMaterial({ color: 0x5b4636, roughness: 1 });
-  const poleMat = new THREE.MeshStandardMaterial({ color: 0x4a5258, roughness: 0.6, metalness: 0.3 });
-  const mk = (geo, mat, shadow) => { const m = new THREE.InstancedMesh(geo, mat, 16); m.count = 0; m.castShadow = shadow; m.receiveShadow = false; m.frustumCulled = false; scene.add(m); return m; };
-  inst.trunk = mk(trunk, barkMat, true); inst.leafy = mk(leafy, leafMat, true); inst.cone = mk(cone, leafMat, true); inst.round = mk(round, leafMat, true);
-  inst.pole = mk(new THREE.BoxGeometry(0.16, 1, 0.16).translate(0, 0.5, 0), poleMat, true);
-  inst.arm = mk(new THREE.BoxGeometry(0.1, 0.1, 2.2).translate(0, 0, 1.1), poleMat, false);
+  PROP_MAT = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.72, metalness: 0.15 });
+  LEAF_MAT = swayPatch(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0 }), 0.012);
   M.lamp = M.lamp || new THREE.MeshBasicMaterial({ color: 0xfff3c4 });
-  inst.lamp = mk(new THREE.BoxGeometry(0.5, 0.16, 0.8), M.lamp, false);
+  LENS_MAT = M.lamp;
+  const leafMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, flatShading: true });
+  const mk = (geo, mat, shadow) => { const m = new THREE.InstancedMesh(geo, mat, 16); m.count = 0; m.castShadow = shadow; m.receiveShadow = false; m.frustumCulled = false; scene.add(m); return m; };
   // at night each streetlight throws a warm pool on the ground; in the wet it also reflects as a streak
   { const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d'), gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
     gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.5, 'rgba(255,255,255,.4)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
     M.lpool = new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), color: 0xffd9a0, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -8 }); }
   inst.lpool = mk(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), M.lpool, false);
   inst.lstreak = makeStreakMesh(16, 0xffc98a); scene.add(inst.lstreak);
-  inst.bag = mk(new THREE.IcosahedronGeometry(0.4, 0).scale(1, 0.75, 1).translate(0, 0.28, 0), new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.35 }), true);
-  inst.dumpster = mk(new THREE.BoxGeometry(1.9, 1.3, 1.1).translate(0, 0.65, 0), new THREE.MeshStandardMaterial({ color: 0x2e5d3a, roughness: 0.7, metalness: 0.3 }), true);
+  // fallbacks if props.glb is missing: the old simple shapes
+  const fb = {
+    streetlight: new THREE.BoxGeometry(0.16, 7.5, 0.16).translate(0, 3.75, 0), streetlight_lens: new THREE.BoxGeometry(0.5, 0.16, 0.8).translate(0, 7.3, 2.1),
+    oak_trunk: new THREE.CylinderGeometry(0.16, 0.24, 4, 6).translate(0, 2, 0), oak_leaves: new THREE.IcosahedronGeometry(3, 1).translate(0, 5.4, 0),
+    pine_trunk: new THREE.CylinderGeometry(0.12, 0.2, 3, 6).translate(0, 1.5, 0), pine_leaves: new THREE.ConeGeometry(2.6, 8.5, 8).translate(0, 5.6, 0),
+    small_trunk: new THREE.CylinderGeometry(0.1, 0.14, 2.5, 6).translate(0, 1.25, 0), small_leaves: new THREE.IcosahedronGeometry(1.8, 0).translate(0, 3.2, 0),
+    bag: new THREE.IcosahedronGeometry(0.4, 0).scale(1, 0.75, 1).translate(0, 0.28, 0), dumpster: new THREE.BoxGeometry(1.9, 1.3, 1.1).translate(0, 0.65, 0),
+  };
+  fb.maple_trunk = fb.oak_trunk; fb.maple_leaves = fb.oak_leaves;
+  for (const [k, g] of Object.entries(fb)) if (!propGeometry(k)) { g.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 3).fill(k.endsWith('_trunk') ? 0.3 : k === 'dumpster' ? 0.2 : 0.8), 3)); PROP_GEO.set(k, g); }
+  void leafMat;
 }
 function ensure(name, n) {
-  let m = inst[name];
+  let m = inst[name] || propMesh(name);
+  if (!m) return null;
   if (m.instanceMatrix.count < n) {
     const cap = Math.ceil(n * 1.4);
     const nm = new THREE.InstancedMesh(m.geometry, m.material, cap);
@@ -145,41 +187,59 @@ const GREENS = [0x4f7d32, 0x5b8a38, 0x46702c, 0x6a9440, 0x3f6a2c, 0x7a9a3c, 0x55
 function rebuildInstances() {
   const all = { trees: [], lights: [], junk: [] };
   for (const b of built.values()) { all.trees.push(...b.trees); all.lights.push(...b.lights); all.junk.push(...(b.junk || [])); }
-  const bags = all.junk.filter((j) => j.kind === 'bag'), dumps = all.junk.filter((j) => j.kind === 'dumpster');
-  const bagM = ensure('bag', bags.length), dumpM = ensure('dumpster', dumps.length), oj = new THREE.Object3D();
-  bags.forEach((j, i) => { oj.position.set(j.x, j.y, j.z); oj.rotation.set(0, j.h, 0); oj.updateMatrix(); bagM.setMatrixAt(i, oj.matrix); });
-  dumps.forEach((j, i) => { oj.position.set(j.x, j.y, j.z); oj.rotation.set(0, j.h, 0); oj.updateMatrix(); dumpM.setMatrixAt(i, oj.matrix); });
-  bagM.count = bags.length; dumpM.count = dumps.length; bagM.instanceMatrix.needsUpdate = dumpM.instanceMatrix.needsUpdate = true;
+  // props by kind (rooftop units, fire escapes, dumpsters, benches, ...)
+  const byKind = new Map(), oj = new THREE.Object3D();
+  for (const j of all.junk) {
+    const far = PROP_FAR[j.kind] || 200; if ((j.x - instAt.x) ** 2 + (j.z - instAt.z) ** 2 > far * far) continue;
+    let a = byKind.get(j.kind); if (!a) byKind.set(j.kind, a = []); a.push(j);
+  }
+  for (const name of Object.keys(inst)) if (!byKind.has(name) && PROP_GEO.has(name) && !/_(trunk|leaves|lens|lo|far)$|^streetlight$/.test(name)) inst[name].count = 0;
+  for (const [kind, list] of byKind) {
+    const m = ensure(kind, list.length); if (!m) continue;
+    list.forEach((j, i) => { oj.position.set(j.x, j.y, j.z); oj.rotation.set(0, j.h || 0, 0); oj.scale.setScalar(j.s || 1); oj.updateMatrix(); m.setMatrixAt(i, oj.matrix); });
+    m.count = list.length; m.instanceMatrix.needsUpdate = true;
+  }
+  // trees: oak or maple for broadleaf, pine for conifers, a small ornamental for street trees
   const T = all.trees, o = new THREE.Object3D(), c = new THREE.Color();
-  const trunk = ensure('trunk', T.length), leafy = ensure('leafy', T.length), cone = ensure('cone', T.length), round = ensure('round', T.length);
-  let nl = 0, nc = 0, nr = 0;
-  T.forEach((t, i) => {
-    const s = t.s, conifer = t.kind === 1, small = t.kind === 2;
-    o.rotation.set(0, t.seed * 6.28, 0);
-    o.position.set(t.x, t.y - 0.2, t.z); o.scale.set(s, (conifer ? 2.2 : small ? 2.2 : 3.4) * s, s); o.updateMatrix(); trunk.setMatrixAt(i, o.matrix);
-    c.setHex(GREENS[Math.floor(t.seed * GREENS.length)]).multiplyScalar(0.85 + t.seed * 0.3);
-    if (conifer) { o.position.set(t.x, t.y + 1.4 * s, t.z); o.scale.set(2.6 * s, 8.5 * s, 2.6 * s); o.updateMatrix(); cone.setMatrixAt(nc, o.matrix); cone.setColorAt(nc++, c.multiplyScalar(0.8)); }
-    else if (small) { o.position.set(t.x, t.y + 3.2 * s, t.z); o.scale.set(1.9 * s, 1.7 * s, 1.9 * s); o.updateMatrix(); round.setMatrixAt(nr, o.matrix); round.setColorAt(nr++, c); }
-    else { o.position.set(t.x, t.y + 5.4 * s, t.z); o.scale.set(3.4 * s, 3.0 * s, 3.4 * s); o.updateMatrix(); leafy.setMatrixAt(nl, o.matrix); leafy.setColorAt(nl++, c); }
-  });
-  trunk.count = T.length; leafy.count = nl; cone.count = nc; round.count = nr;
-  for (const m of [trunk, leafy, cone, round]) { m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true; }
-  const L = all.lights, pole = ensure('pole', L.length), arm = ensure('arm', L.length), lamp = ensure('lamp', L.length), lpool = ensure('lpool', L.length), lstreak = ensure('lstreak', L.length);
+  // broadleaf trees past ~110 m swap to a lighter canopy (and stop casting shadows)
+  const SPEC = ['oak', 'maple', 'pine', 'small', 'oak_lo', 'maple_lo'], groups = { oak: [], maple: [], pine: [], small: [], oak_lo: [], maple_lo: [] };
+  const hasLo = !!propGeometry('oak_leaves_lo');
+  for (const t of T) {
+    let sp = t.kind === 1 ? 'pine' : t.kind === 2 ? 'small' : t.seed < 0.55 ? 'oak' : 'maple';
+    if (hasLo && (sp === 'oak' || sp === 'maple') && (t.x - instAt.x) ** 2 + (t.z - instAt.z) ** 2 > 110 * 110) sp += '_lo';
+    groups[sp].push(t);
+  }
+  for (const sp of SPEC) {
+    const G = groups[sp], lo = sp.endsWith('_lo'), base = lo ? sp.slice(0, -3) : sp;
+    if (lo && !hasLo) continue;
+    const tr = ensure(lo ? base + '_trunk_far' : sp + '_trunk', G.length), lv = ensure(lo ? base + '_leaves_lo' : sp + '_leaves', G.length);
+    if (!tr || !lv) continue;
+    if (lo) { tr.castShadow = false; lv.castShadow = false; }
+    G.forEach((t, i) => {
+      const s = t.s * (sp === 'pine' ? 1.0 : sp === 'small' ? 1.1 : 1.05);
+      o.rotation.set(0, t.seed * 6.28, 0); o.position.set(t.x, t.y - 0.15, t.z); o.scale.set(s, s * (0.9 + t.seed * 0.25), s); o.updateMatrix();
+      tr.setMatrixAt(i, o.matrix); lv.setMatrixAt(i, o.matrix);
+      c.setHex(GREENS[Math.floor(t.seed * GREENS.length)]).multiplyScalar(0.85 + t.seed * 0.3);
+      if (sp === 'maple' && t.seed > 0.9) c.setHex(0x9a6a2a); // the odd turning maple
+      if (sp === 'pine') c.multiplyScalar(0.7);
+      lv.setColorAt(i, c);
+    });
+    tr.count = lv.count = G.length; tr.instanceMatrix.needsUpdate = lv.instanceMatrix.needsUpdate = true; if (lv.instanceColor) lv.instanceColor.needsUpdate = true;
+  }
+  const L = all.lights, pole = ensure('streetlight', L.length), lamp = ensure('streetlight_lens', L.length), lpool = ensure('lpool', L.length), lstreak = ensure('lstreak', L.length);
   L.forEach((l, i) => {
-    o.rotation.set(0, l.h, 0); o.position.set(l.x, l.y, l.z); o.scale.set(1, 7.5, 1); o.updateMatrix(); pole.setMatrixAt(i, o.matrix);
-    o.position.set(l.x, l.y + 7.4, l.z); o.scale.set(1, 1, 1); o.updateMatrix(); arm.setMatrixAt(i, o.matrix);
-    o.position.set(l.x + Math.sin(l.h) * 2.1, l.y + 7.3, l.z + Math.cos(l.h) * 2.1); o.updateMatrix(); lamp.setMatrixAt(i, o.matrix);
+    o.rotation.set(0, l.h, 0); o.position.set(l.x, l.y, l.z); o.scale.set(1, 1, 1); o.updateMatrix(); pole.setMatrixAt(i, o.matrix); lamp.setMatrixAt(i, o.matrix);
     o.position.set(l.x + Math.sin(l.h) * 2.4, l.y + 0.07, l.z + Math.cos(l.h) * 2.4); o.scale.set(13, 1, 13); o.updateMatrix(); lpool.setMatrixAt(i, o.matrix);
     o.rotation.set(0, 0, 0); o.scale.set(1.3, 1, 11); o.updateMatrix(); lstreak.setMatrixAt(i, o.matrix);
   });
-  pole.count = arm.count = lamp.count = lpool.count = lstreak.count = L.length;
-  for (const m of [pole, arm, lamp, lpool, lstreak]) m.instanceMatrix.needsUpdate = true;
+  pole.count = lamp.count = lpool.count = lstreak.count = L.length;
+  for (const m of [pole, lamp, lpool, lstreak]) m.instanceMatrix.needsUpdate = true;
 }
 
 // ---------- the streaming loop ----------
-export function initStream(s) {
+export function initStream(s, quality) {
   scene = s;
-  initMaterials();
+  initMaterials(quality);
   buildFar();
   makeInstanced();
 }
@@ -249,8 +309,11 @@ export function updateStream(px, pz, dt) {
   const t0 = performance.now();
   while (performance.now() - t0 < frameBudget) if (!buildOne(px, pz)) break;
   unloadFar(px, pz);
+  WIND.value += dt;
   instT -= dt;
-  if (instDirty && instT <= 0) { instDirty = false; instT = 0.4; rebuildInstances(); }
+  // small props only draw near the player: re-pick them after a walk or drive of 40 m
+  if (!instDirty && (px - instAt.x) ** 2 + (pz - instAt.z) ** 2 > 1600) instDirty = true;
+  if (instDirty && instT <= 0) { instDirty = false; instT = 0.4; instAt.x = px; instAt.z = pz; rebuildInstances(); }
   discard.center.value.set(px, pz); discard.radius.value = solidRadius(px, pz);
 }
 // Load and build everything within `rad` of a point before the game starts.
@@ -267,7 +330,7 @@ export async function preload(px, pz, rad, onProgress) {
     if (b % 2 === 0) await new Promise((r) => setTimeout(r, 0));
   }
   R = saveR;
-  rebuildInstances(); instDirty = false;
+  instAt.x = px; instAt.z = pz; rebuildInstances(); instDirty = false;
   discard.center.value.set(px, pz); discard.radius.value = solidRadius(px, pz);
 }
 export function setBudget(ms) { frameBudget = ms; }

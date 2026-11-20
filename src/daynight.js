@@ -148,7 +148,8 @@ export function updateDayNight(dt, nowMs, cam) {
   const sunCol = C(0xfff4e0).lerp(C(0xff8a3d), sky.dusk).lerp(C(0x9fb6ff), sky.night);
   R.sun.color.copy(sunCol);
   R.sun.intensity = 2.4 * sky.day * (1 - 0.6 * sky.cloud) + 0.55 * moonLight;
-  R.sun.castShadow = (sky.day > 0.25 && sky.cloud < 0.6) || moonLight > 0.5;
+  // moon shadows cost a lot of draw calls with a low light; only on High
+  R.sun.castShadow = (sky.day > 0.25 && sky.cloud < 0.6) || (moonLight > 0.5 && sky.moonShadows);
   if (sky.night > 0.5) sky.sunDir.set(-sky.sunDir.x, Math.max(0.35, -Math.sin(ang)), sky.sunDir.z).normalize();
   R.hemi.intensity = 0.55 + 0.55 * sky.day * (1 - 0.3 * sky.cloud) + sky.flash * 3;
   R.hemi.color.copy(C(0xffffff).lerp(C(0x8ea2e0), sky.night));

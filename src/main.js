@@ -137,6 +137,7 @@ function applyQuality(q) {
   if (sun.shadow.mapSize.x !== size) { sun.shadow.mapSize.set(size, size); sun.shadow.map?.dispose(); sun.shadow.map = null; }
   scene.traverse((o) => { if (o.material && o.material.needsUpdate !== undefined && o.receiveShadow) o.material.needsUpdate = true; });
   bloom.enabled = q !== 'low';
+  weather.moonShadows = q === 'high';
   setLightQuality(q);
   setOccupantBudget(q === 'low' ? 4 : q === 'medium' ? 10 : 16);
   scene.userData.sky.material.uniforms.clouds.value = q === 'low' ? 0 : 1;
@@ -190,7 +191,7 @@ await loadAssets((p) => { playBtn.textContent = `Loading models… ${Math.round(
 initCharacters(activeQuality);
 fx.setCasingGeometry(geometryOf('weapons', 'casing'));
 playBtn.textContent = 'Loading Davenport…';
-await W.initWorld(scene);
+await W.initWorld(scene, activeQuality);
 await W.preload(W.places.menu.x, W.places.menu.z, 320, (p) => { playBtn.textContent = `Loading Davenport… ${Math.round(p * 100)}%`; });
 playBtn.disabled = false; playBtn.textContent = 'Play';
 fx.initFx(scene);

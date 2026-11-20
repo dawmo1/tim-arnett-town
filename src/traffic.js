@@ -9,6 +9,7 @@ import { G, pointOnEdge, canGo, district } from './city/data.js';
 import { nodeRadius } from './city/tile.js';
 import { makeVehicle, V, CAR_COLORS, alignToGround } from './vehicles.js';
 import { angDiff } from './util.js';
+import { gltf } from './assets.js';
 
 export const traffic = [];
 let scene, ctx;
@@ -319,7 +320,7 @@ function initSignals() {
   sig = {
     pole: mk(new THREE.CylinderGeometry(0.11, 0.13, 1, 6).translate(0, 0.5, 0), housing, 600),
     arm: mk(new THREE.BoxGeometry(0.12, 0.12, 1).translate(0, 0, 0.5), housing, 600),
-    head: mk(new THREE.BoxGeometry(0.42, 1.15, 0.32), housing, 600),
+    head: (() => { let g = null; gltf('props')?.scene.traverse((o) => { if (!g && o.isMesh && o.name === 'p_signal') g = o.geometry; }); return g ? mk(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.2 }), 600) : mk(new THREE.BoxGeometry(0.42, 1.15, 0.32), housing, 600); })(),
     lamp: mk(new THREE.CircleGeometry(0.13, 10), new THREE.MeshBasicMaterial({ color: 0xffffff }), 1800),
     stop: mk(new THREE.PlaneGeometry(0.75, 0.75), new THREE.MeshStandardMaterial({ map: stopTex, transparent: true, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.6 }), 800),
   };
@@ -352,7 +353,7 @@ function rebuildSignals() {
         o.position.set(hx, py + 5.35, hz); o.rotation.set(0, face, 0); o.scale.set(1, 1, 1); o.updateMatrix(); sig.head.setMatrixAt(nh++, o.matrix);
         const fx = Math.sin(face) * 0.17, fz = Math.cos(face) * 0.17;
         sigList.push({ k, heading: travelH, lamp: nl });
-        for (const dy of [0.36, 0, -0.36]) { o.position.set(hx + fx, py + 5.35 + dy, hz + fz); o.rotation.set(0, face, 0); o.updateMatrix(); sig.lamp.setMatrixAt(nl++, o.matrix); }
+        for (const dy of [0.32, 0, -0.32]) { o.position.set(hx + fx, py + 5.35 + dy, hz + fz); o.rotation.set(0, face, 0); o.updateMatrix(); sig.lamp.setMatrixAt(nl++, o.matrix); }
       } else if (ctrl === 2 && ns < 800) {
         o.position.set(px, py, pz); o.rotation.set(0, 0, 0); o.scale.set(0.5, 2.6, 0.5); o.updateMatrix(); sig.pole.setMatrixAt(np++, o.matrix);
         o.position.set(px, py + 2.3, pz); o.rotation.set(0, face, 0); o.scale.set(1, 1, 1); o.updateMatrix(); sig.stop.setMatrixAt(ns++, o.matrix);
