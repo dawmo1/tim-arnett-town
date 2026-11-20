@@ -136,13 +136,9 @@
   <div id="menu">
     <div class="card">
       <h1>Tim Arnett <span>Town</span></h1>
-      <p class="tag">Davenport, Iowa, at full size. Grab a car. Grab your friends. Run from the cops.</p>
-      <label for="nameInput">Your name</label>
-      <input id="nameInput" maxlength="16" autocomplete="off">
-      <label for="roomInput">Room code <small>same code = same game</small></label>
-      <input id="roomInput" maxlength="6" autocomplete="off">
+      <!-- name and room code come back when multiplayer is set up -->
+      <div hidden><input id="nameInput" maxlength="16" autocomplete="off"><input id="roomInput" maxlength="6" autocomplete="off"><p id="netStatus"></p></div>
       <button id="playBtn">Play</button>
-      <p id="netStatus">Checking multiplayer…</p>
       <p class="credit">Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors</p>
     </div>
   </div>
