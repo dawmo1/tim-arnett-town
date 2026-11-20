@@ -196,8 +196,9 @@ export function updateCarLights(cars, camPos, night, mine, t) {
       for (const h of L.tail) if (!side || Math.sign(h[0]) === side) glow(mesh, h[0] + side * 0.12, h[1] + 0.06, h[2], true, ss, 1 * sk, 0.48 * sk, 0.04 * sk);
     }
     if (c.bar && L.bar) {
-      flare(mesh, L.bar[0][0], L.bar[0][1], L.bar[0][2], false, 1.0, flash ? 0.9 : 0.08, flash ? 0.03 : 0.01, flash ? 0.05 : 0.01, true);
-      flare(mesh, L.bar[1][0], L.bar[1][1], L.bar[1][2], false, 1.0, flash ? 0.03 : 0.08, flash ? 0.09 : 0.16, flash ? 0.24 : 1.0, true);
+      // tight lamp glows (seen from all sides), not big halos: up close those read as floating bubbles
+      flare(mesh, L.bar[0][0], L.bar[0][1], L.bar[0][2], false, 0.5, flash ? 1.3 : 0.1, flash ? 0.05 : 0.01, flash ? 0.07 : 0.01, true, glows);
+      flare(mesh, L.bar[1][0], L.bar[1][1], L.bar[1][2], false, 0.5, flash ? 0.05 : 0.1, flash ? 0.14 : 0.2, flash ? 0.36 : 1.4, true, glows);
     }
     if (on && lit) cand.push({ c, v, d2, mine: v === mine });
   }
@@ -212,7 +213,7 @@ export function updateCarLights(cars, camPos, night, mine, t) {
       const l = spots[si++], out = Math.sign(h[0]) * 2.5;
       l.position.set(h[0], h[1] + 0.05, h[2] + 0.3).applyMatrix4(mw);
       l.target.position.set(h[0] + out, h[1] - 1.8, h[2] + 22).applyMatrix4(mw);
-      l.intensity = 260 * night * (k.mine ? 1.2 : 1);
+      l.intensity = 170 * night * (k.mine ? 1.2 : 1);
     } else if (!v.T.boat && !v.T.heli && k.d2 < 200 * 200) for (const h of L.head) {
       // painted pools for the rest: one narrow oval per headlamp, overlapping in the middle
       if (np >= MAX_POOLS) break;

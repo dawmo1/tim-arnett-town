@@ -194,7 +194,6 @@ initSettingsUi();
 
 // ---------- loading screen (TAT V): drifting full-screen art, the logo, a tip and a spinner ----------
 // It covers the whole screen, so half-built streets never show. fade: just black + spinner (respawns).
-const TIPS = ['Hold Tab for the weapon wheel.', 'Press M for the map, click it to set a GPS route.', "Stores, Arnett Arms, Tim's Threads and the casino have doors: press E.", 'Hide in a shop or a parking ramp to shake the cops faster.', 'P calls the mechanic: he drops a car off near you.', 'Hold C while driving to look behind you.', 'G says hi. H insults people. Some swing back.', "Freight trains don't stop. Neither do barges.", 'Re-elect Mayor Tim Arnett.'];
 const loader = document.getElementById('loader'), slidesEl = loader.querySelector('.slides');
 // pictures come from a shuffled bag shared with index.html (which shows the first one before this code loads)
 let artK = 0, artTimer = 0, loaderOut = 0;
@@ -219,7 +218,7 @@ function loading(on, label = '', mode = 'art') {
   if (!on) { loader.classList.add('out'); loaderOut = setTimeout(() => { loader.hidden = true; }, 650); return Promise.resolve(); }
   const wasHidden = loader.hidden || loader.classList.contains('out');
   loader.classList.toggle('fade', mode === 'fade'); loader.classList.toggle('menu', mode === 'menu');
-  const tip = loader.querySelector('.tip'); tip.textContent = TIPS[Math.floor(Math.random() * TIPS.length)];
+  const tip = loader.querySelector('.tip'); tip.textContent = '';
   if (label) { const sm = document.createElement('small'); sm.textContent = label; tip.prepend(sm); }
   loadProgress(0);
   if (mode !== 'fade') artTimer = setInterval(nextArt, mode === 'menu' ? 7000 : 3200);
@@ -291,7 +290,9 @@ addEventListener('keydown', (e) => {
     return;
   }
   if (!playing) return;
-  if (paused) return;
+  if (shopOpen && (e.key === 'Escape' || e.code === 'KeyE') && !e.repeat) { e.preventDefault(); closeShop(); return; }
+  if (paused) { pauseKey(e); return; }
+  if (e.key === 'Escape' && !locked) { openPause(); return; }
   if (e.code === 'Space' || e.code === 'Tab' || e.code.startsWith('Arrow')) e.preventDefault();
   if (e.repeat) return;
   keys.add(e.code);
@@ -343,13 +344,22 @@ function closeChat() {
   typing = false; ui.el.chatInput.value = ''; ui.el.chatInput.hidden = true; ui.el.chatInput.blur();
 }
 // ---------- pause menu, map and waypoint ----------
-let paused = false, waypoint = null;
+let paused = false, waypoint = null, pausedAt = 0;
+const pauseTabs = [...ui.el.pauseTabs.querySelectorAll('[data-tab]')];
 function openPause(tab) {
   if (!playing) return;
-  paused = true; keys.clear(); mouseDown = false;
+  paused = true; keys.clear(); mouseDown = false; pausedAt = performance.now();
+  document.getElementById('pauseName').textContent = me.name;
   ui.el.pause.hidden = false;
-  if (tab) showTab(tab);
-  drawPauseMap();
+  showTab(tab || pauseTabs.find((b) => b.classList.contains('on')).dataset.tab);
+}
+function stepTab(d) { const i = pauseTabs.findIndex((b) => b.classList.contains('on')); showTab(pauseTabs[(i + d + pauseTabs.length) % pauseTabs.length].dataset.tab); }
+// GTA keys while paused: Q/E or arrows switch tabs, Esc goes back to the game (click the game to grab the mouse again)
+function pauseKey(e) {
+  if (e.repeat || e.target.tagName === 'INPUT') return; // sliders keep their arrow keys
+  if (e.code === 'KeyQ' || e.key === 'ArrowLeft') stepTab(-1);
+  else if (e.code === 'KeyE' || e.key === 'ArrowRight') stepTab(1);
+  else if (e.key === 'Escape' && performance.now() - pausedAt > 400) closePause(); // the Esc that unlocked the mouse also opened this
 }
 function closePause() { if (shopOpen) { shopOpen = false; document.getElementById('shop').hidden = true; } paused = false; ui.el.pause.hidden = true; }
 function showTab(tab) {
@@ -357,6 +367,12 @@ function showTab(tab) {
   for (const p of ui.el.pause.querySelectorAll('[data-panel]')) p.hidden = p.dataset.panel !== tab;
   if (tab === 'map') drawPauseMap();
   if (tab === 'goals') drawGoals();
+  if (tab === 'stats') drawStats();
+}
+function drawStats() {
+  const rows = [['Cash', '$' + eco.cash.toLocaleString('en-US')], ['Stores robbed', eco.robbed], ['Cars jacked', eco.jacked], ['Cop cars wrecked', eco.copCars],
+    ['Goals complete', `${eco.done.size} / ${GOALS.length}`], ['Wanted level', '★'.repeat(wanted.stars) || 'None']];
+  document.getElementById('statList').innerHTML = rows.map(([k, v]) => `<li><span>${k}</span><b>${v}</b></li>`).join('');
 }
 function drawGoals() {
   const ul = document.getElementById('goalList');
@@ -369,7 +385,7 @@ function drawGoals() {
     ul.append(li);
   }
 }
-ui.el.pauseTabs.addEventListener('click', (e) => { const t = e.target.closest('button'); if (t) showTab(t.dataset.tab); });
+ui.el.pauseTabs.addEventListener('click', (e) => { const t = e.target.closest('button'); if (t) t.dataset.dir ? stepTab(+t.dataset.dir) : showTab(t.dataset.tab); });
 ui.el.resumeBtn.addEventListener('click', () => { closePause(); lockMouse(); fx.unlockAudio(); });
 ui.el.bigmap.addEventListener('click', (e) => {
   if (ui.bigMapDragged()) return;
@@ -420,25 +436,42 @@ function gpsText(x, z) {
   if (!msg) msg = `<b>⚑</b>${dist < 60 ? 'Arriving at your waypoint' : `Waypoint in ${fmtDist(dist)}`}`;
   gpsEl.innerHTML = msg; gpsEl.hidden = false;
 }
+// map blips carry a type (icon, colour and legend row live in ui.BLIP_TYPES)
 function mapBlips() {
-  const b = [];
-  for (const h of W.places.hospitals) b.push({ x: h.x, z: h.z, color: '#e5484d', size: 6, shape: 'square', label: '+', name: h.name.replace(/^MercyOne /, ''), dy: 12 });
-  for (const p of W.places.police) b.push({ x: p.x, z: p.z, color: '#2f6fdc', size: 6, shape: 'square', label: '★', name: p.name });
-  for (const s of storeList(true)) b.push(s);
-  for (const e of eventBlips()) b.push(e);
-  for (const r of remotes.values()) if (!r.dead) b.push({ x: r.x, z: r.z, color: '#4aa3ff', size: 5, name: r.name });
+  const b = poiBlips().slice();
+  for (const h of W.places.hospitals) b.push({ x: h.x, z: h.z, type: 'hospital', name: h.name.replace(/^MercyOne /, '') });
+  for (const p of police.stations()) b.push({ x: p.x, z: p.z, type: 'police', name: p.name });
+  b.push(...storeList(true));
+  for (const e of eventBlips()) b.push({ ...e, type: 'event' });
+  for (const r of remotes.values()) if (!r.dead) b.push({ x: r.x, z: r.z, type: 'player', name: r.name });
   return b;
 }
+const STORE_TYPE = { rob: 'rob', guns: 'guns', clothes: 'clothes', body: 'garage', casino: 'casino' };
 function storeList(all) {
   const out = [];
   for (const s of stores) {
-    if (s.kind === 'guns') out.push({ x: s.x, z: s.z, color: '#e5484d', size: 6, shape: 'square', label: '⌖', name: 'Arnett Arms' });
-    else if (s.kind === 'body') out.push({ x: s.x, z: s.z, color: '#4aa3ff', size: 6, shape: 'square', label: '✦', name: 'Arnett Auto' });
-    // robbable: the minimap shows the ones within 400 m (more would pile up on its edge); grey while the till is empty
-    else if (s.kind === 'rob' && (all || Math.hypot(s.x - me.x, s.z - me.z) < 400)) out.push({ x: s.x, z: s.z, color: s.cooldown > 0 ? '#7a7f87' : '#2fbf4a', size: 6, label: '$', name: s.cooldown > 0 ? `${s.name} (robbed)` : `${s.name} · rob it` });
-    else if (s.kind === 'casino') out.push({ x: s.x, z: s.z, color: s.cooldown > 0 ? '#7a7f87' : '#d4a017', size: 6.5, shape: 'square', label: '$', name: 'The Arnett Belle casino' });
+    const type = STORE_TYPE[s.kind];
+    // robbable: the minimap shows the ones within 400 m (more would pile up on its edge); dimmed while the till is empty
+    if (type && (all || s.kind !== 'rob' || Math.hypot(s.x - me.x, s.z - me.z) < 400)) out.push({ x: s.x, z: s.z, type, name: s.kind === 'casino' ? 'The Arnett Belle casino' : s.name, dim: s.cooldown > 0 });
   }
   return out;
+}
+// real Davenport places from OSM -> blip type (churches, salons and the like stay off to keep the map readable)
+const POI_TYPE = {
+  fuel: 'gas', supermarket: 'shop', department_store: 'shop', mall: 'shop', variety_store: 'shop', convenience: 'shop', alcohol: 'shop',
+  restaurant: 'food', fast_food: 'food', cafe: 'cafe', pastry: 'cafe', bar: 'bar', pub: 'bar', bank: 'bank', pharmacy: 'pharmacy', chemist: 'pharmacy',
+  park: 'park', school: 'school', college: 'school', university: 'school', car_repair: 'garage', tyres: 'garage',
+  museum: 'landmark', attraction: 'landmark', stadium: 'landmark', theatre: 'landmark', cinema: 'landmark', gallery: 'landmark',
+};
+let poiCache = null;
+function poiBlips() {
+  if (poiCache) return poiCache;
+  if (!stores.length) return []; // stores aren't placed yet; try again next time
+  // our own stores sit on some of these spots (Tim-Mart on a real gas station): don't double them up
+  poiCache = W.D.index.poi.filter((p) => POI_TYPE[p.kind] && !stores.some((s) => s.kind !== 'meds' && Math.hypot(s.x - p.x, s.z - p.z) < 60))
+    .map((p) => ({ x: p.x, z: p.z, type: POI_TYPE[p.kind], name: p.name }));
+  for (const f of W.places.fire) poiCache.push({ x: f.x, z: f.z, type: 'fire', name: f.name });
+  return poiCache;
 }
 function drawPauseMap() { ui.drawBigMap(me, mapBlips(), waypoint, gpsRoute); }
 
@@ -559,11 +592,6 @@ playBtn.addEventListener('click', async () => {
   setTimeout(() => { loading(false); startSpawnCam(); }, 250); // a few frames to settle behind the cover
   selectWeapon(2);
   fx.unlockAudio();
-  ui.help('Welcome to <b>Tim Arnett Town</b>. <kbd>WASD</kbd> to move, mouse to look. Press <kbd>Esc</kbd> or <kbd>M</kbd> for the map.', 7);
-  ui.help('Walk up to any car and press <kbd>E</kbd>. If someone is driving, you will drag them out.', 6);
-  ui.help('Hold <kbd>Tab</kbd> for the weapon wheel. Crimes seen by the cops or reported by witnesses give you stars.', 7);
-  ui.help('<kbd>G</kbd> says hi, <kbd>H</kbd> insults. <kbd>P</kbd> calls the mechanic. Hold <kbd>C</kbd> in a car to look back. An orange <b>!</b> on the map is a crime you can stop.', 8);
-  ui.help('Looking for something to do? Press <kbd>Esc</kbd> and open <b>Goals</b> for crime sprees that pay cash. Click the map to set a GPS route.', 8);
   lockMouse();
 });
 
@@ -1718,11 +1746,9 @@ function updateWantedLevel(dt) {
 }
 // Robbing: inside, point a gun at the clerk (or the casino cashier) and keep it there while they fill the bag.
 // Corner stores: the clerk hits the silent alarm partway through. The casino calls it in at once.
-let tipRoom = null; // the shop the robbery tip was last shown in
 function updateRobbery(dt) {
   robberyPrompt = '';
   const R = interior.room;
-  if (R !== tipRoom) { tipRoom = R; if (R && (R.kind === 'rob' || R.kind === 'casino')) ui.help(`<b>Robbery:</b> hold right click to aim a gun at the ${R.kind === 'casino' ? 'cashier' : 'clerk'} and keep it on them until the bag is full. The alarm brings the cops.`, 7); }
   if (!R || !R.clerk || (R.kind !== 'rob' && R.kind !== 'casino')) return;
   const st = R.store, w = WEAPONS[me.weapon], c = R.clerk, casino = R.kind === 'casino', who = casino ? 'cashier' : 'clerk', till = casino ? 'cage' : 'till';
   const facing = aiming && Math.abs(angDiff(camYaw, Math.atan2(c.x - me.x, c.z - me.z))) < 0.35, close = Math.hypot(c.x - me.x, c.z - me.z) < 16;
@@ -1731,7 +1757,7 @@ function updateRobbery(dt) {
   if (st.cooldown > 0) { const s = Math.ceil(st.cooldown); robberyPrompt = `The ${till} is empty. Come back in ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; return; }
   if (!R.held) {
     st.progress = Math.max(0, (st.progress || 0) - dt * 0.15);
-    robberyPrompt = facing && w.kind !== 'gun' ? `The ${who} laughs at your ${w.name.toLowerCase()}. Point a gun.` : facing ? `Get closer to the ${who}` : st.progress > 0 ? `Keep aiming at the ${who}!` : `Aim a gun at the ${who} (hold right click) to rob ${st.name}`;
+    robberyPrompt = facing && w.kind !== 'gun' ? `The ${who} laughs at your ${w.name.toLowerCase()}. Point a gun.` : facing ? `Get closer to the ${who}` : st.progress > 0 ? `Keep aiming at the ${who}!` : '';
     return;
   }
   st.progress = (st.progress || 0) + dt / (casino ? 14 : 8);
@@ -2122,6 +2148,7 @@ function updateHud(dt, t) {
     ui.setHealth(me.hp);
     ui.setCash(eco.cash);
     ui.setArmor(me.armor);
+    ui.setSpecial(me.veh ? me.veh.nitro ?? 1 : drunk.lvl); // yellow bar: nitro while driving, drunkenness on foot
     // drunk driving where a cop can see it: 1 star (same rule as assault: only counts if seen)
     if (me.veh && drunk.lvl > 0.6 && Math.abs(me.veh.speed) > 5 && wanted.stars === 0 && Math.random() < 0.1) crime('assault', me.veh.x, me.veh.y, me.veh.z);
     if (wanted.stars >= 5 && !me.dead) { survive5 += 0.2; if (survive5 >= 60) goalDone('survive5'); } else survive5 = 0;
@@ -2131,40 +2158,25 @@ function updateHud(dt, t) {
     if (waypoint && Math.hypot(waypoint.x - me.x, waypoint.z - me.z) < 25) { waypoint = null; gpsRoute = null; ui.help('You reached your waypoint.', 3, false); }
     const wk = WEAPONS[me.weapon];
     ui.el.crosshair.classList.toggle('off', me.dead || (!!me.veh && wk.kind !== 'gun') || (!me.veh && wk.melee));
-    if (wanted.stars > 0) ui.help('<b>Wanted!</b> Get out of police sight. While they search, their vision cones show red on the minimap.', 7);
-    if (weather.night > 0.6) ui.help('Night has fallen. Streetlights and headlights are on, and the cops see less in the dark.', 5);
-    if (weather.rain > 0.4) ui.help('Rain makes the roads slippery. Brake earlier.', 5);
     ui.setClock(clockText(), weather.weather, weather.night > 0.5);
     const host = hostUid();
     const list = [{ name: me.name, me: true, host: host === net.uid, stars: wanted.stars }];
     for (const r of remotes.values()) list.push({ name: r.name, host: host === r.uid, stars: r.stars });
     ui.setPlayers(net.room, list, net.online);
   }
-  let prompt = robberyPrompt;
-  if (!me.dead && !prompt) {
-    const st = storeAt(me.veh ? me.veh.x : me.x, me.veh ? me.veh.z : me.z, me.veh ? 7 : 3.2);
-    if (interior.room) prompt = interior.nearExit(me.x, me.z) ? 'E: Leave' : interior.nearCounter(me.x, me.z) && interior.room.kind === 'guns' ? 'E: Buy ammo & loadouts' : interior.nearCounter(me.x, me.z) && interior.room.kind === 'clothes' ? 'E: Try on clothes' : canBuyAtCounter() ? 'E: Buy ammo & drinks · or aim a gun at the clerk to rob' :interior.room.clerk && (interior.room.kind === 'rob' || interior.room.kind === 'casino') && !robberyPrompt ? `Aim a gun at the ${interior.room.kind === 'casino' ? 'cashier' : 'clerk'} (right click) to rob ${interior.room.store.name}` : '';
-    else if (st && st.kind === 'food') prompt = 'E: Buy a hot dog ($8, +30 health)';
-    else if (st && st.kind === 'casino' && !me.veh) prompt = `E: Go into ${st.name}`;
-    else if (st && st.kind === 'meds' && !me.veh) prompt = 'E: Pharmacy (heal $60)';
-    else if (st && st.kind === 'body' && me.veh && !me.veh.T.boat && !me.veh.T.heli) prompt = 'E: Arnett Auto (repairs & upgrades)';
-  }
-  if (!me.dead && !prompt) { const d = doorNear(); if (d) prompt = `E: ${d.label}`; }
-  if (!me.dead && !prompt) {
-    if (me.veh) prompt = '';
-    else if (!me.enter) { const v = nearestVehicle(1.3); if (v) prompt = Math.hypot(v.vx || 0, v.vz || 0) > 3.5 ? '' : `E: ${v.mode === 'traffic' || v.driver ? 'Carjack' : 'Enter'} ${v.T.name}`; }
-  }
+  const prompt = robberyPrompt; // no key hints: the Controls tab explains E, Tab and the rest
   ui.setPrompt(prompt);
   mmT -= dt;
   if (mmT <= 0) {
     mmT = 0.1;
     const flash = Math.floor(t * 4) % 2 ? '#ff1744' : '#2979ff';
-    const blips = [];
-    for (const h of W.places.hospitals) if (Math.abs(h.x - me.x) < 400 && Math.abs(h.z - me.z) < 400) blips.push({ x: h.x, z: h.z, color: '#e53935', size: 6, shape: 'square', label: '+' });
+    // minor places only nearby (they'd crowd the radar); the important ones as before
+    const blips = poiBlips().filter((p) => Math.abs(p.x - me.x) < 150 && Math.abs(p.z - me.z) < 150);
+    for (const h of W.places.hospitals) if (Math.abs(h.x - me.x) < 400 && Math.abs(h.z - me.z) < 400) blips.push({ x: h.x, z: h.z, type: 'hospital' });
     for (const r of remotes.values()) if (!r.dead) blips.push({ x: r.x, z: r.z, color: '#40c4ff', size: 4.5 });
     for (const sb of storeList(false)) blips.push(sb);
-    for (const e of eventBlips()) blips.push(e);
-    for (const s of police.stations()) if (Math.abs(s.x - me.x) < 400 && Math.abs(s.z - me.z) < 400) blips.push({ x: s.x, z: s.z, color: '#2f6fdc', size: 6, shape: 'square', label: '★' });
+    for (const e of eventBlips()) blips.push({ ...e, type: 'event' });
+    for (const s of police.stations()) if (Math.abs(s.x - me.x) < 400 && Math.abs(s.z - me.z) < 400) blips.push({ x: s.x, z: s.z, type: 'police' });
     for (const u of police.cops.values()) if (!police.isDown(u) && !u.parked) { const P = police.posOf(u); blips.push({ x: P.x, z: P.z, color: flash, size: u.kind === 3 ? 6 : u.kind === 2 ? 2.5 : 4 }); }
     const spd = me.veh ? Math.abs(me.veh.speed) : 0;
     ui.drawMinimap({ x: me.veh ? me.veh.x : me.x, z: me.veh ? me.veh.z : me.z, yaw: camYaw }, me, blips, spd > 15 ? 0.75 : 1.1, wanted.search ? cones() : null, waypoint, gpsRoute);

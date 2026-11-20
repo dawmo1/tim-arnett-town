@@ -142,9 +142,9 @@ function bez(P, t) { const u = 1 - t, a = u * u * u, b = 3 * u * u * t, c = 3 * 
 // ---------- per frame ----------
 let turnSeq = 0;
 const queues = new Map(); // all-way stop arrival order: node -> [vehicle]
-const turningAt = (k, me) => traffic.some((o) => o !== me && o.ag.phase === 'turn' && o.ag.turn.node === k);
+const turningAt = (k, me) => traffic.some((o) => o !== me && o.ag && o.ag.phase === 'turn' && o.ag.turn.node === k); // o.ag is null for a patrol car that just joined a chase
 export function bumpTraffic(v) { if (v.ag) { v.ag.speed = 0; v.ag.blockT = Math.max(v.ag.blockT, 1); } }
-export function scareTraffic(x, z, r) { for (const v of traffic) if (Math.hypot(v.x - x, v.z - z) < r) v.ag.panicT = 10 + Math.random() * 6; }
+export function scareTraffic(x, z, r) { for (const v of traffic) if (v.ag && Math.hypot(v.x - x, v.z - z) < r) v.ag.panicT = 10 + Math.random() * 6; }
 
 // obs: [{x, z, r, person, speed}] things to stop for. sirens: [{x, z}] emergency vehicles with sirens on.
 export function updateTraffic(dt, focus, cam, obs, sirens, tSec, opts) {

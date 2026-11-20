@@ -1,5 +1,5 @@
 import * as W from './world.js';
-import { FT, fmtSpeed } from './util.js';
+import { FT, fmtSpeed, fmtDist } from './util.js';
 
 const $ = (id) => document.getElementById(id);
 export const el = {
@@ -10,8 +10,11 @@ export const el = {
   roomInfo: $('roomInfo'), playerList: $('playerList'), help: $('help'), minimap: $('minimap'), hurt: $('hurt'),
   wheel: $('wheel'), wheelName: $('wheelName'), wheelStats: $('wheelStats'), announce: $('announce'), speedo: $('speedo'),
   crosshair: $('crosshair'), clock: $('clock'),
-  cashDelta: $('cashDelta'), vehName: $('vehName'), bottomleft: $('bottomleft'), pauseCash: $('pauseCash'), pauseTime: $('pauseTime'), shopCash: $('shopCash'),
+  cashDelta: $('cashDelta'), vehName: $('vehName'), bottomleft: $('bottomleft'), pauseCash: $('pauseCash'), pauseTime: $('pauseTime'), pauseDay: $('pauseDay'), shopCash: $('shopCash'),
+  spfill: $('spfill'), mmDist: $('mmDist'),
 };
+// the pause menu has its own owner now; its cash/time slots may or may not exist
+const setText = (node, t) => { if (node) node.textContent = t; };
 // restart a one-shot CSS animation; the class drops itself when it ends
 function replay(node, cls) { node.classList.remove(cls); void node.offsetWidth; node.classList.add(cls); }
 for (const n of [el.cashDelta, el.vehName]) n.addEventListener('animationend', () => n.classList.remove('on'));
@@ -74,6 +77,8 @@ let promptHold = 0;
 export function setPrompt(t) { if (performance.now() < promptHold) return; el.prompt.textContent = t || ''; el.prompt.hidden = !t; }
 export function flashPrompt(t) { el.prompt.textContent = t; el.prompt.hidden = false; promptHold = performance.now() + 1500; }
 export function setArmor(a) { el.armorfill.style.width = Math.max(0, Math.min(100, a)) + '%'; }
+// yellow bar under the minimap (GTA's special ability slot): nitro in a car, how drunk you are on foot (0..1)
+export function setSpecial(f) { el.spfill.style.width = Math.round(Math.max(0, Math.min(1, f)) * 100) + '%'; }
 let shownCash = -1, deltaSum = 0, deltaUntil = 0;
 export function setCash(n) {
   if (n === shownCash) return;
@@ -85,7 +90,8 @@ export function setCash(n) {
     el.cashDelta.classList.toggle('down', deltaSum < 0); replay(el.cashDelta, 'on');
   }
   shownCash = n;
-  el.cash.textContent = el.pauseCash.textContent = el.shopCash.textContent = '$' + n.toLocaleString('en-US');
+  const t = '$' + n.toLocaleString('en-US');
+  el.cash.textContent = t; setText(el.pauseCash, t); setText(el.shopCash, t);
 }
 // Top-left help box: short tips, one at a time. Text may contain <kbd>X</kbd>.
 const helpQ = []; let helpT = 0;
@@ -143,8 +149,17 @@ function nextAnnounce() {
   setTimeout(nextAnnounce, 2600);
 }
 
-const WX = { clear: 'Clear', cloudy: 'Cloudy', rain: 'Rain', storm: 'Storm' };
-export function setClock(time, wx, night) { el.clock.textContent = el.pauseTime.textContent = `${time} · ${WX[wx] || wx}${night ? ' · Night' : ''}`; }
+// "Friday 9:41 PM" above the minimap
+const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+let dayIdx = new Date().getDay(), lastHour = -1; // shortcut: weekday counts locally from today's, so players may disagree on the day; upgrade if daynight.js ever exports a day number
+export function setClock(time) { // (main.js also passes weather and night; the HUD no longer shows them)
+  const [h, m] = time.split(':').map(Number);
+  if (h < lastHour) dayIdx = (dayIdx + 1) % 7;
+  lastHour = h;
+  const hm = `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`, t = `${DAYS[dayIdx]} ${hm}`;
+  if (el.clock.textContent !== t) el.clock.textContent = t;
+  setText(el.pauseDay, DAYS[dayIdx]); setText(el.pauseTime, hm);
+}
 let lastVeh = null;
 export function setSpeedo(v, station = '', nitro = 0) {
   // vehicle name, big and bottom-right for a few seconds after getting in (GTA does this)
@@ -152,11 +167,10 @@ export function setSpeedo(v, station = '', nitro = 0) {
   if (!v) { el.speedo.hidden = true; return; }
   el.speedo.hidden = false;
   const alt = v.T.heli ? `<span>Altitude ${Math.round((v.alt ?? v.y) * FT)} ft</span>` : '';
-  const nb = !v.T.bike && !v.T.heli ? `<div id="nitro" title="Nitro"><i style="width:${Math.round(nitro * 100)}%"></i></div>` : '';
   // damage meter: green when healthy, red when it's about to give up
   const hp = Math.max(0, Math.min(1, v.hp / v.T.hp)), hc = hp > 0.6 ? '#7cf29a' : hp > 0.3 ? '#ffc94a' : '#ff5e5b';
   const dm = `<div id="vdmg" title="Damage"><i style="width:${Math.round(hp * 100)}%;background:${hc}"></i></div>`;
-  el.speedo.innerHTML = `<b>${fmtSpeed(v.speed)}</b><small>mph</small>${station ? `<span>${station}</span>` : ''}${alt}${nb}${dm}`;
+  el.speedo.innerHTML = `<b>${fmtSpeed(v.speed)}</b><small>mph</small>${station ? `<span>${station}</span>` : ''}${alt}${dm}`;
 }
 let hitT = 0;
 export function hitMarker(kill) {
@@ -175,7 +189,7 @@ function sector(a0, a1, r0, r1) {
 }
 export function buildWheel(weapons, onPick) {
   const ring = el.wheel.querySelector('.ring');
-  const n = weapons.length, gap = 0.025;
+  const n = weapons.length, gap = 0;
   const svg = document.createElementNS(SVGNS, 'svg');
   svg.setAttribute('viewBox', '-100 -100 200 200'); svg.classList.add('wheelSvg');
   const hubBg = document.createElementNS(SVGNS, 'circle');
@@ -184,16 +198,16 @@ export function buildWheel(weapons, onPick) {
     const mid = -Math.PI / 2 + (i * Math.PI * 2) / n, half = Math.PI / n;
     const g = document.createElementNS(SVGNS, 'g'); g.classList.add('slice');
     const path = document.createElementNS(SVGNS, 'path');
-    path.setAttribute('d', sector(mid - half + gap, mid + half - gap, 50, 97));
-    g.append(path);
-    const ix = Math.cos(mid) * 73, iy = Math.sin(mid) * 73;
+    path.setAttribute('d', sector(mid - half + gap, mid + half - gap, 58, 97));
+    // teal arc along the outer edge, shown on the selected slice
+    const arc = document.createElementNS(SVGNS, 'path');
+    arc.setAttribute('d', sector(mid - half + 0.02, mid + half - 0.02, 93.5, 97)); arc.classList.add('arc');
+    g.append(path, arc);
+    const ix = Math.cos(mid) * 77, iy = Math.sin(mid) * 77;
     const icon = document.createElementNS(SVGNS, 'g');
-    icon.setAttribute('transform', `translate(${(ix - 20).toFixed(1)} ${(iy - 13).toFixed(1)}) scale(0.84)`);
+    icon.setAttribute('transform', `translate(${(ix - 17).toFixed(1)} ${(iy - 8.5).toFixed(1)}) scale(0.7)`);
     icon.innerHTML = ICONS[w.name] || '';
     icon.classList.add('icon'); g.append(icon);
-    const num = document.createElementNS(SVGNS, 'text');
-    num.setAttribute('x', (Math.cos(mid) * 90).toFixed(1)); num.setAttribute('y', (Math.sin(mid) * 90 + 2).toFixed(1));
-    num.textContent = i + 1; num.classList.add('num'); g.append(num);
     g.addEventListener('pointerenter', () => wheelHighlight(i, weapons[i]));
     g.addEventListener('click', () => onPick(i));
     svg.append(g);
@@ -225,8 +239,13 @@ const mm = el.minimap.getContext('2d');
 const SCALE = 0.6; // minimap pixels per metre (before zoom)
 const BASE_S = 0.25;
 let minX = 0, minZ = 0, maxX = 1, maxZ = 1, base = null;
-const ROAD_STYLE = { motor: ['#c3c7cb', 1.2], trunk: ['#b5babe', 1.15], primary: ['#a6acb1', 1.1], secondary: ['#9aa0a5', 1.05], tertiary: ['#8e9499', 1], minor: ['#82888d', 1], residential: ['#82888d', 1], service: ['#6c7277', 0.9] };
-const WATER = '#2c4f6b', LAND = '#3b4247', OFFMAP = '#33393d', BLDG = '#4b5359';
+// GTA V radar palette: slate land, translucent grey roads (wider on highways), blocks barely lighter than
+// the land, water a lighter blue-grey with a pale shoreline. Shared with the pause map. roads: [colour, width factor]
+export const MAP_COLORS = {
+  land: '#2f3842', offmap: '#2b333d', water: '#3e4c5b', shore: '#7c8a98', bldg: '#37414c', route: '#a65cff',
+  roads: { motor: ['rgba(160,167,174,.92)', 1.35], trunk: ['rgba(152,159,166,.9)', 1.25], primary: ['rgba(142,149,156,.86)', 1.1], secondary: ['rgba(142,149,156,.82)', 1], tertiary: ['rgba(142,149,156,.78)', 0.95], minor: ['rgba(142,149,156,.66)', 0.85], residential: ['rgba(142,149,156,.66)', 0.85], service: ['rgba(142,149,156,.5)', 0.7] },
+};
+const ROAD_STYLE = MAP_COLORS.roads, WATER = MAP_COLORS.water, BLDG = MAP_COLORS.bldg;
 export function drawMapBase() {
   const I = W.D.index;
   minX = I.tx0 * 200; maxX = (I.tx1 + 1) * 200; minZ = I.tz0 * 200; maxZ = (I.tz1 + 1) * 200;
@@ -234,15 +253,22 @@ export function drawMapBase() {
   base.width = Math.ceil((maxX - minX) * BASE_S); base.height = Math.ceil((maxZ - minZ) * BASE_S);
   const g = base.getContext('2d');
   // land / water from the coarse grid, smoothed by scaling up
-  const c = W.D.coarse, sm = document.createElement('canvas'); sm.width = c.w; sm.height = c.h;
-  const sg = sm.getContext('2d'), img = sg.createImageData(c.w, c.h);
+  // land as a mask (water left transparent): drawn pale and nudged around first for the shoreline, then land on top
+  const c = W.D.coarse;
   const rgb = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
-  const CW = rgb(WATER), CL = rgb(LAND), CO = rgb(OFFMAP);
-  for (let k = 0; k < c.w * c.h; k++) { const col = c.kind[k] === 1 ? CW : c.kind[k] === 2 ? CO : CL; img.data.set([...col, 255], k * 4); }
-  sg.putImageData(img, 0, 0);
+  const landMask = (colOf) => {
+    const cv = document.createElement('canvas'); cv.width = c.w; cv.height = c.h;
+    const cg = cv.getContext('2d'), img = cg.createImageData(c.w, c.h);
+    for (let k = 0; k < c.w * c.h; k++) if (c.kind[k] !== 1) img.data.set([...colOf(c.kind[k]), 255], k * 4);
+    cg.putImageData(img, 0, 0); return cv;
+  };
+  const SH = rgb(MAP_COLORS.shore), CL = rgb(MAP_COLORS.land), CO = rgb(MAP_COLORS.offmap);
+  const shore = landMask(() => SH), land = landMask((kind) => (kind === 2 ? CO : CL));
   g.fillStyle = WATER; g.fillRect(0, 0, base.width, base.height);
   g.imageSmoothingEnabled = true;
-  g.drawImage(sm, (c.x0 - minX) * BASE_S - c.step * BASE_S / 2, (c.z0 - minZ) * BASE_S - c.step * BASE_S / 2, c.w * c.step * BASE_S, c.h * c.step * BASE_S);
+  const lx = (c.x0 - minX) * BASE_S - c.step * BASE_S / 2, lz = (c.z0 - minZ) * BASE_S - c.step * BASE_S / 2, lw = c.w * c.step * BASE_S, lh = c.h * c.step * BASE_S;
+  for (const [ox, oz] of [[-0.8, 0], [0.8, 0], [0, -0.8], [0, 0.8]]) g.drawImage(shore, lx + ox, lz + oz, lw, lh);
+  g.drawImage(land, lx, lz, lw, lh);
   g.save(); g.scale(BASE_S, BASE_S); g.translate(-minX, -minZ); g.lineCap = 'round'; g.lineJoin = 'round';
   for (const cls of ['service', 'residential', 'minor', 'tertiary', 'secondary', 'primary', 'trunk', 'motor']) {
     const [color, k] = ROAD_STYLE[cls];
@@ -273,7 +299,7 @@ function drawVectors(g, x, z, r, pxPerM) {
 }
 function drawRoute(g, route, pxPerM, from = 0) {
   if (!route || route.length < 2) return;
-  g.strokeStyle = 'rgba(182, 120, 255, 0.95)'; g.lineWidth = 4.5 / pxPerM; g.lineCap = 'round'; g.lineJoin = 'round';
+  g.strokeStyle = MAP_COLORS.route; g.lineWidth = 6 / pxPerM; g.lineCap = 'round'; g.lineJoin = 'round';
   g.beginPath(); g.moveTo(route[from][0], route[from][1]); for (let i = from + 1; i < route.length; i++) g.lineTo(route[i][0], route[i][1]); g.stroke();
 }
 // gang turf: faint coloured circles on both maps
@@ -285,14 +311,80 @@ function drawTurfs(c, lineW) {
     c.beginPath(); c.arc(g.x, g.z, g.r, 0, 7); c.fill(); c.stroke();
   }
 }
+// The minimap canvas is tilted back in CSS (rotateX inside #mmView), so only part of it is on screen:
+// VIS is that part as fractions of the canvas (the narrow bottom edge sets the sides), CY puts the player
+// a little below the middle of what you see.
+const VIS = { x0: 1 / 7, x1: 6 / 7, y0: 0.07, y1: 1 }, CY = 0.64;
+let lastDist = '';
+const MAP_FONT = '"Barlow Condensed", "Arial Narrow", sans-serif';
+// ---------- map blips: GTA-style coloured discs with a white ring and a small white glyph ----------
+// icons draw in a 20x20 box centred on 0,0 (the disc has radius 10); fill/stroke are preset to the ink colour
+const ICON = {
+  text: (t) => (g) => { g.font = `700 14px ${MAP_FONT}`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(t, 0, 1); },
+  gun: (g) => { g.fillRect(-6, -3.5, 12, 3); g.beginPath(); g.moveTo(-5, -1); g.lineTo(-1, -1); g.lineTo(-2.2, 5); g.lineTo(-5.6, 5); g.fill(); },
+  shirt: (g) => { g.beginPath(); for (const [x, y] of [[-2.5, -5], [2.5, -5], [6, -2.5], [4.5, 0.5], [3, -0.5], [3, 5], [-3, 5], [-3, -0.5], [-4.5, 0.5], [-6, -2.5]]) g.lineTo(x, y); g.fill(); },
+  wrench: (g) => { g.lineWidth = 2.6; g.lineCap = 'round'; g.beginPath(); g.moveTo(-4.5, 4.5); g.lineTo(2, -2); g.stroke(); g.lineWidth = 2; g.beginPath(); g.arc(3.2, -3.2, 2.6, 0.8, 5.5); g.stroke(); },
+  cross: (g) => { g.fillRect(-1.8, -5.5, 3.6, 11); g.fillRect(-5.5, -1.8, 11, 3.6); },
+  star: (g) => { g.beginPath(); for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + (i * Math.PI) / 5, r = i % 2 ? 2.5 : 6; g.lineTo(Math.cos(a) * r, Math.sin(a) * r); } g.fill(); },
+  flame: (g) => { g.beginPath(); g.moveTo(0, -6.5); g.quadraticCurveTo(6, -0.5, 3.6, 3.8); g.quadraticCurveTo(0, 7, -3.6, 3.8); g.quadraticCurveTo(-5.5, 0, -1.5, -2.5); g.quadraticCurveTo(-0.5, -4, 0, -6.5); g.fill(); },
+  pump: (g) => { g.fillRect(-5, -5.5, 6.5, 11); g.lineWidth = 1.4; g.beginPath(); g.moveTo(1.5, -3.5); g.lineTo(4.5, -1.5); g.lineTo(4.5, 3.5); g.stroke(); },
+  cart: (g) => { g.lineWidth = 1.5; g.lineJoin = 'round'; g.beginPath(); g.moveTo(-6.5, -4.5); g.lineTo(-4.5, -4.5); g.lineTo(-2.8, 2); g.lineTo(4.5, 2); g.lineTo(5.8, -2.8); g.lineTo(-3.8, -2.8); g.stroke(); g.beginPath(); g.arc(-1.8, 4.4, 1.3, 0, 7); g.arc(3.6, 4.4, 1.3, 0, 7); g.fill(); },
+  food: (g) => {
+    g.lineWidth = 1.2; g.beginPath(); for (const x of [-4.5, -3, -1.5]) { g.moveTo(x, -5.5); g.lineTo(x, -1.5); } g.moveTo(-4.5, -1.5); g.quadraticCurveTo(-3, 0.8, -1.5, -1.5); g.stroke();
+    g.fillRect(-3.8, -0.5, 1.6, 6); g.beginPath(); g.moveTo(2, -5.5); g.quadraticCurveTo(5.5, -3, 4.2, 1); g.lineTo(2, 1); g.fill(); g.fillRect(2, 0.5, 1.6, 5);
+  },
+  cup: (g) => { g.beginPath(); g.moveTo(-5.5, -3); g.lineTo(3, -3); g.lineTo(2, 4.5); g.lineTo(-4.5, 4.5); g.fill(); g.lineWidth = 1.5; g.beginPath(); g.arc(3, 0, 2.3, -1.4, 1.4); g.stroke(); },
+  glass: (g) => { g.beginPath(); g.moveTo(-5.5, -4.5); g.lineTo(5.5, -4.5); g.lineTo(0, 1.5); g.fill(); g.lineWidth = 1.4; g.beginPath(); g.moveTo(0, 1); g.lineTo(0, 5); g.moveTo(-3, 5.2); g.lineTo(3, 5.2); g.stroke(); },
+  bank: (g) => { g.beginPath(); g.moveTo(-6.5, -2); g.lineTo(0, -6); g.lineTo(6.5, -2); g.fill(); for (const x of [-5, -1, 3]) g.fillRect(x, -1, 2, 5); g.fillRect(-6.5, 4.5, 13, 1.6); },
+  tree: (g) => { g.beginPath(); g.arc(0, -1.5, 4.8, 0, 7); g.fill(); g.fillRect(-1, 2, 2, 4.5); },
+  school: (g) => { g.beginPath(); g.moveTo(-7, -2); g.lineTo(0, -5.5); g.lineTo(7, -2); g.lineTo(0, 1.5); g.fill(); g.beginPath(); g.moveTo(-4, -0.5); g.lineTo(-4, 3.5); g.quadraticCurveTo(0, 6, 4, 3.5); g.lineTo(4, -0.5); g.lineTo(0, 1.5); g.fill(); },
+  monument: (g) => { g.beginPath(); g.moveTo(-1.8, 3.5); g.lineTo(-1.2, -4); g.lineTo(0, -6); g.lineTo(1.2, -4); g.lineTo(1.8, 3.5); g.fill(); g.fillRect(-4.5, 3.5, 9, 2.2); },
+  diamond: (g) => { g.beginPath(); g.moveTo(0, -6); g.lineTo(5, 0); g.lineTo(0, 6); g.lineTo(-5, 0); g.fill(); },
+  arrow: (g) => { g.beginPath(); g.moveTo(0, -7); g.lineTo(5.5, 6); g.lineTo(0, 3); g.lineTo(-5.5, 6); g.fill(); },
+};
+// legend order; important = also on the minimap from anywhere (the rest only within ~150 m) and labelled first
+export const BLIP_TYPES = {
+  you: { name: 'You', color: '#20262d', icon: ICON.arrow, fixed: true },
+  waypoint: { name: 'Waypoint', color: MAP_COLORS.route },
+  rob: { name: 'Convenience store', color: '#2fbf4a', icon: ICON.text('$'), important: true },
+  guns: { name: 'Gun store', color: '#d23c30', icon: ICON.gun, important: true },
+  clothes: { name: 'Clothing', color: '#b45ad6', icon: ICON.shirt, important: true },
+  garage: { name: 'Mechanic / garage', color: '#3f8fe0', icon: ICON.wrench, important: true },
+  casino: { name: 'Casino', color: '#d4a017', icon: ICON.diamond, important: true },
+  hospital: { name: 'Hospital', color: '#fff', ink: '#d23c30', icon: ICON.cross, important: true },
+  police: { name: 'Police', color: '#2f6fdc', icon: ICON.star, important: true },
+  fire: { name: 'Fire station', color: '#e8622c', icon: ICON.flame },
+  event: { name: 'Event', color: '#ff9100', icon: ICON.text('!'), important: true },
+  gas: { name: 'Gas station', color: '#7d8a97', icon: ICON.pump },
+  shop: { name: 'Shop', color: '#23a090', icon: ICON.cart },
+  food: { name: 'Restaurant', color: '#e0962c', icon: ICON.food },
+  cafe: { name: 'Cafe', color: '#9a6a45', icon: ICON.cup },
+  bar: { name: 'Bar', color: '#b8427c', icon: ICON.glass },
+  bank: { name: 'Bank', color: '#3d8a5a', icon: ICON.bank },
+  pharmacy: { name: 'Pharmacy', color: '#3fae6a', icon: ICON.cross },
+  park: { name: 'Park', color: '#4f8a3e', icon: ICON.tree },
+  school: { name: 'School', color: '#c9a227', icon: ICON.school },
+  landmark: { name: 'Landmark', color: '#7c6bd0', icon: ICON.monument },
+  player: { name: 'Players', color: '#40c4ff' },
+};
+// one blip: typed blips get their colour + glyph (grey when b.dim); untyped ones (cops, players) keep b.color / b.label
+function drawBlip(g, b, x, y, r) {
+  const T = BLIP_TYPES[b.type];
+  g.fillStyle = b.dim ? '#7a7f87' : T ? T.color : b.color; g.strokeStyle = '#fff'; g.lineWidth = Math.max(1.4, r * 0.24);
+  g.beginPath();
+  if (!T && b.shape === 'square') g.rect(x - r, y - r, r * 2, r * 2); else g.arc(x, y, r, 0, 7);
+  g.fill(); g.stroke();
+  if (T && T.icon) { g.save(); g.translate(x, y); g.scale(r / 10, r / 10); g.fillStyle = g.strokeStyle = T.ink || '#fff'; T.icon(g); g.restore(); }
+  else if (b.label) { g.fillStyle = '#141414'; g.font = `600 ${Math.round(r * 1.8)}px ${MAP_FONT}`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(b.label, x, y + 0.5); }
+}
 export function drawMinimap(view, me, blips, zoom = 1, cones = null, waypoint = null, route = null) {
-  const Wd = el.minimap.width, Ht = el.minimap.height, cx = Wd / 2, cy = Ht * 0.6, k = zoom;
+  const Wd = el.minimap.width, Ht = el.minimap.height, cx = Wd / 2, cy = Ht * CY, k = zoom;
   const alpha = -Math.PI / 2 - Math.atan2(Math.cos(view.yaw), Math.sin(view.yaw));
   const raw = (x, z) => { const dx = (x - view.x) * SCALE * k, dz = (z - view.z) * SCALE * k; return [cx + dx * Math.cos(alpha) - dz * Math.sin(alpha), cy + dx * Math.sin(alpha) + dz * Math.cos(alpha)]; };
   // keep a point inside the frame (for blips that are off the edge)
   const clampPt = ([x, y], m = 8) => {
     const dx = x - cx, dy = y - cy;
-    const sx = dx ? (dx > 0 ? (Wd - m - cx) / dx : (m - cx) / dx) : Infinity, sy = dy ? (dy > 0 ? (Ht - m - cy) / dy : (m - cy) / dy) : Infinity;
+    const sx = dx ? (dx > 0 ? (Wd * VIS.x1 - m - cx) / dx : (Wd * VIS.x0 + m - cx) / dx) : Infinity, sy = dy ? (dy > 0 ? (Ht * VIS.y1 - m - cy) / dy : (Ht * VIS.y0 + m - cy) / dy) : Infinity;
     const t = Math.min(1, sx, sy);
     return [cx + dx * t, cy + dy * t, t < 1];
   };
@@ -302,7 +394,7 @@ export function drawMinimap(view, me, blips, zoom = 1, cones = null, waypoint = 
   const ppm = SCALE * k;
   mm.translate(cx, cy); mm.rotate(alpha); mm.scale(ppm, ppm); mm.translate(-view.x, -view.z);
   if (base) mm.drawImage(base, minX, minZ, base.width / BASE_S, base.height / BASE_S);
-  drawVectors(mm, view.x, view.z, Math.hypot(Wd, Ht) / ppm * 0.75, ppm);
+  drawVectors(mm, view.x, view.z, Math.hypot(Wd / 2, Ht * CY) / ppm, ppm);
   drawTurfs(mm, 2 / ppm);
   drawRoute(mm, route, ppm);
   mm.restore();
@@ -321,18 +413,19 @@ export function drawMinimap(view, me, blips, zoom = 1, cones = null, waypoint = 
     mm.fillStyle = '#b678ff'; mm.strokeStyle = '#000'; mm.lineWidth = 1.5;
     mm.beginPath(); mm.arc(wx, wy, edge ? 5 : 6.5, 0, 7); mm.fill(); mm.stroke();
   }
-  for (const b of blips) {
-    const [x, y] = clampPt(raw(b.x, b.z));
-    mm.fillStyle = b.color; mm.strokeStyle = 'rgba(0,0,0,.65)'; mm.lineWidth = 1.5;
-    mm.beginPath();
-    if (b.shape === 'square') mm.rect(x - b.size, y - b.size, b.size * 2, b.size * 2);
-    else mm.arc(x, y, b.size, 0, 7);
-    mm.fill(); mm.stroke();
-    if (b.label) { mm.fillStyle = '#fff'; mm.font = '12px "Pricedown Bl", Impact, sans-serif'; mm.textAlign = 'center'; mm.textBaseline = 'middle'; mm.fillText(b.label, x, y + 0.5); }
-  }
+  for (const b of blips) { const [x, y] = clampPt(raw(b.x, b.z)); drawBlip(mm, b, x, y, b.type ? 6.5 : b.size); }
   const [nx, ny] = clampPt(raw(view.x, view.z - 100000), 11);
-  mm.fillStyle = 'rgba(8,12,18,.85)'; mm.beginPath(); mm.arc(nx, ny, 8, 0, 7); mm.fill();
-  mm.fillStyle = '#fff'; mm.font = '12px "Pricedown Bl", Impact, sans-serif'; mm.textAlign = 'center'; mm.textBaseline = 'middle'; mm.fillText('N', nx, ny + 0.5);
+  mm.fillStyle = 'rgba(20,24,28,.9)'; mm.beginPath(); mm.arc(nx, ny, 8, 0, 7); mm.fill();
+  mm.fillStyle = '#fff'; mm.font = '600 12px "Barlow Condensed", "Arial Narrow", sans-serif'; mm.textAlign = 'center'; mm.textBaseline = 'middle'; mm.fillText('N', nx, ny + 0.5);
+  // distance left to the waypoint, along the GPS route when there is one
+  let dist = '';
+  if (waypoint) {
+    let d = 0;
+    if (route && route.length > 1) { d = Math.hypot(route[0][0] - view.x, route[0][1] - view.z); for (let i = 1; i < route.length; i++) d += Math.hypot(route[i][0] - route[i - 1][0], route[i][1] - route[i - 1][1]); }
+    else d = Math.hypot(waypoint.x - view.x, waypoint.z - view.z);
+    dist = '↑ ' + fmtDist(d);
+  }
+  if (dist !== lastDist) { lastDist = dist; el.mmDist.textContent = dist; }
   const [px, py] = raw(me.x, me.z);
   const hx = Math.sin(me.h), hz = Math.cos(me.h);
   const ang = Math.atan2(hx * Math.sin(alpha) + hz * Math.cos(alpha), hx * Math.cos(alpha) - hz * Math.sin(alpha));
@@ -342,17 +435,29 @@ export function drawMinimap(view, me, blips, zoom = 1, cones = null, waypoint = 
   mm.restore();
 }
 
-// pause map view: centre + pixels per metre (wheel zooms, drag pans)
-const big = { cx: 0, cz: 0, s: 0, fit: 0, last: null, drag: null, moved: false };
+// pause map view: centre + pixels per metre (wheel zooms, drag pans). w/h = the canvas's CSS size; it fills the pause panel.
+// off = blip types switched off in the legend, hl = the type whose legend row is hovered
+const big = { cx: 0, cz: 0, s: 0, fit: 0, w: el.bigmap.width, h: el.bigmap.height, last: null, drag: null, moved: false, off: new Set(), hl: null };
 const bm = el.bigmap.getContext('2d');
-function bigFitScale() { return Math.min(el.bigmap.width / (maxX - minX), el.bigmap.height / (maxZ - minZ)); }
 export function drawBigMap(me, blips, waypoint, route) {
   big.last = [me, blips, waypoint, route];
-  const Wd = el.bigmap.width, Ht = el.bigmap.height;
-  if (!big.s) { big.fit = bigFitScale(); big.s = big.fit * 2.2; big.cx = me.x; big.cz = me.z; }
+  // match the buffer to the on-screen size (sharp on hi-dpi); a hidden tab keeps the last size
+  const r = el.bigmap.getBoundingClientRect(), dpr = Math.min(devicePixelRatio || 1, 1.5);
+  if (r.width && r.height) {
+    big.w = r.width; big.h = r.height;
+    const bw = Math.round(r.width * dpr), bh = Math.round(r.height * dpr);
+    if (el.bigmap.width !== bw || el.bigmap.height !== bh) { el.bigmap.width = bw; el.bigmap.height = bh; }
+  }
+  const Wd = big.w, Ht = big.h;
+  big.fit = Math.min(Wd / (maxX - minX), Ht / (maxZ - minZ));
+  if (!big.s) { big.s = big.fit * 2.2; big.cx = me.x; big.cz = me.z; }
   const s = big.s;
+  // keep the view on the map: past its edge there is no data (that showed as a blank strip)
+  const keep = (c, lo, hi, half) => (hi - lo <= half * 2 ? (lo + hi) / 2 : Math.max(lo + half, Math.min(hi - half, c)));
+  big.cx = keep(big.cx, minX, maxX, Wd / 2 / s); big.cz = keep(big.cz, minZ, maxZ, Ht / 2 / s);
+  bm.setTransform(el.bigmap.width / Wd, 0, 0, el.bigmap.height / Ht, 0, 0);
   bm.save();
-  bm.fillStyle = WATER; bm.fillRect(0, 0, Wd, Ht);
+  bm.fillStyle = MAP_COLORS.offmap; bm.fillRect(0, 0, Wd, Ht);
   bm.translate(Wd / 2, Ht / 2); bm.scale(s, s); bm.translate(-big.cx, -big.cz);
   if (base) { bm.imageSmoothingEnabled = true; bm.drawImage(base, minX, minZ, base.width / BASE_S, base.height / BASE_S); }
   if (s > 0.45) drawVectors(bm, big.cx, big.cz, Math.hypot(Wd, Ht) / s * 0.55, s);
@@ -360,41 +465,71 @@ export function drawBigMap(me, blips, waypoint, route) {
   drawRoute(bm, route, s);
   bm.restore();
   const P = (x, z) => [Wd / 2 + (x - big.cx) * s, Ht / 2 + (z - big.cz) * s];
-  // neighbourhood names when zoomed out a bit
+  // blips: minor places underneath, important ones on top; hovering a legend row enlarges that type and fades the rest
+  const zoomed = s / big.fit;
+  const shown = [];
   for (const b of blips) {
+    if (b.type && big.off.has(b.type)) continue;
     const [x, y] = P(b.x, b.z);
     if (x < -20 || y < -20 || x > Wd + 20 || y > Ht + 20) continue;
-    bm.fillStyle = b.color; bm.strokeStyle = '#000'; bm.lineWidth = 1.5;
-    bm.beginPath(); if (b.shape === 'square') bm.rect(x - b.size, y - b.size, b.size * 2, b.size * 2); else bm.arc(x, y, b.size, 0, 7); bm.fill(); bm.stroke();
-    if (b.label) { bm.fillStyle = '#fff'; bm.font = '13px "Pricedown Bl", Impact, sans-serif'; bm.textAlign = 'center'; bm.textBaseline = 'middle'; bm.fillText(b.label, x, y + 0.5); }
-    if (b.name && s > big.fit * 1.6) { bm.font = '400 13px "Pricedown Bl", Impact, sans-serif'; bm.textAlign = 'left'; bm.lineWidth = 3; bm.strokeStyle = 'rgba(0,0,0,.75)'; bm.strokeText(b.name, x + 9, y + (b.dy || 1)); bm.fillStyle = '#fff'; bm.fillText(b.name, x + 9, y + (b.dy || 1)); }
+    const T = BLIP_TYPES[b.type], imp = !T || T.important, hl = big.hl && b.type === big.hl;
+    shown.push({ b, x, y, r: (imp ? 7.5 : zoomed > 2 ? 6.5 : 4.5) * (hl ? 1.35 : 1), imp, hl });
   }
-  if (waypoint) { const [x, y] = P(waypoint.x, waypoint.z); bm.fillStyle = '#b678ff'; bm.strokeStyle = '#000'; bm.lineWidth = 1.5; bm.beginPath(); bm.arc(x, y, 8, 0, 7); bm.fill(); bm.stroke(); }
+  shown.sort((a, b) => a.hl - b.hl || a.imp - b.imp);
+  for (const d of shown) { bm.globalAlpha = big.hl && !d.hl ? 0.3 : 1; drawBlip(bm, d.b, d.x, d.y, d.r); }
+  bm.globalAlpha = 1;
+  // names: hovered type first, then important ones, minor places only when zoomed right in; skip any that would overlap
+  const boxes = [];
+  bm.font = `600 15px ${MAP_FONT}`; bm.textAlign = 'left'; bm.textBaseline = 'middle'; bm.lineWidth = 3; bm.strokeStyle = 'rgba(0,0,0,.8)'; bm.fillStyle = '#fff';
+  for (let i = shown.length - 1; i >= 0; i--) {
+    const { b, x, y, r: rr, imp, hl } = shown[i];
+    if (!b.name || big.hl && !hl || !hl && zoomed < (imp ? 1.6 : 4)) continue;
+    const bx = x + rr + 5, w = bm.measureText(b.name).width, box = [bx - 2, y - 9, bx + w + 2, y + 9];
+    if (boxes.some((o) => box[0] < o[2] && box[2] > o[0] && box[1] < o[3] && box[3] > o[1])) continue;
+    boxes.push(box); bm.strokeText(b.name, bx, y + 1); bm.fillText(b.name, bx, y + 1);
+  }
+  if (waypoint && !big.off.has('waypoint')) { const [x, y] = P(waypoint.x, waypoint.z); drawBlip(bm, { type: 'waypoint' }, x, y, 8 * (big.hl === 'waypoint' ? 1.35 : 1)); }
   const [px, py] = P(me.x, me.z);
   bm.save(); bm.translate(px, py); bm.rotate(Math.atan2(Math.cos(me.h), Math.sin(me.h)));
   bm.fillStyle = '#fff'; bm.strokeStyle = '#000'; bm.lineWidth = 2;
-  bm.beginPath(); bm.moveTo(11, 0); bm.lineTo(-7, 7); bm.lineTo(-3, 0); bm.lineTo(-7, -7); bm.closePath(); bm.fill(); bm.stroke();
+  bm.beginPath(); bm.moveTo(12, 0); bm.lineTo(-8, 8); bm.lineTo(-4, 0); bm.lineTo(-8, -8); bm.closePath(); bm.fill(); bm.stroke();
   bm.restore();
-  bm.fillStyle = 'rgba(0,0,0,.55)'; bm.fillRect(8, Ht - 26, 330, 18);
-  bm.fillStyle = '#fff'; bm.font = '14px "Pricedown Bl", Impact, sans-serif'; bm.textAlign = 'left'; bm.textBaseline = 'middle';
-  bm.fillText('Scroll to zoom · drag to move · click to set a waypoint', 14, Ht - 17);
-  bm.textAlign = 'right'; bm.fillStyle = 'rgba(0,0,0,.55)'; bm.fillRect(Wd - 250, Ht - 22, 244, 16);
-  bm.fillStyle = '#fff'; bm.font = '13px "Pricedown Bl", Impact, sans-serif'; bm.fillText('Map data © OpenStreetMap contributors', Wd - 12, Ht - 14);
+  bm.font = `500 13px ${MAP_FONT}`; bm.textAlign = 'right'; bm.fillStyle = 'rgba(255,255,255,.7)';
+  bm.fillText('Map data © OpenStreetMap contributors', Wd - 10, Ht - 12);
 }
-const canvasPt = (ev) => { const r = el.bigmap.getBoundingClientRect(); return [((ev.clientX - r.left) / r.width) * el.bigmap.width, ((ev.clientY - r.top) / r.height) * el.bigmap.height]; };
+const canvasPt = (ev) => { const r = el.bigmap.getBoundingClientRect(); return [ev.clientX - r.left, ev.clientY - r.top]; };
 export function bigMapToWorld(ev) {
   const [x, y] = canvasPt(ev);
-  return { x: big.cx + (x - el.bigmap.width / 2) / big.s, z: big.cz + (y - el.bigmap.height / 2) / big.s };
+  return { x: big.cx + (x - big.w / 2) / big.s, z: big.cz + (y - big.h / 2) / big.s };
 }
 export const bigMapDragged = () => big.moved;
 const redraw = () => big.last && drawBigMap(...big.last);
+addEventListener('resize', () => { if (!el.pause.hidden) redraw(); });
+// legend: one row per blip type with its icon; click toggles the type, hover highlights it
+{
+  const ul = $('mapLegend').querySelector('ul'), dpr = Math.min(devicePixelRatio || 1, 2);
+  for (const [type, T] of Object.entries(BLIP_TYPES)) {
+    const li = document.createElement('li'), row = document.createElement(T.fixed ? 'div' : 'button'), ic = document.createElement('canvas');
+    ic.width = ic.height = 22 * dpr; const g = ic.getContext('2d'); g.scale(dpr, dpr); drawBlip(g, { type }, 11, 11, 9);
+    row.append(ic, T.name); li.append(row); ul.append(li);
+    if (T.fixed) continue;
+    row.setAttribute('aria-pressed', 'true');
+    row.addEventListener('click', () => { const on = big.off.has(type); big.off[on ? 'delete' : 'add'](type); row.setAttribute('aria-pressed', String(on)); redraw(); });
+    row.addEventListener('mouseenter', () => { big.hl = type; redraw(); });
+    row.addEventListener('mouseleave', () => { big.hl = null; redraw(); });
+  }
+}
+// area and street under the cursor, bottom-left of the map
+const mapLoc = $('mapLoc');
+el.bigmap.addEventListener('mousemove', (ev) => { const p = bigMapToWorld(ev), [area, street] = W.areaAt(p.x, p.z); mapLoc.textContent = street ? `${area} · ${street}` : area; mapLoc.hidden = !area; });
+el.bigmap.addEventListener('mouseleave', () => { mapLoc.hidden = true; });
 el.bigmap.addEventListener('wheel', (ev) => {
   ev.preventDefault();
   const p = bigMapToWorld(ev), f = ev.deltaY > 0 ? 1 / 1.25 : 1.25;
   const ns = Math.max(big.fit * 0.9, Math.min(3, big.s * f));
   // keep the point under the cursor still
   const [x, y] = canvasPt(ev);
-  big.s = ns; big.cx = p.x - (x - el.bigmap.width / 2) / ns; big.cz = p.z - (y - el.bigmap.height / 2) / ns;
+  big.s = ns; big.cx = p.x - (x - big.w / 2) / ns; big.cz = p.z - (y - big.h / 2) / ns;
   redraw();
 }, { passive: false });
 el.bigmap.addEventListener('mousedown', (ev) => { big.drag = canvasPt(ev); big.moved = false; });

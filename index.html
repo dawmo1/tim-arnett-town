@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Abril+Fatface&display=swap">
   <link rel="stylesheet" href="https://fonts.cdnfonts.com/css/pricedown">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&display=swap">
   <link rel="stylesheet" href="style.css">
   <script type="importmap">
     { "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/addons/" } }
@@ -54,10 +55,13 @@
 
     <div id="bottomleft">
       <div id="clock"></div>
-      <div id="mmFrame"><canvas id="minimap" width="300" height="190"></canvas></div>
-      <div id="bars">
-        <div class="bar hp"><div id="hpfill"></div></div>
-        <div class="bar armor"><div id="armorfill"></div></div>
+      <div id="mmFrame">
+        <div id="mmView"><canvas id="minimap" width="420" height="330"></canvas><div id="mmDist"></div></div>
+        <div id="bars">
+          <div class="bar hp"><div id="hpfill"></div></div>
+          <div class="bar armor"><div id="armorfill"></div></div>
+          <div class="bar sp"><div id="spfill"></div></div>
+        </div>
       </div>
     </div>
 
@@ -89,21 +93,29 @@
 
     <div id="pause" hidden>
       <div class="pauseTop">
-        <h2>Tim Arnett Town</h2>
-        <div class="pauseInfo"><span id="pauseTime"></span><b id="pauseCash"></b><small id="roomInfo"></small></div>
+        <h2>Tim Arnett Town V</h2>
+        <div class="pauseInfo">
+          <div class="pauseWho"><b id="pauseName"></b><span><span id="pauseDay"></span> <span id="pauseTime"></span></span><b id="pauseCash"></b><small id="roomInfo"></small></div>
+          <i id="pauseFace" aria-hidden="true"></i>
+        </div>
       </div>
       <nav id="pauseTabs" aria-label="Pause menu">
+        <button class="pauseArrow" data-dir="-1" aria-label="Previous tab">&#x2039;</button>
         <button data-tab="map" class="on">Map</button>
-        <button data-tab="goals">Goals</button>
-        <button data-tab="players">Players</button>
-        <button data-tab="controls">Controls</button>
+        <button data-tab="goals">Brief</button>
+        <button data-tab="stats">Stats</button>
         <button data-tab="settings">Settings</button>
+        <button data-tab="controls">Game</button>
+        <button data-tab="players">Online</button>
+        <button class="pauseArrow" data-dir="1" aria-label="Next tab">&#x203a;</button>
       </nav>
       <div class="pauseBody">
         <section data-panel="map">
-          <canvas id="bigmap" width="1000" height="560" aria-label="Map of Davenport. Click to set a waypoint."></canvas>
-          <p class="hint">Click the map to set a waypoint. Click it again to clear it.</p>
+          <canvas id="bigmap" width="1000" height="560" aria-label="Map of Davenport. Click to set a waypoint, click it again to clear it."></canvas>
+          <p id="mapLoc" hidden></p>
+          <aside id="mapLegend" aria-label="Map legend: click a row to show or hide it"><h3>Legend</h3><ul></ul></aside>
         </section>
+        <section data-panel="stats" hidden><ul id="statList"></ul></section>
         <section data-panel="goals" hidden><ul id="goalList"></ul><p class="hint">Rewards are paid in cash. Nothing is saved between sessions.</p></section>
         <section data-panel="players" hidden><ul id="playerList"></ul><p class="hint" id="shareHint"></p></section>
         <section data-panel="controls" hidden>
@@ -144,7 +156,10 @@
           </div>
         </section>
       </div>
-      <button id="resumeBtn">Resume</button>
+      <div class="pauseKeys">
+        <span><kbd>Scroll</kbd> Zoom</span><span><kbd>Click</kbd> Waypoint</span><span><kbd>Q</kbd><kbd>E</kbd> Tabs</span><span><kbd>Enter</kbd> Select</span>
+        <button id="resumeBtn"><kbd>Esc</kbd> Back</button>
+      </div>
     </div>
   </div>
 
