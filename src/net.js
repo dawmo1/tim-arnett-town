@@ -6,7 +6,7 @@ import { firebaseConfig } from './firebase-config.js';
 const V = '10.12.2';
 export const ROOM = 'WORLD';
 export const net = {
-  online: false, uid: 'me', offset: 0, room: ROOM, players: {}, error: '',
+  online: false, uid: 'me', offset: 0, room: ROOM, players: {}, admins: {}, error: '',
   handlers: { player() {}, playerGone() {}, vehicle() {}, vehicleGone() {}, cops() {}, event() {}, chat() {} },
   now() { return Date.now() + this.offset; },
 };
@@ -30,6 +30,7 @@ export async function connect() {
       M.onValue(M.ref(db, '.info/serverTimeOffset'), (s) => { net.offset = s.val() || 0; clearTimeout(t); res(); });
     });
     net.online = true;
+    M.onValue(M.ref(db, 'admins'), (s) => { net.admins = s.val() || {}; }, () => {}); // live: who may use admin commands (rules gate admins/{uid})
     return true;
   } catch (e) {
     console.error(e);
@@ -109,7 +110,36 @@ export function sendEvent(type, data) {
 }
 export function sendChat(name, msg) {
   if (!net.online || !roomRef) { net.handlers.chat({ n: name, m: msg }); return; }
-  M.push(M.child(roomRef, 'chat'), { n: name, m: msg, t: M.serverTimestamp() });
+  M.push(M.child(roomRef, 'chat'), { n: name, m: msg, u: net.uid, t: M.serverTimestamp() });
+}
+
+// ---------- admin ----------
+// The code is checked by the database rules only: adminKeys/{uid} holds your guess, and admins/{uid} = true is
+// accepted only when it equals secret/adminCode (which no client can read). Same anonymous uid = admin after a reload.
+export const isAdmin = () => net.admins[net.uid] === true;
+const denied = (e) => /permission/i.test((e && (e.code || e.message)) || '');
+export async function tryAdminCode(code) {
+  if (!net.online) return false;
+  try {
+    await M.set(M.ref(db, 'adminKeys/' + net.uid), String(code).slice(0, 64));
+    await M.set(M.ref(db, 'admins/' + net.uid), true);
+    net.admins = { ...net.admins, [net.uid]: true }; // don't wait for the listener
+    return true;
+  } catch (e) { if (denied(e)) return false; throw e; }
+}
+export async function adminLogout() {
+  if (!net.online) return;
+  await M.remove(M.ref(db, 'admins/' + net.uid));
+  await M.remove(M.ref(db, 'adminKeys/' + net.uid)).catch(() => {});
+  const a = { ...net.admins }; delete a[net.uid]; net.admins = a;
+}
+// admins may delete any chat message (rules): one multi-path update, each child checked on its own
+export async function clearChat() {
+  if (!net.online || !roomRef) return 0;
+  const chat = M.child(roomRef, 'chat'), all = await M.get(chat), del = {};
+  all.forEach((c) => { del[c.key] = null; });
+  if (Object.keys(del).length) await M.update(chat, del);
+  return Object.keys(del).length;
 }
 
 // The police are run per group: playing players chained together within ~1.2 km share one host (the one who

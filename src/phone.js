@@ -399,7 +399,7 @@ export function initPhone(c) {
   root = document.createElement('div'); root.id = 'phone'; root.setAttribute('aria-label', 'Phone');
   root.innerHTML = '<div class="scr"><div class="bar"><i>▂▄▆█ DAV</i><i class="t"></i><i>▮▮▮▯</i></div><div class="hd"></div><div class="bd"></div><div class="note" hidden></div></div>';
   scr = root.querySelector('.scr'); head = root.querySelector('.hd'); body = root.querySelector('.bd');
-  scr.style.backgroundImage = `url(assets/load/art${1 + Math.floor(Math.random() * 6)}.jpg)`;
+  scr.style.backgroundImage = `url(assets/load/art${1 + Math.floor(Math.random() * 10)}.jpg)`;
   const hud = document.getElementById('hud'), shop = document.getElementById('shop');
   if (shop && shop.parentNode === hud) hud.insertBefore(root, shop); else (hud || document.body).append(root); // under the pause menu
   root.addEventListener('mousedown', (e) => e.preventDefault()); // keep keyboard focus on the game

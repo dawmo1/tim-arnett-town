@@ -20,7 +20,7 @@
     <div class="slides"></div>
     <script>
       // pictures come out of a shuffled bag (kept between visits), so you see them all, in a new order, before any repeats
-      window.tatNextArt = (n = 6) => {
+      window.tatNextArt = (n = 10) => {
         let bag = []; try { bag = JSON.parse(localStorage.getItem('tat-bag') || '[]').filter((i) => i < n); } catch { /* private mode */ }
         if (!bag.length) { bag = [...Array(n).keys()]; for (let i = n - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [bag[i], bag[j]] = [bag[j], bag[i]]; } }
         const i = bag.shift(); try { localStorage.setItem('tat-bag', JSON.stringify(bag)); } catch { /* ignore */ }
@@ -141,6 +141,7 @@
             <dt>G / H</dt><dd>Say hi / insult someone · H while driving: horn</dd>
             <dt>N</dt><dd>Change radio station</dd>
             <dt>T</dt><dd>Chat</dd>
+            <dt>~</dt><dd>Console: type help · Tab completes · ↑ ↓ history · Esc closes</dd>
             <dt>E (in bars, casino)</dt><dd>Drinks at the counter · play pool, darts, slots, blackjack, roulette</dd>
             <dt>Minigames</dt><dd>Space spin / throw · H hit, S stand, D double · R rebet, C clear · Shift steady aim · ← → bet · Esc leave</dd>
             <dt>E (Arnett Auto, in a car)</dt><dd>Mod shop: paint, wheels, tint, neon, horn, plate, performance, save your car</dd>

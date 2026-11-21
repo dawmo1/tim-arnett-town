@@ -473,3 +473,18 @@ button { font: inherit; }
 /* robbery progress bar inside the prompt box */
 #prompt .pbar { display: block; height: 6px; margin-top: 6px; background: rgba(255,255,255,.18); }
 #prompt .pbar b { display: block; height: 100%; background: #8fe38a; transition: width .2s; }
+
+/* ---------- ~ console (admin.js) ---------- */
+#console { position: fixed; left: 0; right: 0; top: 0; z-index: 90; height: min(46vh, 420px); display: flex; flex-direction: column; background: rgba(6, 9, 14, .9); border-bottom: 3px solid var(--accent); box-shadow: 0 8px 30px rgba(0,0,0,.5); font: 15px/1.35 ui-monospace, Menlo, Consolas, monospace; font-size-adjust: none; letter-spacing: 0; animation: conDrop .14s ease-out; }
+@keyframes conDrop { from { transform: translateY(-30%); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { #console { animation: none; } }
+#console .conHead { font: 400 26px/1 var(--display); letter-spacing: 1px; text-transform: uppercase; color: var(--accent); padding: 10px 16px 6px; -webkit-text-stroke: 1px #000; paint-order: stroke fill; }
+#console .conHead small { font: 13px ui-monospace, Menlo, monospace; color: var(--muted); -webkit-text-stroke: 0; text-transform: none; margin-left: 10px; }
+#console .conOut { flex: 1; overflow-y: auto; list-style: none; margin: 0; padding: 4px 16px; color: #dfe6ec; overflow-wrap: anywhere; white-space: pre-wrap; }
+#console .conOut .cmd { color: #fff; font-weight: 700; }
+#console .conOut .ok { color: var(--cash); }
+#console .conOut .err { color: #ff7b7b; }
+#console .conOut .dim { color: var(--muted); }
+#console .conIn { margin: 6px 12px 12px; padding: 8px 10px; font: inherit; color: #fff; background: rgba(0,0,0,.7); border: 2px solid #fff; outline: none; }
+#console .conIn:focus-visible { border-color: var(--accent); }
+.admBadge { display: inline-block; margin-right: 5px; padding: 1px 5px 0; font: 700 11px/1.4 ui-sans-serif, system-ui, sans-serif; font-style: normal; letter-spacing: .5px; text-transform: uppercase; color: #000; background: var(--accent); vertical-align: 2px; text-shadow: none; }

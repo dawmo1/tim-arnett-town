@@ -65,9 +65,11 @@ export function addFeed(text) {
   while (el.feed.children.length > 5) el.feed.lastChild.remove();
   setTimeout(() => li.remove(), 8000);
 }
-export function addChat(name, msg) {
+export const adminBadge = () => Object.assign(document.createElement('i'), { className: 'admBadge', textContent: 'Admin' });
+export function addChat(name, msg, admin = false) {
   const li = document.createElement('li');
   const b = document.createElement('b'); b.textContent = name + ': ';
+  if (admin) b.prepend(adminBadge());
   li.append(b, document.createTextNode(msg));
   el.chatLog.append(li);
   while (el.chatLog.children.length > 8) el.chatLog.firstChild.remove();
@@ -127,6 +129,7 @@ export function renderPlayers(ul, list) {
     const li = document.createElement('li'), b = document.createElement('b'), sp = document.createElement('span');
     li.classList.toggle('me', !!p.me);
     b.textContent = p.name + (p.stars ? ' ' + '★'.repeat(p.stars) : '');
+    if (p.admin) b.append(' ', adminBadge());
     sp.textContent = p.playing ? [p.area, p.host ? 'runs the police' : ''].filter(Boolean).join(' · ') || 'Playing' : 'In the menu';
     li.append(b, sp); ul.append(li);
   }

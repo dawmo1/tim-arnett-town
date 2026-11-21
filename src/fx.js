@@ -467,14 +467,7 @@ function loopNoise(type, freq, q = 1) {
 export function setAmbient(v) {
   if (!ac) return;
   if (!amb) {
-    amb = { hum: loopNoise('lowpass', 220), rain: loopNoise('highpass', 1800), waves: loopNoise('bandpass', 420, 0.6) };
-    // crickets: a high tone chopped on and off very fast
-    const o = ac.createOscillator(), am = ac.createOscillator(), amg = ac.createGain(), g = ac.createGain();
-    o.frequency.value = 4400; am.frequency.value = 28; amg.gain.value = 0.5;
-    const pulse = ac.createGain(); pulse.gain.value = 0.5;
-    am.connect(amg); amg.connect(pulse.gain); o.connect(pulse); pulse.connect(g); g.gain.value = 0; g.connect(out());
-    o.start(); am.start();
-    amb.crickets = g; amb.birdT = 0;
+    amb = { hum: loopNoise('lowpass', 220), rain: loopNoise('highpass', 1800), waves: loopNoise('bandpass', 420, 0.6), birdT: 0 };
     amb.crowd = loopNoise('bandpass', 700, 1.4); amb.wind = loopNoise('lowpass', 380, 0.7); amb.work = loopNoise('bandpass', 2300, 4);
   }
   const t = ac.currentTime;
@@ -482,7 +475,11 @@ export function setAmbient(v) {
   amb.rain.gain.setTargetAtTime(0.12 * v.rain, t, 0.5);
   // waves swell and fade
   amb.waves.gain.setTargetAtTime(0.09 * v.waves * (0.6 + 0.4 * Math.sin(t * 0.7)), t, 0.4);
-  amb.crickets.gain.setTargetAtTime(0.006 * v.crickets, t, 0.8);
+  // crickets: now and then a soft, short chirp at a slightly different pitch (a held tone just sounded like ringing ears)
+  if (v.crickets > 0.2 && Math.random() < 0.01 * v.crickets) {
+    const f = 3600 + Math.random() * 1400, n = 2 + ((Math.random() * 3) | 0), vol = 0.004 + 0.004 * v.crickets * Math.random();
+    for (let i = 0; i < n; i++) tone('sine', f, 0.025, vol, i * 0.055);
+  }
   // crowd murmur, wind gusts in storms, a jackhammer/compressor near road crews
   amb.crowd.gain.setTargetAtTime(0.045 * (v.crowd || 0) * (0.75 + 0.25 * Math.sin(t * 1.3)), t, 0.6);
   amb.wind.gain.setTargetAtTime(0.11 * (v.wind || 0) * (0.5 + 0.5 * Math.sin(t * 0.37) * Math.sin(t * 0.91)), t, 0.4);
@@ -561,7 +558,8 @@ const ENGINE = {
 let eng = null;
 export function setEngine(kind, rpm, load) {
   if (!ac) return;
-  if (!kind) { if (eng) eng.g.gain.setTargetAtTime(0, ac.currentTime, 0.15); if (loops) { setScreech(0); setScrape(0); setTurbo(0, false); } return; }
+  // the burble LFO feeds the gain directly, so it has to go to zero too or a rumble keeps going after you get out
+  if (!kind) { if (eng) { eng.g.gain.setTargetAtTime(0, ac.currentTime, 0.15); eng.lg.gain.setTargetAtTime(0, ac.currentTime, 0.15); } if (loops) { setScreech(0); setScrape(0); setTurbo(0, false); } return; }
   const P = ENGINE[kind] || ENGINE.car;
   if (!eng || eng.kind !== kind) {
     if (eng) { eng.g.gain.setTargetAtTime(0, ac.currentTime, 0.05); const old = eng; setTimeout(() => { try { old.o1.stop(); old.o2.stop(); old.lfo.stop(); } catch { /* already stopped */ } }, 400); }

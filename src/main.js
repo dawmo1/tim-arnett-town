@@ -42,6 +42,7 @@ import * as garage from './garage.js';
 import { applyMods, modsOf, horn as modHorn, armorMul } from './carmods.js';
 import * as phone from './phone.js';
 import * as minigames from './minigames/index.js';
+import { adm, initAdmin, isOpen as consoleOpen, openConsole, onAdminEvent } from './admin.js';
 
 // Everyone owns every weapon (price is unused). mag/ammoPack: magazine size and rounds per purchase; ammoPrice: cost of one ammoPack
 const WEAPONS = [
@@ -306,6 +307,7 @@ const keys = new Set();
 let mouseDown = false, clicked = false, locked = false, typing = false;
 let camYaw = 0, camPitch = 0.22, lastMouse = 0;
 addEventListener('keydown', (e) => {
+  if (consoleOpen()) return; // its input handles its own keys
   if (typing) {
     if (e.key === 'Enter') { const m = ui.el.chatInput.value.trim(); if (m) sendChat(me.name, m.slice(0, 120)); closeChat(); }
     else if (e.key === 'Escape') closeChat();
@@ -314,6 +316,7 @@ addEventListener('keydown', (e) => {
   if (!playing) return;
   if (shopOpen && (e.key === 'Escape' || e.code === 'KeyE') && !e.repeat) { e.preventDefault(); closeShop(); return; }
   if (paused) { pauseKey(e); return; }
+  if (e.code === 'Backquote' && !e.repeat && !minigames.isOpen()) { e.preventDefault(); keys.clear(); mouseDown = false; aiming = false; closeWheel(false); document.exitPointerLock?.(); openConsole(); return; }
   if (blackedOut() && e.key !== 'Escape') { e.preventDefault(); return; } // passed out: no moving, shooting or using things
   if (phone.key(e)) { e.preventDefault(); mouseDown = false; aiming = false; me.lockOn = null; return; } // phone up: arrows / Enter / Backspace / Esc belong to it; drop held fire/aim
   if (e.key === 'Escape' && !locked) { openPause(); return; }
@@ -334,12 +337,12 @@ addEventListener('keydown', (e) => {
 });
 addEventListener('keyup', (e) => { keys.delete(e.code); if ((e.code === 'Tab' || e.code === 'KeyQ') && wheelOpen) closeWheel(true); });
 addEventListener('blur', () => { keys.clear(); mouseDown = false; });
-canvas.addEventListener('click', () => { if (playing && !typing) { lockMouse(); fx.unlockAudio(); } });
+canvas.addEventListener('click', () => { if (playing && !typing && !consoleOpen()) { lockMouse(); fx.unlockAudio(); } });
 document.addEventListener('pointerlockchange', () => {
   locked = document.pointerLockElement === canvas;
   if (!locked) mouseDown = false;
   if (locked) closePause();
-  else if (playing && !typing && !wheelOpen && !shopOpen && !phone.unlocked() && !minigames.isOpen()) openPause(); // Esc with the phone up only backs the phone
+  else if (playing && !typing && !consoleOpen() && !wheelOpen && !shopOpen && !phone.unlocked() && !minigames.isOpen()) openPause(); // Esc with the phone up only backs the phone
 });
 addEventListener('mousemove', (e) => {
   if (!locked) return;
@@ -593,7 +596,7 @@ function askName() {
   }));
 }
 const connecting = connect().then(async (ok) => {
-  netStatus.textContent = ok ? 'Everyone plays in one world. Chat here or with T in the game.' : net.error;
+  netStatus.textContent = kickNote() || (ok ? 'Everyone plays in one world. Chat here or with T in the game.' : net.error);
   profile = await loadProfile();
   if (profile && profile.pos && typeof profile.pos.x === 'number') savedPos = profile.pos;
   me.name = storedName || cleanName(profile && profile.n) || randomName();
@@ -630,6 +633,7 @@ addEventListener('keydown', (e) => {
 });
 playBtn.addEventListener('click', async () => {
   if (!document.getElementById('namePrompt').hidden) return;
+  if (kickNote()) { netStatus.textContent = kickNote(); return; }
   playBtn.disabled = true; playBtn.textContent = 'Joining…';
   await connecting;
   playBtn.textContent = `Loading ${startI === 0 ? (savedPos ? 'your spot' : 'the Quad Cities') : startOpts[startI]}…`;
@@ -664,9 +668,10 @@ playBtn.addEventListener('click', async () => {
 const mmChat = document.getElementById('mmChat'), mmChatInput = document.getElementById('mmChatInput');
 net.handlers.chat = (c) => {
   if (!c) return;
-  const n = String(c.n || '?').slice(0, 16), m = String(c.m || '').slice(0, 120);
-  ui.addChat(n, m);
+  const n = String(c.n || '?').slice(0, 16), m = String(c.m || '').slice(0, 120), admin = !!c.u && net.admins[c.u] === true;
+  ui.addChat(n, m, admin);
   const li = document.createElement('li'), b = document.createElement('b'); b.textContent = n + ':';
+  if (admin) b.prepend(ui.adminBadge());
   li.append(b, document.createTextNode(m)); mmChat.append(li);
   while (mmChat.children.length > 50) mmChat.firstChild.remove();
   mmChat.scrollTop = mmChat.scrollHeight;
@@ -682,9 +687,9 @@ function playerRows() {
   for (const [uid, p] of Object.entries(net.players)) {
     if (!p) continue;
     const s = Array.isArray(p.s) ? p.s : null, mine = uid === net.uid;
-    list.push({ name: mine ? me.name : String(p.n || '?').slice(0, 16), me: mine, playing: mine ? playing : !!s, host: !!s && host === uid, stars: mine ? (playing ? wanted.stars : 0) : (s && s[7]) || 0, area: String(p.a || '').slice(0, 40) });
+    list.push({ name: mine ? me.name : String(p.n || '?').slice(0, 16), me: mine, playing: mine ? playing : !!s, host: !!s && host === uid, admin: net.admins[uid] === true, stars: mine ? (playing ? wanted.stars : 0) : (s && s[7]) || 0, area: String(p.a || '').slice(0, 40) });
   }
-  if (!list.some((p) => p.me)) list.unshift({ name: me.name, me: true, playing, host: false, stars: wanted.stars, area: '' });
+  if (!list.some((p) => p.me)) list.unshift({ name: me.name, me: true, playing, host: false, admin: net.admins[net.uid] === true, stars: wanted.stars, area: '' });
   return list.sort((a, b) => b.me - a.me || b.playing - a.playing || a.name.localeCompare(b.name));
 }
 // Settings: Name (shared by the main menu and the pause menu); updates your presence live
@@ -790,6 +795,7 @@ net.handlers.event = (e) => {
     case 'boom': explode(e.x, e.y, e.z, String(e.by || 'an explosion'), e.bu, false); break;
     case 'nade': spawnNade({ x: e.x, y: e.y, z: e.z, vx: e.vx, vy: e.vy, vz: e.vz, t: e.k === 'molotov' ? 6 : e.k === 'rocket' ? 4 : 2.4, mine: false, kind: e.k || 'nade' }); break;
     case 'kill': ui.addFeed(String(e.text || '').slice(0, 80)); if (e.ku === net.uid) report('kill'); break;
+    case 'adm': if (net.admins[e.from] === true) onAdminEvent(e); break; // the rules make from = the sender's real uid
     case 'jack': if (e.to === net.uid && me.veh && me.veh.id === e.id) { me.veh.driver = e.from; ejectMe(); ui.addFeed('Someone stole your ride!'); } break;
   }
 };
@@ -1019,7 +1025,7 @@ function hurtWalker(w, dmg, dx, dz, p, force = 3, byNpc = false) {
 }
 // imp (optional): a push like {x, y, z}; big pushes knock you over
 function damageMe(dmg, by, bu, imp) {
-  if (me.dead || dmg <= 0) return;
+  if (me.dead || dmg <= 0 || adm.god) return;
   dmg *= 0.45; // the player is tougher than everyone else (about 2.2x the health, bar still reads 0-100)
   if (me.armor > 0) { const soak = Math.min(me.armor, dmg * 0.7); me.armor -= soak; dmg -= soak; }
   me.hp -= dmg; me.lastBy = by; me.lastByUid = bu || '';
@@ -1707,12 +1713,13 @@ function updatePlayer(dt) {
   }
   if (me.rag) { ragdollUpdate(dt); me.vx = (me.x - px) / dt; me.vz = (me.z - pz) / dt; return; }
   if (me.swing > 0) me.swing = Math.max(0, me.swing - dt * 3);
-  const fwd = (keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0) - (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0);
-  const side = (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) - (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0);
-  if (me.seat) rideUpdate(dt); else if (me.veh) driveUpdate(dt, fwd, side); else footUpdate(dt, fwd, side);
+  const still = adm.frozen ? 0 : 1; // frozen by an admin: no moving or shooting
+  const fwd = still * ((keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0) - (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0));
+  const side = still * ((keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) - (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0));
+  if (me.seat) rideUpdate(dt); else if (me.veh) driveUpdate(dt, fwd, side); else if (adm.fly) flyUpdate(dt, fwd, side); else footUpdate(dt, fwd, side);
   if (!me.veh) { me.vx = (me.x - px) / dt; me.vz = (me.z - pz) / dt; }
   const w = WEAPONS[me.weapon];
-  const wantFire = locked && (w.auto ? mouseDown : clicked);
+  const wantFire = locked && still && (w.auto ? mouseDown : clicked);
   clicked = false;
   if (wantFire && me.cd <= 0 && !me.dead && !me.swim && !(me.veh && w.melee)) fire(w);
 }
@@ -1792,7 +1799,7 @@ function footUpdate(dt, fwd, side) {
     return;
   }
   const crouch = !!me.crouch && !me.swim;
-  const speed = me.swim ? 2.6 : aiming ? 2.6 : crouch ? 2.0 : sprint ? 8 : 4.5;
+  const speed = (me.swim ? 2.6 : aiming ? 2.6 : crouch ? 2.0 : sprint ? 8 : 4.5) * adm.speed;
   if (sprint && crouch && fwd) me.crouch = false;
   const rx = -Math.cos(camYaw), rz = Math.sin(camYaw);
   let mx = Math.sin(camYaw) * fwd + rx * side, mz = Math.cos(camYaw) * fwd + rz * side;
@@ -1824,13 +1831,13 @@ function footUpdate(dt, fwd, side) {
     if (moved && vs > 6 && me.hitCd <= 0 && (v.mode === 'traffic')) { damageMe(vs * 2.5, 'traffic', '', { x: v.vx * 0.8, y: 3.5, z: v.vz * 0.8 }); me.hitCd = 1; }
   }
   const land = !!interior.room || W.isLand(me.x, me.z);
-  me.vy -= 20 * dt;
+  me.vy -= 20 * adm.gravity * dt;
   me.y += me.vy * dt;
   if (land) {
     me.swim = false;
     const gh = interior.room ? interior.room.y : W.surfaceHeight(me.x, me.z, me.y); // roofs count when you're on them
     if (me.y <= gh + 0.05 && me.vy <= 0) { me.y = gh; me.vy = 0; me.grounded = true; } else me.grounded = false;
-    if (me.grounded && keys.has('Space') && !me.move) { if (!tryClimb()) { me.vy = 6.5; me.grounded = false; me.crouch = false; } }
+    if (me.grounded && keys.has('Space') && !me.move) { if (!tryClimb()) { me.vy = 6.5 * adm.jump; me.grounded = false; me.crouch = false; } }
   } else {
     if (me.y <= W.SWIM_Y) { me.y = W.SWIM_Y; me.vy = 0; me.swim = true; }
     me.grounded = false;
@@ -1855,6 +1862,17 @@ function footUpdate(dt, fwd, side) {
   animateCharacter(me.ch, dt, { crouch: crouch && !me.inCover && !aimPose, cover: me.inCover && !aimPose, speed: aimPose ? Math.min(me.moveSpeed, 3) : me.moveSpeed, aim: aimPose, swim: me.swim, swing: me.kick && wpn.name === 'Fists' ? 0 : me.swing, punch: me.kick && wpn.name === 'Fists' && me.swing > 0 ? { i: 4, t: 0.22 * Math.sin((1 - me.swing) * Math.PI) } : undefined, weapon: me.swim ? 'none' : wk, wmodel: me.swim ? null : wpn.model, rifle: wpn.long, recoil: me.recoil, reload: me.reloadT > 0 ? 1 - me.reloadT / (wpn.name === 'Shotgun' ? 1.8 : 1.3) : 0, pitch: aimPose ? -camPitch * 57 : 0, carry: !aimPose && wpn.long });
 }
 
+// admin noclip: fly where the camera looks, through everything. Space up, Shift down, Ctrl fast.
+function flyUpdate(dt, fwd, side) {
+  const sp = (keys.has('ControlLeft') || keys.has('ControlRight') ? 60 : 18) * adm.speed, cp = Math.cos(camPitch);
+  const up = (keys.has('Space') ? 1 : 0) - (keys.has('ShiftLeft') || keys.has('ShiftRight') ? 1 : 0);
+  me.x += (Math.sin(camYaw) * cp * fwd - Math.cos(camYaw) * side) * sp * dt;
+  me.z += (Math.cos(camYaw) * cp * fwd + Math.sin(camYaw) * side) * sp * dt;
+  me.y = Math.max(W.SWIM_Y - 30, me.y + (-Math.sin(camPitch) * fwd + up) * sp * dt);
+  me.vy = 0; me.h = camYaw; me.swim = false; me.grounded = false; me.move = null; me.moveSpeed = 0; me.netPose = 0; me.netK = 0;
+  me.ch.g.visible = true; me.ch.g.position.set(me.x, me.y, me.z); me.ch.g.rotation.set(0, me.h, 0);
+  animateCharacter(me.ch, dt, { speed: 0, weapon: WEAPONS[me.weapon].kind, wmodel: WEAPONS[me.weapon].model });
+}
 function driveUpdate(dt, fwd, side) {
   const v = me.veh;
   const pre = { vx: v.vx, vz: v.vz, speed: v.speed };
@@ -2194,6 +2212,55 @@ function deliverCar(ti, label, color = [0xc62828, 0x1565c0, 0x111214, 0xf2f2f0, 
   setTimeout(() => { if (v.personal === undefined) v.keep = false; }, 120000); // personal cars (garage.js) stay put
   return v;
 }
+// ---------- ~ console / admin commands (admin.js) ----------
+async function teleport(x, z, exact) {
+  if (!playing || me.dead) return;
+  await loading(true, '', 'fade');
+  let sp = { x, z };
+  if (!exact) { await W.ensureRoads(x - 500, z - 500, x + 500, z + 500); sp = W.sidewalkSpot({ x, z, r: 60 }) || sp; } // a place name: the nearest sidewalk
+  await W.preload(sp.x, sp.z, 200, loadProgress);
+  manageParked(0, sp.x, sp.z, true);
+  const y = W.isLand(sp.x, sp.z) ? W.groundHeight(sp.x, sp.z) : W.SWIM_Y, v = !me.seat && me.veh;
+  if (v) { v.x = sp.x; v.z = sp.z; v.y = y; v.vx = v.vz = v.speed = 0; writeVeh(v, true); me.x = v.x; me.z = v.z; }
+  else {
+    if (me.veh) ejectMe();
+    if (me.ch.rag) release(me.ch);
+    interior.leave(); me.outside = null; me.rag = null; me.move = null; me.enter = null;
+    me.x = sp.x; me.z = sp.z; me.y = y; me.vy = 0;
+  }
+  setTimeout(() => loading(false), 300);
+}
+function spawnCar(ti) {
+  const d = 3 + TYPES[ti].len / 2, x = me.x + Math.sin(camYaw) * d, z = me.z + Math.cos(camYaw) * d;
+  const v = makeVehicle(newId('d'), ti, [0xc62828, 0x1565c0, 0x111214, 0xf2f2f0, 0xe0a526][Math.floor(Math.random() * 5)], { x, z, h: camYaw });
+  v.stolenOnce = true; v.keep = true; scene.add(v.mesh); vehicles.push(v); vehById.set(v.id, v);
+  setTimeout(() => { if (v.personal === undefined) v.keep = false; }, 120000);
+}
+function explodeTarget() {
+  const { o, d } = aimRay(), hit = raycast(o, d, 200);
+  let v = hit.kind === 'veh' ? hit.ref : null, bd = 40;
+  if (!v) for (const c of vehicles) { const dd = Math.hypot(c.x - me.x, c.z - me.z); if (c !== me.veh && !c.exploded && dd < bd) { bd = dd; v = c; } }
+  if (!v) return '';
+  explodeVehicle(v); return v.T.name;
+}
+const nearMe = (o, r) => Math.hypot(o.x - me.x, o.z - me.z) < r;
+const kickNote = () => {
+  let k = null; try { k = JSON.parse(localStorage.getItem('tat-kick') || 'null'); } catch { /* private mode */ }
+  const left = k ? Math.ceil((k.until - Date.now()) / 1000) : 0;
+  return left > 0 ? `Kicked by an admin${k.reason ? ': ' + String(k.reason).slice(0, 80) : ''}. You can rejoin in ${left} s.` : '';
+};
+initAdmin({
+  me, WEAPONS, eco, wanted, resetWanted, police, refreshWeaponHud, teleport, spawnCar, repairCar, explodeTarget,
+  playing: () => playing, waypoint: () => waypoint,
+  killMe: () => { me.lastBy = ''; me.lastByUid = ''; die(); },
+  killPeds: (r) => { let n = 0; for (const w of walkers) if (!w.dead && nearMe(w, r)) { hurtWalker(w, 999, 0, 0, null, 3, true); n++; } return n; },
+  clearCops: () => { police.clearAll(); resetWanted(); }, // shortcut: on a non-host the host's cops sync back in
+  clearTraffic: (r) => { let n = 0; for (const v of [...vehicles]) if (v.mode === 'traffic' && v !== me.veh && nearMe(v, r)) { v.mode = 'free'; resetVehicle(v); n++; } return n; },
+  clearChatLog: () => { ui.el.chatLog.innerHTML = ''; mmChat.innerHTML = ''; },
+  // shortcut: the block lives in this browser's localStorage, so a modified client or cleared storage gets around it
+  kick: (reason) => { try { localStorage.setItem('tat-kick', JSON.stringify({ until: Date.now() + 120000, reason })); } catch { /* private mode */ } saveNow(); location.reload(); },
+  closed: () => { if (playing && !paused && !shopOpen) lockMouse(); },
+});
 let shopOpen = false;
 function openShop(title, items, rebuild) { // rebuild: () => items, re-run after each purchase so counts stay current
   shopOpen = true; paused = true; keys.clear(); mouseDown = false;
@@ -2244,6 +2311,12 @@ function spawnCamera(dt, tx, ty, tz, lx, ly, lz) {
   if (k >= 1) spawnCam = null;
 }
 function updateCamera(dt) {
+  const spec = adm.spectate && remotes.get(adm.spectate);
+  if (spec) { // admin spectate: a chase cam on them, the mouse still turns it
+    const cp = Math.cos(camPitch), d = spec.vehObj ? 9 : 5, ty = spec.y + (spec.vehObj ? 2 : 1.6);
+    camera.position.set(spec.x - Math.sin(camYaw) * cp * d, ty + Math.sin(camPitch) * d, spec.z - Math.cos(camYaw) * cp * d);
+    camera.lookAt(spec.x, ty, spec.z); followSun(spec.x, spec.y, spec.z); return;
+  } else if (adm.spectate && !net.players[adm.spectate]) { adm.spectate = null; ui.addFeed('Spectate ended: they left'); }
   if (garage.shopCam(camera, dt)) { followSun(me.veh ? me.veh.x : me.x, me.y, me.veh ? me.veh.z : me.z); return; } // Arnett Auto orbit
   const spd = me.veh ? Math.abs(me.veh.speed) : 0;
   const aimZoom = aiming && !me.dead && WEAPONS[me.weapon].kind === 'gun';
@@ -2503,7 +2576,7 @@ function seatPeople(dt) {
 
 // Sky, weather, lights, wildlife and ambience. Runs in the menu too.
 function updateWorldLife(dt, nowMs, t) {
-  const thunder = updateDayNight(dt, nowMs, camera.position);
+  const thunder = updateDayNight(dt, adm.clockFrozen ?? nowMs + adm.clockOff, camera.position); // admin time cheats (local only)
   if (thunder) setTimeout(() => fx.soundThunder(0.6 + Math.random() * 0.4), thunder * 1000);
   const n = weather.night;
   updateLamps(n, t);
@@ -2536,6 +2609,8 @@ function updateWorldLife(dt, nowMs, t) {
 
 let movingVehicles = [], physT = 0;
 function update(dt, t) {
+  dt *= adm.slowmo;
+  if (adm.neverWanted && wanted.stars) resetWanted();
   if (wheelOpen && remotes.size === 0) dt *= 0.3; // slow motion while choosing a weapon (solo only)
   if (me.dead && remotes.size === 0) { const k = (performance.now() - me.deadAt) / 1000; dt *= k < 3 ? 0.28 : Math.min(1, 0.28 + (k - 3) * 0.5); }
   const nowMs = net.now(), tSec = nowMs / 1000;
@@ -2543,7 +2618,8 @@ function update(dt, t) {
   for (const u of police.cops.values()) if (u.kind < 2 && Math.abs(u.v.vx || 0) + Math.abs(u.v.vz || 0) > 5) movingVehicles.push(u.v);
   updateNav(dt);
   updateThreat(dt);
-  const fxp = me.veh ? me.veh.x : me.x, fzp = me.veh ? me.veh.z : me.z;
+  const spec = adm.spectate && remotes.get(adm.spectate); // spectating: stream the streets around them
+  const fxp = spec ? spec.x : me.veh ? me.veh.x : me.x, fzp = spec ? spec.z : me.veh ? me.veh.z : me.z;
   W.updateWorld(fxp, fzp, dt);
   manageParked(dt, fxp, fzp);
   updateRoute(dt);
