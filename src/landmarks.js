@@ -183,6 +183,7 @@ function lmMats() {
   LM = { lm_body: new THREE.MeshStandardMaterial({ ...base, roughness: 0.85 }), lm_glass: new THREE.MeshStandardMaterial({ ...base, roughness: 0.12 }), lm_lit: lit, lm_neon: neon };
   return LM;
 }
+export const landmarkMats = () => Object.values(lmMats()); // for main.js's shader prewarm
 function initModels() {
   // the I-74 twin basket-handle arches over the main span (landmarks/i74.glb): centre and heading from OSM (the
   // carriageways cross the main span at x 5482 / 5520, z 455, bearing 169 deg), deck height from the crossing data

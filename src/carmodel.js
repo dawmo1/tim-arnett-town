@@ -63,12 +63,14 @@ function decals() {
   g.fillStyle = '#fff'; g.fillRect(0, 0, 512, 512);
   // Blender uvbox (u0,v0,u1,v1) -> canvas x = u*512, y = (1 - v)*512
   const R = (u0, v0, u1, v1) => [u0 * 512, (1 - v1) * 512, (u1 - u0) * 512, (v1 - v0) * 512];
+  // cars.py box_d maps u backwards on both +y and -y faces, so text on front/back faces is drawn mirrored here to read right
+  const mirrorText = (t, cx, ty) => { g.save(); g.translate(cx, 0); g.scale(-1, 1); g.fillText(t, 0, ty); g.restore(); };
   let [x, y, w, h] = R(0, 0, 0.5, 0.25); // Iowa-style plate
   g.fillStyle = '#f4f1e6'; g.fillRect(x, y, w, h); g.fillStyle = '#2a4e8a'; g.fillRect(x, y, w, h * 0.22);
-  g.fillStyle = '#fff'; g.font = `bold ${h * 0.16}px Arial`; g.textAlign = 'center'; g.fillText('IOWA', x + w / 2, y + h * 0.17);
-  g.fillStyle = '#16233d'; g.font = `bold ${h * 0.42}px Arial Narrow, Arial`; g.fillText('TIM 2026', x + w / 2, y + h * 0.75);
+  g.fillStyle = '#fff'; g.font = `bold ${h * 0.16}px Arial`; g.textAlign = 'center'; mirrorText('IOWA', x + w / 2, y + h * 0.17);
+  g.fillStyle = '#16233d'; g.font = `bold ${h * 0.42}px Arial Narrow, Arial`; mirrorText('TIM 2026', x + w / 2, y + h * 0.75);
   [x, y, w, h] = R(0.5, 0.75, 1, 1); // taxi roof sign
-  g.fillStyle = '#ffd23a'; g.fillRect(x, y, w, h); g.fillStyle = '#111'; g.font = `900 ${h * 0.55}px Arial Black, Arial`; g.fillText('TAXI', x + w / 2, y + h * 0.72);
+  g.fillStyle = '#ffd23a'; g.fillRect(x, y, w, h); g.fillStyle = '#111'; g.font = `900 ${h * 0.55}px Arial Black, Arial`; mirrorText('TAXI', x + w / 2, y + h * 0.72);
   [x, y, w, h] = R(0, 0.25, 0.5, 0.5); // ambulance stripe
   g.fillStyle = '#d32f2f'; g.fillRect(x, y, w, h); g.fillStyle = '#fff'; g.font = `900 ${h * 0.5}px Arial Black, Arial`; g.fillText('AMBULANCE', x + w / 2, y + h * 0.68);
   [x, y, w, h] = R(0.5, 0.25, 0.75, 0.5); // star-ish cross
@@ -78,7 +80,7 @@ function decals() {
   g.fillStyle = '#f6c21c'; g.fillRect(x, y, w, h); g.fillStyle = '#111';
   for (let k = -4; k < 8; k++) { g.beginPath(); g.moveTo(x + k * 20, y + h); g.lineTo(x + k * 20 + 10, y + h); g.lineTo(x + k * 20 + 10 + h, y); g.lineTo(x + k * 20 + h, y); g.fill(); }
   [x, y, w, h] = R(0, 0.5, 1, 0.625); // bus destination
-  g.fillStyle = '#111'; g.fillRect(x, y, w, h); g.fillStyle = '#ffb300'; g.font = `bold ${h * 0.6}px monospace`; g.fillText('12  ARNETT AVE', x + w / 2, y + h * 0.72);
+  g.fillStyle = '#111'; g.fillRect(x, y, w, h); g.fillStyle = '#ffb300'; g.font = `bold ${h * 0.6}px monospace`; mirrorText('12  ARNETT AVE', x + w / 2, y + h * 0.72);
   decalTex = new THREE.CanvasTexture(c); decalTex.colorSpace = THREE.SRGBColorSpace; decalTex.flipY = false; decalTex.anisotropy = 4;
   return decalTex;
 }

@@ -13,7 +13,7 @@ import { initWalkers, updateWalkers, walkers, panicNear, spawnFleeing, scare, pr
 import { joinTraffic } from './traffic.js';
 import { GANGS } from './gangs.js';
 import { initEmergency, updateEmergency, reportDown } from './emergency.js';
-import { initLandmarks, updateLandmarks, doors, closedCrossings, trainCars, bargeList } from './landmarks.js';
+import { initLandmarks, updateLandmarks, doors, closedCrossings, trainCars, bargeList, landmarkMats } from './landmarks.js';
 import * as interior from './interiors.js';
 import { initVenues, useVenue, updateVenues } from './venues.js';
 import { initEvents, updateEvents, eventBlips, toggleJob } from './events.js';
@@ -222,6 +222,7 @@ function nextArt() {
 // resolves once the screen is fully covered
 function loading(on, label = '', mode = 'art') {
   clearInterval(artTimer); clearTimeout(loaderOut);
+  fx.setMusic(on && mode !== 'fade'); // the beat plays behind the pictures and the menu, not on respawn fades
   if (!on) { loader.classList.add('out'); loaderOut = setTimeout(() => { loader.hidden = true; }, 650); return Promise.resolve(); }
   const wasHidden = loader.hidden || loader.classList.contains('out');
   loader.classList.toggle('fade', mode === 'fade'); loader.classList.toggle('menu', mode === 'menu');
@@ -292,7 +293,7 @@ const grenades = [];
 
 const me = {
   name: '', look: null, ch: null, x: 0, y: 0, z: 0, h: 0, vy: 0, vx: 0, vz: 0, hp: 100, dead: false, deadT: 0,
-  stars: 0, unseen: 0, weapon: 2, cd: 0, swing: 0, veh: null, swim: false, grounded: true, moveSpeed: 0,
+  stars: 0, unseen: 0, weapon: 2, cd: 0, swing: 0, veh: null, seat: 0, swim: false, grounded: true, moveSpeed: 0,
   shotSeq: 0, shot: [0, 0, 0], hitCd: 0, lastBy: '', lastByUid: '',
   armor: 0, owned: new Set(WEAPONS.keys()), ammo: startAmmo(), reloadT: 0, aimT: 0, lockOn: null,
 };
@@ -327,7 +328,7 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyN' && me.veh && !me.veh.T.bike) { const st = nextStation(); ui.flashPrompt(st.sub ? `📻 ${st.name} · ${st.sub}` : st.name); }
   if (e.code === 'KeyP') callMechanic();
   if (e.code === 'KeyJ' && !toggleJob()) ui.flashPrompt('No side job for this ride'); // taxi, ambulance, fire truck, police car, scooter
-  if (e.code === 'KeyH' && me.veh && !me.dead) modHorn(me.veh); // horn (carmods.js: the car's own horn mod)
+  if (e.code === 'KeyH' && me.veh && !me.seat && !me.dead) modHorn(me.veh); // horn (carmods.js: the car's own horn mod)
   else if (e.code === 'KeyG' || e.code === 'KeyH') talk(e.code === 'KeyG');
   if (e.code === 'KeyC' && playing && !me.veh && !me.dead && !typing) { me.crouch = !me.crouch; ui.flashPrompt(me.crouch ? 'Crouching (C to stand)' : 'Standing'); }
 });
@@ -617,7 +618,8 @@ function mmShow(which) {
   for (const el of [...src.children]) { borrowed.push({ el, home: src }); body.append(el); }
 }
 function mmSelect(i) { mmItems.forEach((b, k) => b.classList.toggle('on', k === i)); mmShow(mmItems[i].dataset.mm || null); }
-mmItems.forEach((b, i) => { b.addEventListener('mouseenter', () => mmSelect(i)); b.addEventListener('focus', () => mmSelect(i)); if (b.dataset.mm) b.addEventListener('click', () => mmSelect(i)); });
+const mmSideBySide = matchMedia('(min-width: 1001px) and (min-height: 561px)'); // stacked layout: hover must not swap the panel while the mouse heads down to it
+mmItems.forEach((b, i) => { b.addEventListener('mouseenter', () => { if (mmSideBySide.matches) mmSelect(i); }); b.addEventListener('focus', () => mmSelect(i)); if (b.dataset.mm) b.addEventListener('click', () => mmSelect(i)); });
 addEventListener('keydown', (e) => {
   if (ui.el.menu.hidden || playing || !document.getElementById('namePrompt').hidden) return;
   if (e.target.tagName === 'INPUT' && e.key !== 'Escape') return; // typing a chat message or your name
@@ -637,6 +639,7 @@ playBtn.addEventListener('click', async () => {
   mmShow(null);
   await loading(true, W.areaAt(sp.x, sp.z)[0]);
   menuFocus = sp;
+  prewarmShaders();
   const pics = new Promise((r) => setTimeout(r, 22000)); // the pictures always get ~22 s, longer if the streets still aren't in
   ui.el.menu.hidden = true;
   await W.preload(sp.x, sp.z, 260, loadProgress);
@@ -737,7 +740,7 @@ function refreshOnline() {
   ui.renderPlayers(document.getElementById('mmPlayers'), list);
 }
 setInterval(refreshOnline, 1000);
-net.handlers.cops = (obj) => { if (!isHost) police.applyRemote(obj); };
+net.handlers.cops = (all) => { if (!isHost) police.applyRemote(all[hostUid()] || {}); }; // cops/{host}: only our group's host
 net.handlers.vehicle = (id, rec) => {
   let v = vehById.get(id);
   if (!v && rec && Number.isInteger(rec.ti) && rec.ti >= 0 && rec.ti < V_COUNT) {
@@ -748,7 +751,7 @@ net.handlers.vehicle = (id, rec) => {
   }
   if (!v || !rec) return;
   v.touchedAt = net.now();
-  if (me.veh === v) {
+  if (me.veh === v && !me.seat) { // (riding as a passenger: take the driver's updates like any remote car)
     if (rec.d && rec.d !== net.uid) { v.driver = rec.d; ejectMe(); v.tgt = { x: rec.x, z: rec.z, h: rec.h, y: rec.y || 0 }; }
     return;
   }
@@ -773,13 +776,13 @@ net.handlers.vehicle = (id, rec) => {
   if (typeof rec.l === 'number') { const l = rec.l; v.sirenOn = !!(l & 1); v.netBrake = !!(l & 2); v.netRev = !!(l & 4); v.doorOpen = l & 8 ? 1 : 0; v.flat = !!(l & 16); v.brokenHead = !!(l & 32); v.brokenTail = !!(l & 64); }
   if (Array.isArray(rec.dz)) { const [f, b, l, r] = rec.dz; if (f !== Math.round(v.dz.f) || b !== Math.round(v.dz.b) || l !== Math.round(v.dz.l) || r !== Math.round(v.dz.r)) { if (f + b + l + r === 0) { repair(v); applyMods(v); } else { v.dz = { f, b, l, r }; applyDamageVisual(v); } } } // all zero = repaired at Arnett Auto
 };
-net.handlers.vehicleGone = (id) => { const v = vehById.get(id); if (v) resetVehicle(v); };
+net.handlers.vehicleGone = (id) => { const v = vehById.get(id); if (!v) return; if (me.veh === v && me.seat) ejectMe(); resetVehicle(v); };
 net.handlers.event = (e) => {
   switch (e.type) {
     case 'hit': if (e.to === net.uid) damageMe(+e.dmg || 0, String(e.by || 'someone'), e.from, e.ix !== undefined ? { x: +e.ix, y: 3.5, z: +e.iz } : null); break;
-    case 'vehHit': if (me.veh && me.veh.id === e.id) damageVehicle(me.veh, +e.dmg || 0, e.imp ? { cp: [e.px, e.pz], imp: e.imp } : null); break;
+    case 'vehHit': if (me.veh && !me.seat && me.veh.id === e.id) damageVehicle(me.veh, +e.dmg || 0, e.imp ? { cp: [e.px, e.pz], imp: e.imp } : null); break;
     case 'bump': {
-      if (me.veh && me.veh.id === e.id) applyBump(me.veh, e);
+      if (me.veh && !me.seat && me.veh.id === e.id) applyBump(me.veh, e);
       else if (isHost) { const u = police.cops.get(e.id); if (u && u.kind < 2) applyBump(u.v, e); }
       break;
     }
@@ -935,7 +938,7 @@ function flushBump(o) {
   const b = o.pending;
   if (!b) return;
   o.pending = null;
-  if (o === me.veh) { applyBump(o, b); return; }
+  if (o === me.veh && !me.seat) { applyBump(o, b); return; }
   if (o.mode === 'cop') { if (isHost) applyBump(o, b); else sendEvent('bump', { id: o.id, jx: r2(b.jx), jz: r2(b.jz), jw: r2(b.jw) }); return; }
   if (o.driver && o.driver !== net.uid) sendEvent('bump', { id: o.id, jx: r2(b.jx), jz: r2(b.jz), jw: r2(b.jw) });
   else { applyBump(o, b); o.localSim = true; }
@@ -1117,16 +1120,46 @@ function toggleVehicle() {
   const v = nearestVehicle(1.3);
   if (!v) return;
   if (Math.hypot(v.vx || 0, v.vz || 0) > 3.5) { ui.flashPrompt("It's moving too fast to grab"); return; }
-  me.enter = { v, phase: 'walk', t: 0 };
-  v.jackHold = true;
+  const seat = driverPlayer(v) ? freeSeat(v) : 0; // another player drives: ride along (no free seat: carjack as before)
+  me.enter = { v, phase: 'walk', t: 0, seat };
+  v.jackHold = !seat;
+}
+// ---------- passengers: me.veh with me.seat > 0 is riding in another player's car; only the driver's client simulates it ----------
+const driverPlayer = (v) => !!(v.driver && v.driver !== net.uid && net.players[v.driver]);
+// passenger seats (the driver's not counted)
+const passSeats = (T) => (T.bus ? 7 : T.limo ? 5 : T.bike || T.duster || T.truck || T.pickup || T.monster || T.cabbed || T.muscle || T.convertible || T.name === 'Sports car' ? 1 : 3);
+function freeSeat(v) {
+  const taken = new Set();
+  for (const [uid, p] of Object.entries(net.players)) if (uid !== net.uid && p && Array.isArray(p.s) && p.s[5] === v.id && p.s[20] > 0) taken.add(p.s[20]);
+  for (let i = 1; i <= passSeats(v.T); i++) if (!taken.has(i)) return i;
+  return 0;
+}
+// world spot of seat i (0 driver, 1 front passenger, then rear rows left/right): the model's seat empties, else from the car's size
+const SEAT_KEYS = ['D', 'P', 'RL', 'RR'], seatTmp = new THREE.Vector3();
+function seatPos(v, i) {
+  const loc = SEAT_KEYS[i] && v.mesh.userData.parts?.seats?.[SEAT_KEYS[i]], root = v.mesh.userData.body?.children[0];
+  if (loc && root) { root.updateWorldMatrix(true, false); seatTmp.set(loc.x, loc.y - 0.5, loc.z); root.localToWorld(seatTmp); return { x: seatTmp.x, y: seatTmp.y, z: seatTmp.z }; }
+  const T = v.T, sx = T.bike ? 0 : (i & 1 ? -1 : 1) * T.wid * 0.22, sz = T.bike ? -0.65 : T.len * 0.05 - (i >> 1) * Math.min(1.1, T.len * 0.2);
+  return { x: v.x + Math.cos(v.h) * sx + Math.sin(v.h) * sz, y: v.y + (T.bike ? 0.25 : T.hgt * 0.1), z: v.z - Math.sin(v.h) * sx + Math.cos(v.h) * sz };
+}
+// sit in the seat and follow the car the driver's client sends (updateVehicles interpolates it like any remote car)
+function rideUpdate(dt) {
+  const v = me.veh;
+  if (!driverPlayer(v) || v.exploded) { ejectMe(); return; } // driver got out, left the game, or the car's wrecked
+  v.speed = Math.hypot(v.vx || 0, v.vz || 0); // for the speedo
+  me.x = v.x; me.z = v.z; me.y = Math.max(W.SWIM_Y, v.y); me.h = v.h; me.vx = v.vx || 0; me.vz = v.vz || 0; me.moveSpeed = 0;
+  const p = seatPos(v, me.seat);
+  me.ch.g.visible = true; me.ch.g.position.set(p.x, p.y, p.z); me.ch.g.rotation.set(0, v.h, 0);
+  animateCharacter(me.ch, dt, { sit: true, weapon: WEAPONS[me.weapon].kind === 'gun' ? 'gun' : 'none' });
 }
 function cancelEnter() {
   const e = me.enter; if (!e) return;
   e.v.jackHold = false; e.v.doorOpen = 0; me.enter = null;
 }
-function doorSpot(v) {
-  const lx = Math.cos(v.h), lz = -Math.sin(v.h), off = v.T.bike ? 0.7 : v.T.wid / 2 + 0.55;
-  return { x: v.x + lx * off + Math.sin(v.h) * 0.25, z: v.z + lz * off + Math.cos(v.h) * 0.25 };
+function doorSpot(v, seat = 0) {
+  const sg = seat & 1 ? -1 : 1, lx = Math.cos(v.h) * sg, lz = -Math.sin(v.h) * sg, off = v.T.bike ? 0.7 : v.T.wid / 2 + 0.55;
+  const fw = seat > 1 && !v.T.bike ? 0.25 - (seat >> 1) * Math.min(1.1, v.T.len * 0.2) : 0.25; // rear seats: the back door
+  return { x: v.x + lx * off + Math.sin(v.h) * fw, z: v.z + lz * off + Math.cos(v.h) * fw };
 }
 function enterUpdate(dt) {
   const e = me.enter, v = e.v;
@@ -1135,7 +1168,7 @@ function enterUpdate(dt) {
   const occupied = v.mode === 'traffic' || v.npcDriver || (v.driver && v.driver !== net.uid);
   let pose = { speed: 0 };
   if (e.phase === 'walk') {
-    const d = doorSpot(v), dx = d.x - me.x, dz = d.z - me.z, dist = Math.hypot(dx, dz);
+    const d = doorSpot(v, e.seat), dx = d.x - me.x, dz = d.z - me.z, dist = Math.hypot(dx, dz);
     if (dist < 0.6 || e.t > 1.8) { e.phase = v.T.bike ? 'in' : 'open'; e.t = 0; }
     else {
       const sp = Math.min(dist / dt, 5.5);
@@ -1144,11 +1177,11 @@ function enterUpdate(dt) {
       pose = { speed: 5 };
     }
   } else {
-    me.h += angDiff(me.h, v.h - Math.PI / 2) * Math.min(1, dt * 10); // face the car
+    me.h += angDiff(me.h, v.h - (e.seat & 1 ? -1 : 1) * Math.PI / 2) * Math.min(1, dt * 10); // face the car
     if (e.phase === 'open') {
-      v.doorOpen = 1;
+      if (!e.seat) v.doorOpen = 1; // (the animated door is the driver's)
       pose = { reach: true };
-      if (e.t > 0.4) { e.t = 0; e.phase = occupied ? 'yank' : 'in'; if (occupied) yankDriver(v); }
+      if (e.t > 0.4) { e.t = 0; const jack = occupied && !e.seat; e.phase = jack ? 'yank' : 'in'; if (jack) yankDriver(v); }
     } else if (e.phase === 'yank') {
       pose = { pull: Math.min(1, e.t / 0.9) };
       if (e.t > 0.9) { e.phase = 'in'; e.t = 0; }
@@ -1195,6 +1228,14 @@ function yankDriver(v) {
   ui.announce('CARJACKED');
 }
 function finishEnter(v) {
+  if (me.enter.seat && driverPlayer(v)) { // (if the driver got out meanwhile you take the wheel instead)
+    me.enter = null; v.jackHold = false;
+    const seat = freeSeat(v); // again: someone may have taken it while we walked up
+    if (!seat) { ui.flashPrompt('No free seat'); return; }
+    me.veh = v; me.seat = seat;
+    ui.flashPrompt(`Riding with ${nameOf(v.driver)}`);
+    return;
+  }
   const wasParked = v.mode === 'parked' || (!v.driver && v.mode !== 'traffic');
   me.enter = null;
   v.jackHold = false; v.doorOpen = 0;
@@ -1209,7 +1250,7 @@ function leaveVehicle() {
   const v = me.veh;
   const sp = Math.hypot(v.vx, v.vz);
   if (sp > 9 && !v.T.bike) {
-    const lx = Math.cos(v.h), lz = -Math.sin(v.h);
+    const sg = me.seat & 1 ? -1 : 1, lx = Math.cos(v.h) * sg, lz = -Math.sin(v.h) * sg; // out of your own side
     ejectMe();
     const bv = { x: v.vx * 0.55 + lx * 3, y: 3, z: v.vz * 0.55 + lz * 3 };
     if (!knockMe(bv, 2)) me.rag = { t: 1.8, vx: bv.x, vy: bv.y, vz: bv.z, spin: 6, landed: false };
@@ -1217,7 +1258,7 @@ function leaveVehicle() {
     ui.announce('BAILED OUT');
     return;
   }
-  if (v.T.bike || me.exitT > 0) { ejectMe(); return; }
+  if (v.T.bike || me.exitT > 0 || me.seat) { ejectMe(); return; } // (a passenger never steps the car, so no slow exit)
   me.exitT = 0.45;
   v.doorOpen = 1;
 }
@@ -1227,8 +1268,10 @@ function ejectMe() {
   me.veh = null;
   me.exitT = 0;
   v.doorOpen = 1; v.doorCloseAt = performance.now() + 500;
-  const lx = Math.cos(v.h), lz = -Math.sin(v.h), off = v.T.wid / 2 + 0.7;
-  const p = W.pushOutCircle(v.x + lx * off, v.z + lz * off, 0.4);
+  const lx = Math.cos(v.h), lz = -Math.sin(v.h), off = v.T.wid / 2 + 0.7, seat = me.seat;
+  me.seat = 0;
+  const d = seat ? doorSpot(v, seat) : { x: v.x + lx * off, z: v.z + lz * off }; // passengers: out beside their own seat
+  const p = W.pushOutCircle(d.x, d.z, 0.4);
   me.x = p.x; me.z = p.z; me.y = W.isLand(p.x, p.z) ? W.groundHeight(p.x, p.z) : W.SWIM_Y; me.vy = 0; me.h = v.h;
   me.ch.g.position.set(me.x, me.y, me.z); me.ch.g.rotation.set(0, me.h, 0); // (the body was left where you got in; a ragdoll would start there)
   me.ch.g.visible = true;
@@ -1453,7 +1496,7 @@ function trainAndBargeHits(dt) {
   for (const b of bargeList()) if (Math.abs(b.x - px) < 140 && Math.abs(b.z - pz) < 140) big.push(b);
   for (const o of big) {
     if (me.veh) {
-      const i = collideVehicles(me.veh, o, false);
+      const i = me.seat ? 0 : collideVehicles(me.veh, o, false); // (a passenger's car is the driver's to collide)
       if (i > 0) { crashFx(me.veh, me.veh.hit); if (i > 6) damageVehicle(me.veh, (i - 4) * 3, me.veh.hit); }
     } else if (!me.ch.rag) {
       const q = pushCharOut(me.x, me.z, 0.4, o);
@@ -1588,7 +1631,7 @@ function updateVehicles(dt, tSec, nowMs) {
         }
       }
 
-      if (v === me.veh) { /* driven in updatePlayer */ }
+      if (v === me.veh && !me.seat) { /* driven in updatePlayer */ }
       else if (v.localSim) {
         const wi = stepVehicle(v, {}, dt);
         if (v.hit && wi > 6) { crashFx(v, v.hit); damageZone(v, v.hit.cp[0], v.hit.cp[1], wi, v.hit.ly); }
@@ -1666,7 +1709,7 @@ function updatePlayer(dt) {
   if (me.swing > 0) me.swing = Math.max(0, me.swing - dt * 3);
   const fwd = (keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0) - (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0);
   const side = (keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) - (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0);
-  if (me.veh) driveUpdate(dt, fwd, side); else footUpdate(dt, fwd, side);
+  if (me.seat) rideUpdate(dt); else if (me.veh) driveUpdate(dt, fwd, side); else footUpdate(dt, fwd, side);
   if (!me.veh) { me.vx = (me.x - px) / dt; me.vz = (me.z - pz) / dt; }
   const w = WEAPONS[me.weapon];
   const wantFire = locked && (w.auto ? mouseDown : clicked);
@@ -1935,8 +1978,10 @@ function updateRemotes(dt) {
     r.vehObj = vo;
     const wk = WEAPONS[r.weapon]?.kind || 'none';
     if (vo) {
-      r.ch.g.visible = !!vo.T.bike;
-      if (vo.T.bike) { r.ch.g.position.set(vo.x - Math.sin(vo.h) * 0.25, vo.y + 0.2, vo.z - Math.cos(vo.h) * 0.25); r.ch.g.rotation.set(0, vo.h, 0); animateCharacter(r.ch, dt, { sit: true, weapon: wk }); }
+      const seat = s[20] | 0; // > 0: riding as a passenger, sat in that seat
+      r.ch.g.visible = !!vo.T.bike || seat > 0;
+      if (seat > 0) { const sp = seatPos(vo, seat); r.ch.g.position.set(sp.x, sp.y, sp.z); r.ch.g.rotation.set(0, vo.h, 0); animateCharacter(r.ch, dt, { sit: true, weapon: wk }); }
+      else if (vo.T.bike) { r.ch.g.position.set(vo.x - Math.sin(vo.h) * 0.25, vo.y + 0.2, vo.z - Math.cos(vo.h) * 0.25); r.ch.g.rotation.set(0, vo.h, 0); animateCharacter(r.ch, dt, { sit: true, weapon: wk }); }
     } else if ((r.dead || s[16]) && !r.ch.rag) {
       ragdoll(r.ch, { x: r.vx * 0.6, y: 2, z: r.vz * 0.6 }, { dead: true }); // their computer simulates the real fall
     } else if (r.ch.rag) {
@@ -2051,7 +2096,7 @@ function useStore() {
   }
   const st = storeAt(me.veh ? me.veh.x : me.x, me.veh ? me.veh.z : me.z, me.veh ? 7 : 3.2);
   if (!st) return false;
-  if (st.kind === 'body' && me.veh && !me.veh.T.boat && !me.veh.T.heli) { bodyShop(me.veh); return true; }
+  if (st.kind === 'body' && me.veh && !me.seat && !me.veh.T.boat && !me.veh.T.heli) { bodyShop(me.veh); return true; }
   if (me.veh) return false;
   if (st.kind === 'casino') { enterRoom(st); return true; } // other shops are buildings you walk into (interiors.js)
   if (st.kind === 'food') { if (me.hp >= 100) { ui.flashPrompt("You're not hungry"); return true; } if (!spend(8)) { ui.flashPrompt('A hot dog is $8'); return true; } me.hp = Math.min(100, me.hp + 30); fx.soundCash(); ui.flashPrompt('Hot dog: +30 health'); return true; }
@@ -2082,7 +2127,7 @@ function gunShopItems(basic = false) {
 function bodyShop(v) { shopOpen = true; paused = true; keys.clear(); mouseDown = false; document.exitPointerLock?.(); garage.openModShop(v); }
 // fixed in place (same mesh: plate, rims, neon stay); repair() straightens panels, refits lost parts, glass and lamps, applyMods puts the tint back
 function repairCar(v) { v.hp = v.T.hp; v.burnAt = 0; v.burnBy = ''; fx.stopFire(v.fire); v.fire = null; v.flat = false; repair(v); applyMods(v); writeVeh(v, true); }
-garage.initGarage({ spawn: (ti, c, label) => deliverCar(ti, label, c), remove: (v) => { removeVehicle(v.id); resetVehicle(v); }, vehicles: () => vehicles, myVeh: () => me.veh, repair: repairCar, writeVeh: (v) => writeVeh(v, true), close: closeShop, saved: () => markDirty() });
+garage.initGarage({ spawn: (ti, c, label) => deliverCar(ti, label, c), remove: (v) => { removeVehicle(v.id); resetVehicle(v); }, vehicles: () => vehicles, myVeh: () => (me.seat ? null : me.veh), repair: repairCar, writeVeh: (v) => writeVeh(v, true), close: closeShop, saved: () => markDirty() });
 // ---- clothing store: Tim's Threads (outfits, a barber, tattoos and masks)
 const COLS = [['White', 0], ['Black', 1], ['Grey', 2], ['Navy', 4], ['Blue', 5], ['Red', 7], ['Maroon', 8], ['Green', 9], ['Olive', 10], ['Khaki', 11], ['Brown', 12], ['Gold', 14], ['Orange', 15], ['Pink', 16], ['Purple', 17], ['Teal', 18]];
 const HAIR_COLS = [['Black', 0], ['Dark brown', 1], ['Brown', 3], ['Auburn', 4], ['Blonde', 6], ['Grey', 7], ['Pink', 10], ['Blue', 11]];
@@ -2256,7 +2301,7 @@ function updateCamera(dt) {
 
 function policePlayers() {
   const arr = [{ uid: net.uid, x: me.x, y: me.y, z: me.z, vx: me.vx, vz: me.vz, speed: Math.hypot(me.vx, me.vz), stars: wanted.stars, alive: !me.dead, inVeh: !!me.veh, search: wanted.search, lkx: wanted.lk.x, lkz: wanted.lk.z }];
-  for (const r of remotes.values()) arr.push({ uid: r.uid, x: r.x, y: r.y, z: r.z, vx: r.vx, vz: r.vz, speed: Math.hypot(r.vx, r.vz), stars: r.stars, alive: !r.dead, inVeh: !!r.veh, search: r.search, lkx: r.lkx, lkz: r.lkz });
+  for (const r of remotes.values()) if (net.group.has(r.uid)) arr.push({ uid: r.uid, x: r.x, y: r.y, z: r.z, vx: r.vx, vz: r.vz, speed: Math.hypot(r.vx, r.vz), stars: r.stars, alive: !r.dead, inVeh: !!r.veh, search: r.search, lkx: r.lkx, lkz: r.lkz });
   return arr;
 }
 // What townspeople see: is the player armed, and who (if anyone) is the gun pointed at?
@@ -2386,7 +2431,7 @@ function updateHud(dt, t) {
     ui.setArmor(me.armor);
     ui.setSpecial(me.veh ? me.veh.nitro ?? 1 : drunk.lvl); // yellow bar: nitro while driving, drunkenness on foot
     // drunk driving where a cop can see it: 1 star (same rule as assault: only counts if seen)
-    if (me.veh && drunk.lvl > 0.6 && Math.abs(me.veh.speed) > 5 && wanted.stars === 0 && Math.random() < 0.1) crime('assault', me.veh.x, me.veh.y, me.veh.z);
+    if (me.veh && !me.seat && drunk.lvl > 0.6 && Math.abs(me.veh.speed) > 5 && wanted.stars === 0 && Math.random() < 0.1) crime('assault', me.veh.x, me.veh.y, me.veh.z);
     if (wanted.stars >= 5 && !me.dead) { survive5 += 0.2; if (survive5 >= 60) goalDone('survive5'); } else survive5 = 0;
     if (ui.setStars(wanted.stars, wanted.search)) fx.soundWanted(); // no banner: the stars alone show it
     ui.setSpeedo(me.veh, me.veh && !me.veh.T.bike ? currentStation().name : '', me.veh ? me.veh.nitro ?? 1 : 0);
@@ -2398,7 +2443,7 @@ function updateHud(dt, t) {
     if (area !== lastArea) { lastArea = area; setArea(area); } // presence: where you are, for everyone's player list
     if (!ui.el.pause.hidden) ui.setPlayers(playerRows(), net.online);
   }
-  const prompt = robberyPrompt; // no key hints: the Controls tab explains E, Tab and the rest
+  const prompt = robberyPrompt || (me.seat && me.veh ? `Passenger · ${nameOf(me.veh.driver)} is driving` : ''); // no key hints: the Controls tab explains E, Tab and the rest
   ui.setPrompt(prompt, robberyPrompt && prompt === robberyPrompt ? robberyBar : null);
   mmT -= dt;
   if (mmT <= 0) {
@@ -2503,7 +2548,9 @@ function update(dt, t) {
   manageParked(dt, fxp, fzp);
   updateRoute(dt);
   physT -= dt; if (physT <= 0) { physT = 0.5; syncPhysics(fxp, fzp); }
+  const wasHost = isHost;
   isHost = hostUid() === net.uid;
+  if (wasHost && !isHost) setCops(null); // another player's group took over: drop our copy of the cops
   updateVehicles(dt, tSec, nowMs);
   updatePlayer(dt);
   updateDrunk(dt);
@@ -2538,7 +2585,7 @@ function update(dt, t) {
   sendT -= dt;
   if (sendT <= 0) {
     sendT = crowd ? 0.1 : 1;
-    sendState([r1(me.x), r2(me.y), r1(me.z), r2(me.h), r1(me.moveSpeed), me.veh ? me.veh.id : '', Math.round(me.hp), wanted.stars, me.weapon, me.shotSeq, r1(me.shot[0]), r1(me.shot[1]), r1(me.shot[2]), wanted.search ? 1 : 0, r1(wanted.lk.x), r1(wanted.lk.z), me.ch.rag && !me.dead ? 1 : 0, me.netPose || 0, me.netPitch || 0, me.netK || 0]);
+    sendState([r1(me.x), r2(me.y), r1(me.z), r2(me.h), r1(me.moveSpeed), me.veh ? me.veh.id : '', Math.round(me.hp), wanted.stars, me.weapon, me.shotSeq, r1(me.shot[0]), r1(me.shot[1]), r1(me.shot[2]), wanted.search ? 1 : 0, r1(wanted.lk.x), r1(wanted.lk.z), me.ch.rag && !me.dead ? 1 : 0, me.netPose || 0, me.netPitch || 0, me.netK || 0, me.seat || 0]);
   }
   updateCrowd(dt);
   tickProfile(dt);
@@ -2555,6 +2602,16 @@ function menuCamera(t) {
   W.updateWorld(p.x, p.z, 0.016);
 }
 
+// Compile the shaders that otherwise first show up mid-game (landmark models, explosions, fire, blood, glass) while
+// the loading art is up, so the first landmark or gunfight doesn't hitch.
+function prewarmShaders() {
+  const g = new THREE.Group(), geo = new THREE.BoxGeometry(0.01, 0.01, 0.01);
+  for (const m of [...landmarkMats(), ...fx.warmMats()]) { const o = new THREE.Mesh(geo, m); o.position.copy(camera.position); o.frustumCulled = false; g.add(o); }
+  scene.add(g);
+  const done = () => { scene.remove(g); geo.dispose(); };
+  // compile just this group (with the scene's lights); a stray geometry-less object elsewhere must never block Play
+  try { renderer.compileAsync(g, camera, scene).catch(() => {}).finally(done); } catch { done(); }
+}
 let last = performance.now();
 function frame(now) {
   requestAnimationFrame(frame);
@@ -2579,5 +2636,6 @@ requestAnimationFrame(frame);
 // let a few frames render (and shaders compile) behind the loading screen, then show the menu
 setTimeout(() => { loading(true, '', 'menu'); ui.el.menu.hidden = false; playBtn.focus(); }, 400);
 // meanwhile, download the streets where you'll start
+
 
 

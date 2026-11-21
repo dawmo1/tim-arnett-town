@@ -26,7 +26,7 @@
           }
         },
         "cops": {
-          ".write": "auth != null && $room === 'WORLD'"
+          "$host": { ".write": "auth != null && auth.uid === $host && $room === 'WORLD'" }
         },
         "events": {
           ".indexOn": ["t"],
@@ -36,7 +36,7 @@
         },
         "chat": {
           "$m": {
-            ".write": "auth != null && !data.exists() && $room === 'WORLD'",
+            ".write": "auth != null && $room === 'WORLD' && (!data.exists() || (!newData.exists() && data.child('t').isNumber() && data.child('t').val() < now - 3600000))",
             ".validate": "newData.child('m').isString() && newData.child('m').val().length >= 1 && newData.child('m').val().length <= 120 && newData.child('n').isString() && newData.child('n').val().length >= 1 && newData.child('n').val().length <= 16"
           }
         }

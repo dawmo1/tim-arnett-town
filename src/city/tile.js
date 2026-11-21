@@ -963,7 +963,7 @@ export function buildTile(t) {
   const lights = [...lightsMapped, ...streetLights(t, junk, lightsMapped)];
   parkingDetail(t, markB, lights, junk, bigBoxes, dealers);
   streetSigns(t, namesB, solidB, boxes, posts);
-  regionPlaces(t, { junk, lights, trees, posts, solid, SB: solidB, NB: namesB, walkB, groundB, lotB });
+  regionPlaces(t, { junk, lights, trees, posts, solid, SB: solidB, NB: namesB, walkB, groundB, lotB, markB });
   powerLines(t, junk, wires, solid);
   crops(t, cropB, yards);
   if (!t.kAdded) { for (const v of newK) t.k.push(v); t.kAdded = true; } // driveway cars join the parked-car spots (once)

@@ -32,6 +32,7 @@ export default {
     { match: { x: 614, z: 1562, r: 10 }, name: 'Rozz-Tox' }, // 2108 3rd Ave
   ],
   places: [
+    { kind: 'miniround', x: 246.8, z: 1385.3, r: 2 }, // painted mini-roundabout at 2nd Ave & 18th St (built 2024)
     // Downtown Rock Island (the rebranded "District"): Green Lawn at 1801 2nd Ave, trees and benches on it
     { kind: 'tree', x: 256, z: 1334, tree: 0 }, { kind: 'tree', x: 274, z: 1330, tree: 0 }, { kind: 'tree', x: 272, z: 1352, tree: 2 },
     { kind: 'prop', prop: 'bench', x: 264, z: 1346 }, { kind: 'prop', prop: 'bench', x: 278, z: 1342 },
@@ -73,5 +74,5 @@ export default {
   ],
   notes: 'See docs/regions/rock-island.md. Unverified: gateway arch design (modelled generic), exact RIBCO/Rozz-Tox footprints, '
     + 'water tower spots at 14th St & 42nd Ave and 36th St & 14th Ave (intersection known, corner guessed), stone-shop roof form. '
-    + 'Wanted from core: a painted mini-roundabout at 2nd Ave & 18th St (built 2024), Arsenal Island gates.',
+    + 'Wanted from core: Arsenal Island gates.',
 };

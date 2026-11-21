@@ -58,6 +58,22 @@ export async function joinWorld(name, look) {
   const evq = M.query(M.child(roomRef, 'events'), M.orderByChild('t'), M.startAt(net.now() - 1000));
   M.onChildAdded(evq, (s) => { const e = s.val(); if (e && e.from !== net.uid) net.handlers.event(e); });
   M.onChildAdded(M.query(M.child(roomRef, 'chat'), M.limitToLast(30)), (s) => net.handlers.chat(s.val()));
+  pruneChat();
+  setInterval(() => { if (hostUid() === net.uid) pruneChat(); }, 600000);
+}
+// Chat keeps the newest 100 messages: anything older than those and over an hour old is deleted (the rules allow
+// deleting a message only once it's an hour old). shortcut: removes up to 500 per run, so a huge backlog takes a few runs.
+async function pruneChat() {
+  try {
+    const chat = M.child(roomRef, 'chat');
+    const keep = await M.get(M.query(chat, M.orderByKey(), M.limitToLast(100)));
+    if (keep.size < 100) return;
+    let first = null; keep.forEach((c) => { first ??= c.key; });
+    const old = await M.get(M.query(chat, M.orderByKey(), M.endBefore(first), M.limitToFirst(500)));
+    const cut = net.now() - 3700000, del = {};
+    old.forEach((c) => { const t = c.child('t').val(); if (typeof t === 'number' && t < cut) del[c.key] = null; });
+    if (Object.keys(del).length) await M.update(chat, del);
+  } catch (e) { console.warn('chat prune failed', e); }
 }
 // Story Mode pressed: j = when you started playing (the earliest player runs the police).
 export function startPlaying() {
@@ -77,7 +93,14 @@ export function sendState(arr) {
 }
 export function setVehicle(id, rec) { if (net.online && roomRef) M.set(M.child(roomRef, 'vehicles/' + id), rec); }
 export function removeVehicle(id) { if (net.online && roomRef) M.remove(M.child(roomRef, 'vehicles/' + id)); }
-export function setCops(obj) { if (net.online && roomRef) M.set(M.child(roomRef, 'cops'), obj); }
+// each group host writes its own units to cops/{uid} (null clears them when it stops hosting)
+let copsCleanup = false;
+export function setCops(obj) {
+  if (!net.online || !roomRef) return;
+  const r = M.child(roomRef, 'cops/' + net.uid);
+  if (!copsCleanup) { copsCleanup = true; M.onDisconnect(r).remove(); }
+  M.set(r, obj);
+}
 export function sendEvent(type, data) {
   if (!net.online || !roomRef) return;
   const r = M.push(M.child(roomRef, 'events'));
@@ -89,12 +112,30 @@ export function sendChat(name, msg) {
   M.push(M.child(roomRef, 'chat'), { n: name, m: msg, t: M.serverTimestamp() });
 }
 
-// The host runs the police: the playing player who started first (people in the menu don't count).
+// The police are run per group: playing players chained together within ~1.2 km share one host (the one who
+// started first); a player far from everyone else hosts their own cops. In the menu you see the global earliest.
+const LINK = 1200, UNLINK = 1600; // hysteresis so a group doesn't flap (and drop its cops) right at the edge
+let linked = new Set();
+net.group = linked;
 export function hostUid() {
+  const play = [];
+  for (const uid in net.players) { const p = net.players[uid]; if (p && Array.isArray(p.s)) play.push(uid); }
+  const mine = net.players[net.uid], group = new Set();
+  if (mine && Array.isArray(mine.s)) {
+    group.add(net.uid);
+    for (const a of group) { // grows while iterating: a flood fill over the chain of nearby players
+      const sa = net.players[a].s;
+      for (const b of play) {
+        if (group.has(b)) continue;
+        const sb = net.players[b].s, d = Math.hypot(sa[0] - sb[0], sa[2] - sb[2]);
+        if (d < (linked.has(b) ? UNLINK : LINK)) group.add(b);
+      }
+    }
+  } else for (const uid of play) group.add(uid);
+  linked = net.group = group;
   let best = null, bj = Infinity;
-  for (const [uid, p] of Object.entries(net.players)) {
-    if (!p || !Array.isArray(p.s)) continue;
-    const j = typeof p.j === 'number' ? p.j : Infinity;
+  for (const uid of group) {
+    const p = net.players[uid], j = typeof p.j === 'number' ? p.j : Infinity;
     if (j < bj || (j === bj && (best === null || uid < best))) { bj = j; best = uid; }
   }
   return best || net.uid;

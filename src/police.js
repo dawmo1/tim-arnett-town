@@ -14,7 +14,8 @@ import { clamp, angDiff } from './util.js';
 import { hitByCar } from './breakables.js';
 
 export const cops = new Map();
-let scene, ctx, nextId = 0, spawnT = 0, syncT = 0;
+// ids start at a random offset: several group hosts run cops at once and hit/bump events name units by id
+let scene, ctx, nextId = Math.floor(Math.random() * 1e6), spawnT = 0, syncT = 0;
 const rbTimer = {}, since = {};
 const OFFICER_LOOKS = [[0xe0ac69, 0x1f3a93, 0x111111, 0x111111], [0x8d5524, 0x1f3a93, 0x111111, 0x111111], [0xffdbac, 0x1f3a93, 0x111111, 0x3b2314], [0xc68642, 0x1f3a93, 0x111111, 0x111111]];
 

@@ -261,11 +261,11 @@ export function updateFx(dt) {
   for (const g of fires) g.children.forEach((f) => { const s = 0.3 + Math.random() * 0.5; f.scale.set(s, s * 1.6, s); });
 }
 
-// ---------- sound (synthesized, no files) ----------
+// ---------- sound: recorded CC0 samples where we have them, synthesized for the rest ----------
 let ac = null, noise = null, master = null, volume = 1;
 // everything plays through one master volume
 function out() { if (!master) { master = ac.createGain(); master.gain.value = volume; master.connect(ac.destination); } return master; }
-export function setVolume(v) { volume = v; if (master) master.gain.value = v; }
+export function setVolume(v) { volume = v; if (master) master.gain.value = v; if (musicOn) fadeMusic(); }
 export function unlockAudio() {
   if (ac) { ac.resume(); return; }
   try {
@@ -273,7 +273,53 @@ export function unlockAudio() {
     noise = ac.createBuffer(1, ac.sampleRate * 1.5, ac.sampleRate);
     const d = noise.getChannelData(0);
     for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    loadSfx();
   } catch { ac = null; }
+}
+// ---------- recorded sounds (CC0 packs, see credits) in assets/sfx/<name>_<n>.mp3; the synth stands in until they load ----------
+const SFX = { gun_pistol: 4, gunfar_pistol: 2, gun_smg: 4, gunfar_smg: 2, gun_shotgun: 4, gunfar_shotgun: 2, gun_rifle: 4, gunfar_rifle: 2, gun_sniper: 4, gunfar_sniper: 2,
+  metal: 4, crash: 3, glass: 5, punch: 6, step: 6, stepsoft: 6, click: 2, back: 1, confirm: 1, error: 1, boom: 1 };
+const sfx = {};
+function loadSfx() {
+  for (const [k, n] of Object.entries(SFX)) for (let i = 1; i <= n; i++)
+    fetch(`assets/sfx/${k}_${i}.mp3`).then((r) => r.arrayBuffer()).then((a) => ac.decodeAudioData(a)).then((b) => (sfx[k] ||= []).push(b)).catch(() => {});
+}
+// play a random take of `name` (slight pitch jitter so repeats don't sound copied); false = not loaded, use the synth
+function sample(name, vol, { rate = 1, cut = 0, send = 0, t0 = 0 } = {}) {
+  const list = sfx[name];
+  if (!ac || !list) return false;
+  if (vol <= 0.005) return true;
+  const s = ac.createBufferSource(), g = ac.createGain();
+  s.buffer = list[(Math.random() * list.length) | 0]; s.playbackRate.value = rate * (0.95 + Math.random() * 0.1); g.gain.value = vol;
+  if (cut) { const f = ac.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = cut; s.connect(f); f.connect(g); } else s.connect(g);
+  g.connect(out());
+  if (send > 0.01) { const eg = ac.createGain(); eg.gain.value = send; g.connect(eg); eg.connect(echo()); }
+  s.start(ac.currentTime + t0); return true;
+}
+export function soundUi(name) { if (!sample(name, 0.45)) burst(0.03, 4000, 0.25); }
+
+// ---------- loading / menu music: "Friendly Evil Gangsta Synth Hip Hop" by Mesostic (CC0) ----------
+let music = null, musicOn = false, musicFade = 0;
+export function setMusic(on) {
+  musicOn = on;
+  if (!music) {
+    if (!on) return;
+    music = new Audio('assets/music/loading.mp3'); music.loop = true; music.volume = 0;
+    // browsers block sound until the first click or key press
+    const kick = () => { if (musicOn && music.paused) music.play().catch(() => {}); };
+    addEventListener('pointerdown', kick); addEventListener('keydown', kick);
+  }
+  if (on && music.paused) music.play().catch(() => {});
+  fadeMusic();
+}
+function fadeMusic() {
+  clearInterval(musicFade);
+  if (!music) return;
+  const target = musicOn ? Math.min(1, 0.5 * volume) : 0;
+  musicFade = setInterval(() => {
+    const d = target - music.volume;
+    if (Math.abs(d) <= 0.025) { music.volume = target; clearInterval(musicFade); if (!musicOn) music.pause(); } else music.volume += Math.sign(d) * 0.025;
+  }, 40);
 }
 function burst(dur, freq, vol) {
   if (!ac || vol <= 0.01) return;
@@ -293,7 +339,7 @@ let echoBus = null;
 function echo() {
   if (echoBus) return echoBus;
   const d = ac.createDelay(1), fb = ac.createGain(), lp = ac.createBiquadFilter(), g = ac.createGain();
-  d.delayTime.value = 0.13; fb.gain.value = 0.32; lp.type = 'lowpass'; lp.frequency.value = 1800; g.gain.value = 0;
+  d.delayTime.value = 0.13; fb.gain.value = 0.32; lp.type = 'lowpass'; lp.frequency.value = 1800; g.gain.value = 1;
   g.connect(d); d.connect(lp); lp.connect(fb); fb.connect(d); lp.connect(out());
   return (echoBus = g);
 }
@@ -304,6 +350,8 @@ export function soundShot(kind, dist = 0) {
   const [vol, len, bright, thump] = GUN[kind] || GUN.pistol;
   const v = vol * Math.max(0, 1 - dist / 260), cut = bright * Math.max(0.15, 1 - dist / 180);
   if (v <= 0.01) return;
+  // real recordings: the close take nearby, the distant take (with its natural slap-back) far off
+  if (sample((dist > 70 ? 'gunfar_' : 'gun_') + (GUN[kind] ? kind : 'pistol'), Math.min(1, v * 1.15), { cut: dist > 30 ? cut * 1.5 : 0, send: echoAmount * 0.7 })) return;
   const t = ac.currentTime;
   const src = ac.createBufferSource(); src.buffer = noise;
   const f = ac.createBiquadFilter(); f.type = 'lowpass'; f.frequency.setValueAtTime(cut * 1.6, t); f.frequency.exponentialRampToValueAtTime(cut * 0.35, t + len);
@@ -317,8 +365,13 @@ export function soundShot(kind, dist = 0) {
   og.gain.setValueAtTime(v * 0.8, t); og.gain.exponentialRampToValueAtTime(0.001, t + 0.18); o.connect(og); og.connect(out()); o.start(t); o.stop(t + 0.2);
 }
 export function tink() { tone('triangle', 3200 + Math.random() * 1500, 0.06, 0.03); }
-export function soundBoom(dist = 0) { burst(1.4, 500, 1.2 * fall(dist * 0.6)); }
-export function soundHit() { burst(0.06, 900, 0.4); }
+// explosion: the blast pitched down, a deep shotgun report under it, debris, and a long noise rumble
+export function soundBoom(dist = 0) {
+  const v = fall(dist * 0.6), cut = Math.max(700, 7000 - dist * 25);
+  if (sample('boom', v, { rate: 0.6, cut })) { sample('gunfar_shotgun', v, { rate: 0.4, cut, send: 0.5 }); sample('crash', 0.55 * v, { rate: 0.75, cut, t0: 0.05 }); burst(2.4, 200, 0.9 * v); return; }
+  burst(1.4, 500, 1.2 * v);
+}
+export function soundHit() { if (!sample('punch', 0.6)) burst(0.06, 900, 0.4); }
 
 function tone(type, freq, dur, vol, t0 = 0) {
   if (!ac || vol <= 0.01) return;
@@ -351,6 +404,11 @@ export function soundCrunch(power = 1, dist = 0) {
   const t = ac.currentTime, o = ac.createOscillator(), og = ac.createGain();
   o.type = 'sine'; o.frequency.setValueAtTime(100 + Math.random() * 30, t); o.frequency.exponentialRampToValueAtTime(36, t + 0.25);
   og.gain.setValueAtTime(0.9 * v, t); og.gain.exponentialRampToValueAtTime(0.001, t + 0.32); o.connect(og); og.connect(out()); o.start(t); o.stop(t + 0.34);
+  if (sample('metal', 0.85 * v, { rate: 0.75 + 0.2 * Math.random() })) { // recorded metal, plus wreckage and glass on harder hits
+    if (p > 0.5) sample('crash', 0.75 * v, { rate: 0.85, t0: 0.02 });
+    if (p > 0.8) sample('glass', 0.55 * v, { t0: 0.04 });
+    return;
+  }
   burst(0.35 + 0.3 * p, 600, 0.55 * v);
   const n = 2 + Math.round(p * 3);
   for (let i = 0; i < n; i++) band(i * 0.03 + Math.random() * 0.02, 0.1 + Math.random() * 0.15 * p, 500 + Math.random() * 1800, 1.4, 0.6 * v * (1 - i / (n + 1)));
@@ -444,6 +502,8 @@ function farSiren() {
 export function footstep(kind, loud = 1) {
   if (!ac) return;
   const v = 0.08 * loud;
+  if ((kind === 'grass' || kind === 'snow') && sample('stepsoft', 0.22 * loud)) return;
+  if (!['grass', 'snow', 'metal', 'wood', 'water'].includes(kind) && sample('step', 0.2 * loud)) return;
   if (kind === 'grass') burst(0.07, 900, v * 0.7);
   else if (kind === 'metal') { burst(0.04, 3500, v * 0.6); tone('square', 520 + Math.random() * 120, 0.05, v * 0.12); }
   else if (kind === 'wood') { burst(0.05, 1200, v * 0.7); tone('sine', 180 + Math.random() * 40, 0.06, v * 0.25); }
@@ -487,7 +547,7 @@ export function soundGoal() { [523, 659, 784, 1046, 1318].forEach((f, i) => tone
 export function soundCash() { tone('square', 1318, 0.06, 0.06); tone('square', 1760, 0.08, 0.06, 0.06); }
 export function soundGnome() { [880, 1108, 1318, 1760].forEach((f, i) => tone('sine', f, 0.25, 0.12, i * 0.07)); }
 export function soundWhoosh() { burst(0.32, 1400, 0.3); burst(0.5, 400, 0.25); } // the spawn camera's cuts
-export function soundClick() { burst(0.03, 4000, 0.25); }
+export function soundClick() { soundUi('click'); }
 export function soundReload() { burst(0.05, 3000, 0.3); setTimeout(() => burst(0.06, 2000, 0.35), 350); }
 export function soundNitro() { burst(0.6, 900, 0.3); }
 
@@ -520,9 +580,13 @@ export function setEngine(kind, rpm, load) {
 }
 export function soundBackfire(dist = 0) { burst(0.09, 700, 0.55 * fall(dist)); setTimeout(() => burst(0.06, 500, 0.35 * fall(dist)), 70); }
 const exhaustMat = new THREE.MeshLambertMaterial({ color: 0x9a9a9a, transparent: true, opacity: 0.35, depthWrite: false });
+// every effect material, so main.js can compile their shaders behind the loading screen (the first gunfight or
+// explosion otherwise hitches while they compile); the explosion's own material is per-boom but shares this program
+export const warmMats = () => [bloodMat, decalMat, fireMat, smokeMat, flashMat, sparkMat, glassMat, dropMat, dustMat, casingMat, exhaustMat, new THREE.MeshBasicMaterial({ color: 0xffa726, transparent: true, opacity: 1 })];
 // a little puff from the tailpipe (dark when flooring it, fire on a backfire)
 export function exhaust(x, y, z, vx, vz, flame = false) {
   if (parts.length > 270) return;
   const s = new THREE.Mesh(sphere, flame ? fireMat : exhaustMat); s.position.set(x, y, z); s.scale.setScalar(flame ? 0.12 : 0.08); scene.add(s);
   parts.push({ m: s, vx: vx * 0.2 + (Math.random() - 0.5) * 0.4, vy: 0.3 + Math.random() * 0.3, vz: vz * 0.2 + (Math.random() - 0.5) * 0.4, life: flame ? 0.12 : 0.8, kind: 'smoke' });
 }
+

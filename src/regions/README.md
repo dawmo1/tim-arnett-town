@@ -54,10 +54,11 @@ faces the nearest road.
 | `tree` | x, z, tree (0 broadleaf, 1 conifer, 2 street), scale | |
 | `light` | x, z, h | a street light |
 | `roundabout` | x, z, r | the raised grass island; the ring road itself comes from OSM |
+| `miniround` | x, z, r | painted mini-roundabout: a flat white disc on the junction, no collision |
 | `median` | pts [x, z, ...], w | raised kerbed median strip |
 | `parking` | pts [x, z, ...] | paved lot polygon. It must be convex; split concave lots into several. |
 
-Road features (`roundabout`, `median`, `parking`) are meant to be on the road, so they skip the off-road check.
+Road features (`roundabout`, `miniround`, `median`, `parking`) are meant to be on the road, so they skip the off-road check.
 An unknown kind logs one warning. If you need a new kind, describe it in your report.
 
 ### models

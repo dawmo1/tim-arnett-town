@@ -414,7 +414,7 @@ export { coreAt };
 const warned = new Set();
 export function regionPlaces(t, X) {
   const regs = regionsIn(t.ox, t.oz, t.ox + TILE, t.oz + TILE); if (!regs.length) return;
-  const { junk, lights, trees, posts, solid, SB, NB, groundB, lotB } = X;
+  const { junk, lights, trees, posts, solid, SB, NB, groundB, lotB, markB } = X;
   const CONC = lin(0xbdb8ae), GRASS = lin(0x80a359);
   for (const reg of regs) for (const p of reg.places) {
     const P = p.pts, px = P ? P[0] : p.x, pz = P ? P[1] : p.z;
@@ -452,6 +452,13 @@ export function regionPlaces(t, X) {
         for (let k = 0; k < 24; k++) { const a = (k / 24) * Math.PI * 2, x = px + Math.cos(a) * (r - 0.3), z = pz + Math.sin(a) * (r - 0.3); ring.push(groundB.v(x, y + 0.33, z, 0, 1, 0, ...GRASS, x / 7, z / 7)); }
         for (let k = 0; k < 24; k++) groundB.i.push(ctr, ring[(k + 1) % 24], ring[k]);
         solid.push(makeBox(px, pz, 1, 0, r * 0.7, r * 0.7, y - 0.3, 0.6)); break;
+      }
+      case 'miniround': { // a painted mini-roundabout: a flat white disc on the junction, r metres, drive straight over it
+        const r = p.r || 2, PAINT = lin(0xeeeeea), py = (x, z) => terrainHeight(x, z) + 0.1, ring = [];
+        const ctr = markB.v(px, py(px, pz), pz, 0, 1, 0, ...PAINT, 0, 0);
+        for (let k = 0; k < 20; k++) { const a = (k / 20) * Math.PI * 2, x = px + Math.cos(a) * r, z = pz + Math.sin(a) * r; ring.push(markB.v(x, py(x, z), z, 0, 1, 0, ...PAINT, 0, 0)); }
+        for (let k = 0; k < 20; k++) markB.i.push(ctr, ring[(k + 1) % 20], ring[k]);
+        break;
       }
       case 'median': { // a raised kerbed median along pts [x, z, ...], w metres wide
         if (!P || P.length < 4) break;

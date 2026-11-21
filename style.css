@@ -38,7 +38,8 @@ button { font: inherit; }
 .mmKeys kbd { display: inline-block; min-width: 24px; padding: 1px 6px; margin-right: 6px; border-radius: 4px; background: #fff; color: #000; font: inherit; text-align: center; text-shadow: none; }
 #loader.menu .spin, #loader.menu .bar, #loader.menu .tip { display: none; }
 #loader.menu .shade { background: linear-gradient(to top, rgba(0,0,0,.6), rgba(0,0,0,0) 30%); }
-@media (max-width: 760px) { .mmList { top: 38%; left: 16px; right: 16px; width: auto; } #mmPanel { left: 16px; right: 16px; width: auto; top: auto; bottom: 64px; transform: none; max-height: 44vh; } .mmKeys { display: none; } }
+/* narrow or short screens: list and panel stack in one scrolling column, so the panel can never cover the list */
+@media (max-width: 1000px), (max-height: 560px) { #menu { display: flex; flex-direction: column; gap: 12px; padding: 16px; overflow-y: auto; } .mmList, #mmPanel { position: static; transform: none; width: auto; max-width: 560px; flex: none; } #mmPanel { max-height: none; overflow: visible; } .mmList button { font-size: 24px; padding: 10px 16px 8px; } .mmList button.on { padding-left: 22px; } .mmKeys { display: none; } }
 #resumeBtn:focus-visible, .mmList button:focus-visible, #pauseTabs button:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
 #netStatus { font-size: 14px; color: var(--muted); margin: 0 0 8px; }
 /* main menu Online panel: who's on (and where), plus the same chat as T in game */

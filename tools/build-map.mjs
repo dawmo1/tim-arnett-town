@@ -318,6 +318,19 @@ for (const w of roadWays) w.nodes.forEach((n, i) => use.set(n, (use.get(n) || 0)
 const nodeIdx = new Map(), nodes = [];
 const getNode = (osm, x, z) => { if (!nodeIdx.has(osm)) { nodeIdx.set(osm, nodes.length); nodes.push({ x, z, osm, ctrl: 0, deg: 0 }); } return nodeIdx.get(osm); };
 let edges = [];
+// ramps: every *_link, plus short unnamed highway=motorway pieces that touch a link or trunk (mis-tagged ramps:
+// they came out as 2-lane, 10 m motorway and overlapped at interchanges like I-88 exit 6). Untagged ramps get 1 lane.
+{
+  const touch = new Map(); // osm node -> highway types of the ways ending there
+  for (const w of roadWays) for (const n of [w.nodes[0], w.nodes[w.nodes.length - 1]]) { if (!touch.has(n)) touch.set(n, []); touch.get(n).push(w.t.highway); }
+  for (const w of roadWays) {
+    const hw = w.t.highway;
+    if (/_link$/.test(hw)) { w.ramp = true; continue; }
+    if (hw !== 'motorway' || w.t.name || w.t.lanes) continue;
+    let L = 0; for (let i = 1; i < w.pts.length; i++) L += dist(w.pts[i], w.pts[i - 1]);
+    if (L < 700 && [w.nodes[0], w.nodes[w.nodes.length - 1]].some((n) => touch.get(n).some((h) => /_link$|^trunk$/.test(h)))) w.ramp = true;
+  }
+}
 const parseWidth = (v) => { if (!v) return 0; const n = parseFloat(v); return /ft|'/.test(v) ? n * 0.3048 : n || 0; };
 for (const w of roadWays) {
   let start = 0;
@@ -327,7 +340,7 @@ for (const w of roadWays) {
       let oneway = t.oneway === 'yes' || t.oneway === '1' || t.oneway === 'true' || t.highway === 'motorway' || /_link$/.test(t.highway) && t.oneway !== 'no' && (w.cl === 'motor' || w.cl === 'trunk') || t.junction === 'roundabout' ? 1 : t.oneway === '-1' ? -1 : 0;
       let A = a, B = b, PTS = pts;
       if (oneway === -1) { A = b; B = a; PTS = pts.slice().reverse(); oneway = 1; }
-      const lanesTotal = +t.lanes || (oneway ? (w.cl === 'primary' || w.cl === 'trunk' || w.cl === 'motor' ? 2 : 1) : w.cl === 'primary' || w.cl === 'trunk' ? 4 : w.cl === 'track' ? 1 : 2);
+      const lanesTotal = +t.lanes || (oneway ? (w.ramp ? 1 : w.cl === 'primary' || w.cl === 'trunk' || w.cl === 'motor' ? 2 : 1) : w.cl === 'primary' || w.cl === 'trunk' ? 4 : w.cl === 'track' ? 1 : 2);
       const lf = oneway ? lanesTotal : Math.max(1, +t['lanes:forward'] || Math.ceil(lanesTotal / 2));
       const lb = oneway ? 0 : w.cl === 'track' ? 1 : Math.max(1, +t['lanes:backward'] || Math.floor(lanesTotal / 2) || 1);
       const ms = t.maxspeed ? parseFloat(t.maxspeed) * (t.maxspeed.includes('mph') || !t.maxspeed.match(/km/) ? 0.447 : 0.2778) : SPEED[w.cl];
@@ -338,12 +351,51 @@ for (const w of roadWays) {
         | (t.cycleway && t.cycleway !== 'no' ? 1024 : 0) | (t['parking:lane:both'] || t['parking:both'] || t['parking:lane:right'] || t['parking:right'] ? 2048 : 0) | (t.median || t.dual_carriageway === 'yes' ? 4096 : 0) | (t.toll === 'yes' ? 8192 : 0);
       // one carriageway of a divided road or a ramp: its lanes plus shoulders, not the class's two-way width (15 m motorway
       // ramps overlapped everything at the interchanges)
-      const width = parseWidth(t.width) || (oneway ? Math.max(4.5, lf * lw + (w.cl === 'motor' || w.cl === 'trunk' ? 3 : w.cl === 'primary' || w.cl === 'secondary' ? 1.2 : 0.6))
-        : Math.max(WIDTH[w.cl], (lf + lb) * lw + (w.cl === 'residential' ? 2 : 0)));
+      const shoulder = w.cl === 'motor' || w.cl === 'trunk' ? 3 : w.cl === 'primary' || w.cl === 'secondary' ? 1.2 : 0.6;
+      // a tagged width on a one-way carriageway is often the whole divided road: cap it at its own lanes plus shoulders
+      const width = oneway ? Math.min(parseWidth(t.width) || Infinity, Math.max(4.5, lf * (parseWidth(t.width) ? 3.4 : lw) + shoulder))
+        : parseWidth(t.width) || Math.max(WIDTH[w.cl], (lf + lb) * lw + (w.cl === 'residential' ? 2 : 0));
       edges.push({ a: A, b: B, pts: PTS, cl: w.cl, lf, lb, speed: Math.min(ms || SPEED[w.cl], 33), name: t.name || '', ref: t.ref || '', bridge: t.bridge && t.bridge !== 'no' ? 1 : 0, layer: +t.layer || 0, width: r1(width), flags, turn: t['turn:lanes'] || t['turn:lanes:forward'] || '' });
       start = i;
     }
   }
+}
+// E 53rd St, Brady to Elmore: 4 lanes plus a centre turn lane (2+2, ~17.5 m); OSM has it as a plain 2-lane road
+for (const e of edges) {
+  if (e.name !== 'East 53rd Street' || e.lb === 0) continue;
+  const xs = e.pts.map((p) => p[0]), zs = e.pts.map((p) => p[1]);
+  if (Math.min(...xs) >= 830 && Math.max(...xs) <= 3515 && Math.min(...zs) > -5700 && Math.max(...zs) < -5600) { e.lf = 2; e.lb = 2; e.width = 17.5; e.flags |= 128; }
+}
+// two one-way carriageways of the same road closer than their widths (River Drive downtown: 10 m apart, tagged 14-17 m):
+// cap each at the separation and drop lanes to fit
+{
+  const ow = edges.filter((e) => e.lb === 0 && (e.name || e.ref)), G = 40, grid = new Map();
+  const key = (x, z) => `${Math.floor(x / G)},${Math.floor(z / G)}`;
+  for (const e of ow) for (const p of e.pts) { const k = key(p[0], p[1]); if (!grid.has(k)) grid.set(k, new Set()); grid.get(k).add(e); }
+  const near = (f, x, z, dx, dz) => { // distance from (x,z) to f, if f runs the opposite way there
+    let best = Infinity, dot = 0;
+    for (let i = 1; i < f.pts.length; i++) {
+      const [ax, az] = f.pts[i - 1], [bx, bz] = f.pts[i], sx = bx - ax, sz = bz - az, L2 = sx * sx + sz * sz || 1;
+      const t = Math.max(0, Math.min(1, ((x - ax) * sx + (z - az) * sz) / L2)), d = Math.hypot(ax + sx * t - x, az + sz * t - z);
+      if (d < best) { best = d; dot = (sx * dx + sz * dz) / Math.sqrt(L2); }
+    }
+    return dot < -0.7 ? best : Infinity;
+  };
+  let capped = 0;
+  for (const e of ow) {
+    let sep = Infinity;
+    for (let i = 1; i < e.pts.length; i++) {
+      const [ax, az] = e.pts[i - 1], [bx, bz] = e.pts[i], L = Math.hypot(bx - ax, bz - az);
+      if (L < 1) continue;
+      for (let s = 5; s < L - 5; s += 10) { // samples along the edge, skipping the ends where carriageways merge
+        const x = ax + (bx - ax) * s / L, z = az + (bz - az) * s / L, cand = new Set();
+        for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) for (const f of grid.get(`${Math.floor(x / G) + di},${Math.floor(z / G) + dj}`) || []) cand.add(f);
+        for (const f of cand) if (f !== e && (f.name === e.name || (f.ref && f.ref === e.ref))) { const d = near(f, x, z, (bx - ax) / L, (bz - az) / L); if (d > 5) sep = Math.min(sep, d); }
+      }
+    }
+    if (e.width > sep - 0.6) { e.width = r1(Math.max(4.5, sep - 0.6)); e.lf = Math.max(1, Math.min(e.lf, Math.floor(e.width / 3.2))); capped++; }
+  }
+  log(`one-way carriageways capped to their separation: ${capped}`);
 }
 // drop tiny disconnected bits (keep every network longer than 400 m: towns, Arsenal Island, farm loops)
 const elen = (e) => { let l = 0; for (let i = 1; i < e.pts.length; i++) l += dist(e.pts[i], e.pts[i - 1]); return l; };
@@ -512,6 +564,7 @@ function addBuilding(geomPts, t, src = {}) {
   else if (d === 'north') h = area > 3000 ? 8 + rand() * 4 : 5 + rand() * 3;
   else if (d === 'rural') h = area > 1500 ? 7 + rand() * 4 : 5 + rand() * 3;
   else h = area > 1500 ? 8 + rand() * 6 : 6 + rand() * 4;
+  if (src.id === 'r12867212') h = 27; // the Arconic Davenport Works mill in Riverdale (~490,000 m2) stands ~25-30 m, not 12 m
   const roof = t['roof:shape'];
   const pitched = roof ? (roof === 'flat' ? 0 : 1) : (HOUSEY.has(type) || type === 'barn' || (type === 'yes' && area < 260 && d !== 'downtown' && d !== 'north')) && area < 420 ? 1 : 0;
   // facade style: 0 brick, 1 stone, 2 siding, 3 glass/office, 4 stucco/strip mall, 5 industrial metal
