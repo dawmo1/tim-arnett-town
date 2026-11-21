@@ -341,12 +341,17 @@ export function initMaterials(quality = 'medium') {
   if (quality !== 'low') { bm.normalMap = atlas('height', 1024); bm.normalScale.set(1, 1); bm.userData.orm = atlas('orm', 512); }
   M.building = atlasPatch(bm);
   M.terrain = new THREE.MeshStandardMaterial({ vertexColors: true, map: noiseTex(256, '#d8d8d8', 0.18, 3), roughness: 0.95 });
-  M.road = new THREE.MeshStandardMaterial({ vertexColors: true, map: noiseTex(256, '#bdbdbd', 0.22, 4, (g, s) => { g.fillStyle = 'rgba(0,0,0,.25)'; for (let k = 0; k < 6; k++) { g.beginPath(); g.moveTo(Math.random() * s, 0); g.lineTo(Math.random() * s, s); g.lineWidth = 1; g.strokeStyle = 'rgba(30,30,30,.25)'; g.stroke(); } }), roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
-  M.walk = new THREE.MeshStandardMaterial({ vertexColors: true, map: noiseTex(128, '#e4e1db', 0.12, 5, (g, s) => { g.fillStyle = 'rgba(80,80,80,.35)'; g.fillRect(0, 0, s, 2); g.fillRect(0, 0, 2, s); }), roughness: 0.92, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 });
-  M.mark = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -6 });
+  M.road = new THREE.MeshStandardMaterial({ vertexColors: true, map: noiseTex(256, '#bdbdbd', 0.22, 4, (g, s) => { g.fillStyle = 'rgba(0,0,0,.25)'; for (let k = 0; k < 6; k++) { g.beginPath(); g.moveTo(Math.random() * s, 0); g.lineTo(Math.random() * s, s); g.lineWidth = 1; g.strokeStyle = 'rgba(30,30,30,.25)'; g.stroke(); } }), roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -20 });
+  M.walk = new THREE.MeshStandardMaterial({ vertexColors: true, map: noiseTex(128, '#e4e1db', 0.12, 5, (g, s) => { g.fillStyle = 'rgba(80,80,80,.35)'; g.fillRect(0, 0, s, 2); g.fillRect(0, 0, 2, s); }), roughness: 0.92, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -6 });
+  M.mark = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -30 });
+  // ground layers, bottom to top, each a clear step of depth offset apart (a few cm of lift alone fights at 150 m+):
+  // terrain < crops -2 < sidewalks -6 < lots/driveways/aisles -10 < minor roads -14 < major roads + junctions -20 < paint -30
+  M.lot = M.road.clone(); M.lot.polygonOffsetFactor = -1; M.lot.polygonOffsetUnits = -10;
+  M.roadLo = M.road.clone(); M.roadLo.polygonOffsetUnits = -14;
+  M.lod = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 }); // far-LOD buildings (tile.js buildTileLite)
   M.signs = new THREE.MeshStandardMaterial({ map: signAtlas(false), emissiveMap: signAtlas(true), emissive: 0xffffff, emissiveIntensity: 0, roughness: 0.5, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
   M.graffiti = new THREE.MeshStandardMaterial({ map: graffitiAtlas(), transparent: true, alphaTest: 0.3, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
-  M.rail = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, metalness: 0.2, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
+  M.rail = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, metalness: 0.2, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -24 });
   M.water = new THREE.MeshStandardMaterial({ color: 0x3f6f7a, roughness: 0.12, metalness: 0.1, transparent: true, opacity: 0.93 });
   M.far = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 });
   M.farBox = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, emissive: 0xffc070, emissiveIntensity: 0 });
@@ -363,6 +368,6 @@ export function initMaterials(quality = 'medium') {
   M.namesLit = M.names;
   M.glow = glowMaterial();
   WX.puddles.value = puddleTex();
-  weatherPatch(M.crop, 'ground'); weatherPatch(M.building, 'roof'); weatherPatch(M.terrain, 'ground'); weatherPatch(M.road, 'road'); weatherPatch(M.walk, 'walk'); weatherPatch(M.far, 'ground'); weatherPatch(M.farBox, 'roof');
+  weatherPatch(M.crop, 'ground'); weatherPatch(M.building, 'roof'); weatherPatch(M.terrain, 'ground'); weatherPatch(M.road, 'road'); weatherPatch(M.roadLo, 'road'); weatherPatch(M.lot, 'road'); weatherPatch(M.lod, 'roof'); weatherPatch(M.walk, 'walk'); weatherPatch(M.far, 'ground'); weatherPatch(M.farBox, 'roof');
   return M;
 }

@@ -14,6 +14,7 @@ import { mat } from './character.js';
 import { textTexture } from './util.js';
 import { loadLazy, dropLazy } from './assets.js';
 import { addHall, removeHall } from './interiors.js';
+import { onRegion } from './regions/index.js';
 
 let scene, ctx;
 const night = [];  // [material, max emissive] lit at night
@@ -24,6 +25,8 @@ export const doors = []; // {x, y, z, to: {x, y, z, h}, label}
 export function initLandmarks(s, c) {
   scene = s; ctx = c;
   initTrain(); initRiver(); initFerry(); initBillboards(); initModels();
+  // town modules' models (src/regions/<id>.js, files under assets/models/regions/<id>/): streamed like the ones above
+  onRegion((r) => { for (const L of r.models) { MODELS.push(L); if (!L.ground) solidify(L); } });
   W.onStream('built', (t) => tryBuild(t));
   for (const rec of W.builtTiles.values()) tryBuild(rec.t);
 }
@@ -57,6 +60,7 @@ function waterFrom(x, z, dx, dz, max = 800) { for (let d = 0; d < max; d += 4) i
 // Each model is built around its anchor (game x/z), base at y, facing as in the city. The OSM buildings
 // under `clear` ([cx, cz, half x, half z]) are dropped from the tile data (city/data.js lots), `solid`
 // ([cx, cz, half x, half z, height, base above y, heading (default the model's)]) are its walls. Models stream in within LOAD m and out past DROP m.
+// L.path: the file under assets/models/ when it isn't landmarks/<file>.glb (region models: regions/<id>/<file>.glb).
 const MODELS = [
   { file: 'blackhawk', x: 451.6, z: 96.5, y: 7.5, clear: [[451.6, 96.5, 21, 18]], solid: [[448.25, 86.9, 21.15, 12.7, 50], [472.75, 91, 3.35, 8.6, 50], [433.35, 109.2, 6.25, 9.6, 10],
     [469.85, 109.2, 6.25, 9.6, 10], [451.6, 109.2, 24.5, 9.6, 40, 10], ...roomWalls(451.6, 109.2, 0, 24, 18.4, 10, [['s', -2, 2]])] }, // lobby (blackhawk_int) behind the 3rd St doors
@@ -213,7 +217,7 @@ let modelT = 0;
 function updateModels(dt, focus) {
   if ((modelT -= dt) > 0 || !focus) return; modelT = 0.5;
   for (const L of MODELS) {
-    const d = Math.hypot(L.x - focus.x, L.z - focus.z), file = `landmarks/${L.file}.glb`, load = L.load || LOAD;
+    const d = Math.hypot(L.x - focus.x, L.z - focus.z), file = L.path || `landmarks/${L.file}.glb`, load = L.load || LOAD;
     if (d < load && !L.obj && !L.loading) {
       if (L.y === undefined) { // ground: wait for the anchor's tile so the base sits on the detailed terrain
         if (!W.tiles.has(`${Math.floor(L.x / 200)}_${Math.floor(L.z / 200)}`)) continue;
@@ -226,7 +230,7 @@ function updateModels(dt, focus) {
       for (const R of L.rooms || []) removeHall(R);
       L.rooms = null;
       // bridge modules share one file: free it when the last copy goes
-      if (!MODELS.some((o) => o.file === L.file && (o.obj || o.loading))) loadLazy(file).then((g) => { g?.scene.traverse((o) => o.geometry?.dispose()); dropLazy(file); });
+      if (!MODELS.some((o) => (o.path || o.file) === (L.path || L.file) && (o.obj || o.loading))) loadLazy(file).then((g) => { g?.scene.traverse((o) => o.geometry?.dispose()); dropLazy(file); });
     }
   }
 }

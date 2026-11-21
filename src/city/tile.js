@@ -5,10 +5,10 @@ import * as THREE from 'three';
 import { TILE, C, G, D, terrainHeight, district, pointOnEdge, nearestEdge } from './data.js';
 import { makeBox } from './collide.js';
 import { M, CELL, STYLE_CELL, SIGN_NAMES } from './mats.js';
-import { Buf, face, tri, obox, panel, lin, hash } from './geom.js';
+import { Buf, face, tri, obox, panel, lin, hash, PLAIN } from './geom.js';
 import { applyArchetypes, edgeArea, coreAt, HOUSE, pointsOf } from './areas.js';
 import { nameUV, displayName, STRIP_FOOD, GHOST } from './names.js';
-import { streetSigns, powerLines, parkingDetail, crops, dataPoints, dataLines } from './detail.js';
+import { streetSigns, powerLines, parkingDetail, crops, dataPoints, dataLines, placeOff, validatePlacements, regionPlaces } from './detail.js';
 
 // ---------- ground colours ----------
 const GROUND = [];
@@ -21,8 +21,8 @@ const MORE = { farm: 0x8e9a5a, meadow: 0x93ad62, orchard: 0x6f9c4a, golf: 0x6cb5
 for (const [k, v] of Object.entries(MORE)) if (C[k] != null) GROUND[C[k]] = v;
 const GROUND_LIN = Array.from(GROUND, (h) => lin(h ?? 0x84a85c));
 
-function buildTerrain(t, B) {
-  const S = 51, step = 4;
+function buildTerrain(t, B, step = 4) { // step 8 for the far LOD (same heights on the tile edges, so no cracks)
+  const S = TILE / step + 1, cs = step / 4;
   const hgt = new Float32Array(S * S);
   for (let j = 0; j < S; j++) for (let i = 0; i < S; i++) hgt[j * S + i] = terrainHeight(t.ox + i * step, t.oz + j * step);
   const cls = (i, j) => t.c[Math.max(0, Math.min(49, j)) * 50 + Math.max(0, Math.min(49, i))];
@@ -34,7 +34,7 @@ function buildTerrain(t, B) {
     const hx = terrainHeight(x + 2, z) - terrainHeight(x - 2, z), hz = terrainHeight(x, z + 2) - terrainHeight(x, z - 2);
     const nl = Math.hypot(hx, 4, hz);
     let r = 0, g = 0, b = 0;
-    for (const [di, dj] of [[-1, -1], [0, -1], [-1, 0], [0, 0]]) { const k0 = cls(i + di, j + dj); const c = urban && k0 === C.lawn ? URBAN : GROUND_LIN[k0] || GROUND_LIN[0]; r += c[0]; g += c[1]; b += c[2]; }
+    for (const [di, dj] of [[-1, -1], [0, -1], [-1, 0], [0, 0]]) { const k0 = cls(i * cs + di, j * cs + dj); const c = urban && k0 === C.lawn ? URBAN : GROUND_LIN[k0] || GROUND_LIN[0]; r += c[0]; g += c[1]; b += c[2]; }
     const k = (0.93 + hash(x * 0.37 + z * 1.13) * 0.12) / 4;
     B.v(x, y, z, -hx / nl, 4 / nl, -hz / nl, r * k, g * k, b * k, x / 7, z / 7);
   }
@@ -42,7 +42,25 @@ function buildTerrain(t, B) {
 }
 
 // ---------- roads ----------
-const dense = new Map(); // edge id -> {x, z, s, nx, nz, m} arrays (points every <= 5 m, with mitre normals)
+// Ground layers never overlap at the same depth (that's what flickered): each edge's strip stops where its junction
+// starts, a junction is one convex polygon over the ends of its legs, two edges meeting end to end share a mitred joint,
+// and the layers that do overlap (sidewalk < lot / driveway < minor road < major road < paint) are a depth-offset step
+// apart (mats.js). Tunnels aren't drawn.
+const legs = (k) => G.adj[k].map((id) => G.edges[id]).filter(Boolean);
+// unit direction leaving node k along e (its first / last segment)
+function legDir(e, k) {
+  const P = e.pts, n = P.length / 2, atA = k === e.a;
+  const ax = atA ? P[0] : P[n * 2 - 2], az = atA ? P[1] : P[n * 2 - 1], bx = atA ? P[2] : P[n * 2 - 4], bz = atA ? P[3] : P[n * 2 - 3], l = Math.hypot(bx - ax, bz - az) || 1;
+  return [(bx - ax) / l, (bz - az) / l];
+}
+// where two edges meet end to end (a way split): the shared joint's tangent, so both strips end on the same mitre line
+function joint(e, k, own) {
+  const L = legs(k); if (L.length !== 2 || L[0] === L[1]) return null;
+  const od = legDir(L[0] === e ? L[1] : L[0], k), atA = k === e.a;
+  const tx = atA ? own[0] - od[0] : own[0] + od[0], tz = atA ? own[1] - od[1] : own[1] + od[1], l = Math.hypot(tx, tz);
+  return l < 0.35 ? null : [tx / l, tz / l]; // (a hairpin: leave it square)
+}
+const dense = new Map(); // edge id -> {x, z, s, nx, nz, sc, m} (points every <= 5 m, mitred normals)
 function denseOf(e) {
   let d = dense.get(e.id); if (d) return d;
   const P = e.pts, np = e.cum.length, xs = [], zs = [], ss = [];
@@ -55,27 +73,66 @@ function denseOf(e) {
     const k0 = Math.max(0, k - 1), k1 = Math.min(m - 1, k + 1);
     let dx = xs[k1] - xs[k0], dz = zs[k1] - zs[k0]; const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;
     // (-dz, dx) is the right-hand side of travel a->b (x east, z south); both sides are built symmetrically
-    nx[k] = -dz; nz[k] = dx;
-    // mitre scale from the turn at this point
+    nx[k] = -dz; nz[k] = dx; sc[k] = 1;
     if (k > 0 && k < m - 1) {
       const ux = xs[k] - xs[k - 1], uz = zs[k] - zs[k - 1], vx = xs[k + 1] - xs[k], vz = zs[k + 1] - zs[k];
       const lu = Math.hypot(ux, uz) || 1, lv = Math.hypot(vx, vz) || 1;
-      const cos = (ux * vx + uz * vz) / (lu * lv);
-      sc[k] = Math.min(2, 1 / Math.max(0.5, Math.sqrt((1 + cos) / 2)));
-    } else sc[k] = 1;
+      sc[k] = Math.min(2, 1 / Math.max(0.5, Math.sqrt((1 + (ux * vx + uz * vz) / (lu * lv)) / 2)));
+    } else {
+      const T = joint(e, k === 0 ? e.a : e.b, [dx, dz]);
+      if (T) { nx[k] = -T[1]; nz[k] = T[0]; sc[k] = Math.min(2, 1 / Math.max(0.5, T[0] * dx + T[1] * dz)); }
+    }
   }
   d = { x: xs, z: zs, s: ss, nx, nz, sc, m };
   dense.set(e.id, d);
   return d;
 }
+// the strip's point at distance s along e, o metres to the side (exactly what the strip quads interpolate)
+function stripAt(e, s, o) {
+  const d = denseOf(e); let k = 0; while (k < d.m - 2 && d.s[k + 1] < s) k++;
+  const f = Math.max(0, Math.min(1, (s - d.s[k]) / ((d.s[k + 1] - d.s[k]) || 1)));
+  const xa = d.x[k] + d.nx[k] * o * d.sc[k], za = d.z[k] + d.nz[k] * o * d.sc[k], xb = d.x[k + 1] + d.nx[k + 1] * o * d.sc[k + 1], zb = d.z[k + 1] + d.nz[k + 1] * o * d.sc[k + 1];
+  return [xa + (xb - xa) * f, za + (zb - za) * f];
+}
+function hull(P) { // convex hull (monotone chain), counter-clockwise in x/z
+  P = P.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cr = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]), lo = [], up = [];
+  for (const p of P) { while (lo.length >= 2 && cr(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); }
+  for (let i = P.length - 1; i >= 0; i--) { const p = P[i]; while (up.length >= 2 && cr(up[up.length - 2], up[up.length - 1], p) <= 0) up.pop(); up.push(p); }
+  return lo.slice(0, -1).concat(up.slice(0, -1));
+}
+// A junction (3+ legs): how far each leg's strip is cut back (far enough that neighbouring legs no longer overlap, even
+// at sharp angles) and the paved polygon over the middle. Cached; recomputed if more legs load.
+const JN = new Map();
+export function junction(k) {
+  const L = legs(k); if (L.length < 3) return null;
+  let J = JN.get(k); if (J && J.n === L.length) return J;
+  const lg = L.map((e) => { const d = legDir(e, k); return { e, hw: e.width / 2, a: Math.atan2(d[1], d[0]) }; }).sort((p, q) => p.a - q.a);
+  let hwMax = 0; for (const g of lg) hwMax = Math.max(hwMax, g.hw);
+  let r = hwMax + 0.8;
+  for (let i = 0; i < lg.length; i++) {
+    const p = lg[i], q = lg[(i + 1) % lg.length]; let th = q.a - p.a; if (th <= 0) th += Math.PI * 2;
+    if (th > Math.PI - 0.05) continue;
+    const sn = Math.max(0.2, Math.sin(th)), cs = Math.cos(th);
+    r = Math.max(r, (q.hw + p.hw * cs) / sn + 0.3, (p.hw + q.hw * cs) / sn + 0.3); // where the two legs' facing kerbs cross
+  }
+  r = Math.min(r, hwMax * 3 + 2);
+  const trim = new Map(), ring = [[G.nodes.x[k], G.nodes.z[k]]];
+  for (const g of lg) { const s = Math.min(r, g.e.len * 0.45), at = g.e.a === k ? s : g.e.len - s; trim.set(g.e.id, s); ring.push(stripAt(g.e, at, g.hw), stripAt(g.e, at, -g.hw)); }
+  J = { n: L.length, r, trim, poly: hull(ring) };
+  JN.set(k, J);
+  return J;
+}
+// radius of the paved junction at a node (stop lines, crosswalks and signs sit just outside it)
+export function nodeRadius(k) {
+  const J = junction(k); if (J) return J.r;
+  let r = 0; for (const e of legs(k)) r = Math.max(r, e.width / 2);
+  return r;
+}
+const trimAt = (e, k) => { const J = junction(k); return J ? J.trim.get(e.id) ?? J.r : 0; };
 const ROAD_COL = { motor: 0x4a4d52, trunk: 0x4a4d52, primary: 0x4c4f53, secondary: 0x515458, tertiary: 0x56595d, minor: 0x5c5f62, residential: 0x5e6164, service: 0x66686a, track: 0x8f8572 };
 const SIDEWALK = (e) => e.cls !== 'service' && e.cls !== 'motor' && e.cls !== 'trunk' && e.cls !== 'track';
 const WALK_W = 2.2;
-// radius of the paved junction at a node
-export function nodeRadius(k) {
-  let r = 0; for (const id of G.adj[k]) { const e = G.edges[id]; if (e) r = Math.max(r, e.width / 2); }
-  return r + (G.adj[k].length >= 3 ? 0.8 : 0);
-}
 const inTile = (t, x, z) => x >= t.ox && x < t.ox + TILE && z >= t.oz && z < t.oz + TILE;
 // How a street looks, from its tags (edge flags) and its surroundings. Rural roads with no surface tag: Scott County's
 // county roads are ~58% gravel (docs/references.md), so local roads out there are gravel unless tagged paved.
@@ -87,9 +144,19 @@ function roadLook(e, t) {
   return (e.look = { a, gravel, brick: !!(f & 2), sw, lit: !!(f & 64), median: !!(f & 4096) });
 }
 const BIG = new Set(['primary', 'secondary', 'tertiary', 'trunk', 'motor']);
+const RANKC = { motor: 7, trunk: 6, primary: 5, secondary: 4, tertiary: 3, minor: 2, residential: 1, service: 0, track: 0 };
+const surfCol = (e, L) => (L.gravel ? (e.cls === 'track' ? 0x8f8572 : 0xa39b8a) : L.brick ? 0x8a4b3b : ROAD_COL[e.cls] || 0x5a5d61);
+// sidewalk layers by area: kerb, then a brick strip downtown or a grass parkway in the neighbourhoods, then the walk
+function walkLayers(L, big, C3) {
+  const [CURB, WALKC, BRICKW, GRASS, walkB, groundB] = C3;
+  return L.a === 'core' ? [[-0.2, 0.15, CURB, walkB, 1.5], [0.15, 1.35, big ? BRICKW : WALKC, walkB, 1.5], [1.35, WALK_W + 0.6, WALKC, walkB, 1.5]]
+    : (L.a === 'res' || L.a === 'suburb') && !big ? [[-0.2, 0.15, CURB, walkB, 1.5], [0.15, 0.9, GRASS, groundB, 7], [0.9, WALK_W + 0.3, WALKC, walkB, 1.5]]
+      : [[-0.2, 0.15, CURB, walkB, 1.5], [0.15, WALK_W, WALKC, walkB, 1.5]];
+}
 
-function buildRoads(t, roadB, walkB, markB, groundB) {
+function buildRoads(t, roadB, roadLoB, walkB, markB, groundB, lite = false) { // lite: no paint (far LOD)
   const WHITE = lin(0xeeeeea), YELLOW = lin(0xe8b923), CURB = lin(0xbdb8ae), WALKC = lin(0xc9c5bd), BRICKW = lin(0x9a5a48), GRASS = lin(0x80a359);
+  const C3 = [CURB, WALKC, BRICKW, GRASS, walkB, groundB];
   const deckY = (e, s, x, z) => (e.bridge ? pointOnEdge(e, s).y : terrainHeight(x, z));
   const flat = (B, ax, az, bx, bz, w, y0, y1, c) => { // a flat strip (markings) from a to b, w wide
     const dx = bx - ax, dz = bz - az, l = Math.hypot(dx, dz) || 1, px = (-dz / l) * w / 2, pz = (dx / l) * w / 2;
@@ -107,37 +174,37 @@ function buildRoads(t, roadB, walkB, markB, groundB) {
     triFlat(markB, [bx - hz * 0.45, bz + hx * 0.45], [bx + hz * 0.45, bz - hx * 0.45], [bx + hx * 1.1, bz + hz * 1.1], y, WHITE);
   };
   for (const id of t.e) {
-    const e = G.edges[id]; if (!e) continue;
-    const d = denseOf(e), hw = e.width / 2, L = roadLook(e, t);
-    const base = L.gravel ? (e.cls === 'track' ? 0x8f8572 : 0xa39b8a) : L.brick ? 0x8a4b3b : ROAD_COL[e.cls] || 0x5a5d61;
-    const rc = lin(base), v = 0.94 + hash(id) * 0.1, rcol = [rc[0] * v, rc[1] * v, rc[2] * v];
-    const trimA = G.adj[e.a].length >= 3 ? nodeRadius(e.a) + 0.5 : 0, trimB = G.adj[e.b].length >= 3 ? nodeRadius(e.b) + 0.5 : 0;
+    const e = G.edges[id]; if (!e || (e.flags & 1)) continue;
+    const d = denseOf(e), hw = e.width / 2, L = roadLook(e, t), RB = BIG.has(e.cls) ? roadB : roadLoB;
+    const rc = lin(surfCol(e, L)), v = 0.94 + hash(id) * 0.1, rcol = [rc[0] * v, rc[1] * v, rc[2] * v];
+    const cutA = trimAt(e, e.a), cutB = trimAt(e, e.b), lo = cutA, hi = e.len - cutB;
+    const trimA = cutA ? cutA + 0.5 : 0, trimB = cutB ? cutB + 0.5 : 0;
     const big = BIG.has(e.cls), rural = L.a === 'rural';
-    // kerb, then (by area) a brick strip downtown, a grass parkway in the neighbourhoods, then the sidewalk
-    const lay = L.a === 'core' ? [[-0.2, 0.15, CURB, walkB, 1.5], [0.15, 1.35, big ? BRICKW : WALKC, walkB, 1.5], [1.35, WALK_W + 0.6, WALKC, walkB, 1.5]]
-      : (L.a === 'res' || L.a === 'suburb') && !big ? [[-0.2, 0.15, CURB, walkB, 1.5], [0.15, 0.9, GRASS, groundB, 7], [0.9, WALK_W + 0.3, WALKC, walkB, 1.5]]
-        : [[-0.2, 0.15, CURB, walkB, 1.5], [0.15, WALK_W, WALKC, walkB, 1.5]];
+    const lay = walkLayers(L, big, C3);
     for (let k = 0; k < d.m - 1; k++) {
-      const mx = (d.x[k] + d.x[k + 1]) / 2, mz = (d.z[k] + d.z[k + 1]) / 2;
+      const sa = Math.max(lo, d.s[k]), sb = Math.min(hi, d.s[k + 1]); if (sb - sa < 0.01) continue;
+      const span = d.s[k + 1] - d.s[k] || 1, fa = (sa - d.s[k]) / span, fb = (sb - d.s[k]) / span;
+      const mx = d.x[k] + (d.x[k + 1] - d.x[k]) * (fa + fb) / 2, mz = d.z[k] + (d.z[k + 1] - d.z[k]) * (fa + fb) / 2;
       if (!inTile(t, mx, mz)) continue;
-      const row = (B, k2, o0, o1, lift, c, uvScale) => {
-        const out = [];
+      // one end of a quad: offsets o0, o1 across the road at fraction f of dense segment k
+      const row = (B, f, o0, o1, lift, c, uvScale) => {
+        const out = [], s = d.s[k] + span * f;
         for (const o of [o0, o1]) {
-          const x = d.x[k2] + d.nx[k2] * o * d.sc[k2], z = d.z[k2] + d.nz[k2] * o * d.sc[k2];
-          const y = (e.bridge ? deckY(e, d.s[k2]) : terrainHeight(x, z)) + lift;
+          const xa = d.x[k] + d.nx[k] * o * d.sc[k], za = d.z[k] + d.nz[k] * o * d.sc[k], xb = d.x[k + 1] + d.nx[k + 1] * o * d.sc[k + 1], zb = d.z[k + 1] + d.nz[k + 1] * o * d.sc[k + 1];
+          const x = xa + (xb - xa) * f, z = za + (zb - za) * f, y = (e.bridge ? Math.max(deckY(e, s), terrainHeight(x, z)) : terrainHeight(x, z)) + lift; // a deck never dips under the ground (where you'd stand: data.js groundHeight)
           out.push(B.v(x, y, z, 0, 1, 0, ...c, x / uvScale, z / uvScale));
         }
         return out;
       };
-      const [a0, a1] = row(roadB, k, -hw, hw, 0.06, rcol, 6), [b0, b1] = row(roadB, k + 1, -hw, hw, 0.06, rcol, 6);
-      roadB.quad(a0, a1, b1, b0);
-      for (const side of L.sw) for (const [lo, hi, c, B, us] of lay) {
-        const o0 = side > 0 ? hw + lo : -hw - hi, o1 = side > 0 ? hw + hi : -hw - lo, lift = B === groundB ? 0.04 : c === CURB ? 0.045 : 0.035;
-        const [c0, c1] = row(B, k, o0, o1, lift, c, us), [d0, d1] = row(B, k + 1, o0, o1, lift, c, us);
+      const [a0, a1] = row(RB, fa, -hw, hw, 0.06, rcol, 6), [b0, b1] = row(RB, fb, -hw, hw, 0.06, rcol, 6);
+      RB.quad(a0, a1, b1, b0);
+      for (const side of L.sw) for (const [lo2, hi2, c, B, us] of lay) {
+        const o0 = side > 0 ? hw + lo2 : -hw - hi2, o1 = side > 0 ? hw + hi2 : -hw - lo2, lift = B === groundB ? 0.04 : c === CURB ? 0.045 : 0.035;
+        const [c0, c1] = row(B, fa, o0, o1, lift, c, us), [d0, d1] = row(B, fb, o0, o1, lift, c, us);
         B.quad(c0, c1, d1, d0);
       }
       // markings (skipped inside junctions and on gravel and brick)
-      if (L.gravel || L.brick || e.cls === 'track') continue;
+      if (lite || L.gravel || L.brick || e.cls === 'track') continue;
       const s0 = d.s[k], s1 = d.s[k + 1];
       if (s0 < trimA + 1 || s1 > e.len - trimB - 1) continue;
       const y0 = deckY(e, s0, d.x[k], d.z[k]) + 0.085, y1 = deckY(e, s1, d.x[k + 1], d.z[k + 1]) + 0.085;
@@ -147,66 +214,74 @@ function buildRoads(t, roadB, walkB, markB, groundB) {
       const dash = (o, col, w = 0.12, len = 3, gap = 9) => {
         const Ls = s1 - s0 || 1;
         for (let a = Math.floor(s0 / gap) * gap; a < s1; a += gap) {
-          const lo = Math.max(s0, a), hi = Math.min(s1, a + len); if (hi <= lo) continue;
-          const f0 = (lo - s0) / Ls, f1 = (hi - s0) / Ls, [ax, az] = at(k, o), [bx, bz] = at(k + 1, o);
+          const lo3 = Math.max(s0, a), hi3 = Math.min(s1, a + len); if (hi3 <= lo3) continue;
+          const f0 = (lo3 - s0) / Ls, f1 = (hi3 - s0) / Ls, [ax, az] = at(k, o), [bx, bz] = at(k + 1, o);
           flat(markB, ax + (bx - ax) * f0, az + (bz - az) * f0, ax + (bx - ax) * f1, az + (bz - az) * f1, w, y0 + (y1 - y0) * f0, y0 + (y1 - y0) * f1, col);
         }
       };
       const solid = (o, col, w = 0.11) => { const [ax, az] = at(k, o), [bx, bz] = at(k + 1, o); flat(markB, ax, az, bx, bz, w, y0, y1, col); };
       if (twoWay && big && L.median) {
         // a raised concrete median down the middle (OSM median tag)
-        for (const [lo, hi] of [[c0 - 0.7, c0 + 0.7]]) { const [p0, p1] = row(walkB, k, lo, hi, 0.12, CURB, 1.5), [q0, q1] = row(walkB, k + 1, lo, hi, 0.12, CURB, 1.5); walkB.quad(p0, p1, q1, q0); }
+        const [p0, p1] = row(walkB, 0, c0 - 0.7, c0 + 0.7, 0.12, CURB, 1.5), [q0, q1] = row(walkB, 1, c0 - 0.7, c0 + 0.7, 0.12, CURB, 1.5); walkB.quad(p0, p1, q1, q0);
       } else if (twoWay && big) for (const o of [c0 - 0.13, c0 + 0.13]) solid(o, YELLOW);
       else if (twoWay && rural && e.cls !== 'service') dash(c0, YELLOW, 0.11, 3, 12); // county roads: a broken yellow centre line
       if ((big || lanes >= 3) && lanes >= 2) for (let li = 1; li < lanes; li++) { if (twoWay && li === e.lb) continue; dash(-e.width / 2 + li * lw, WHITE); }
       if (big || (rural && e.cls !== 'service')) for (const o of [hw - 0.35, -hw + 0.35]) solid(o, WHITE, 0.12);
     }
     // turn arrows from turn:lanes on the forward lanes, a little before the far junction
-    if (e.turn && e.lf > 0 && !L.gravel && G.adj[e.b].length >= 3 && e.len > trimB + 30) {
+    if (!lite && e.turn && e.lf > 0 && !L.gravel && G.adj[e.b].length >= 3 && e.len > trimB + 30) {
       const ent = String(e.turn).split('|'), lanes = e.lf + e.lb, lw = e.width / Math.max(1, lanes);
       if (ent.length === e.lf) {
         const s = e.len - trimB - 12, p = pointOnEdge(e, s), q = pointOnEdge(e, s + 1), dx = q.x - p.x, dz = q.z - p.z, dl = Math.hypot(dx, dz) || 1;
-        ent.forEach((v, i) => {
-          const kind = /left/.test(v) ? 'left' : /right/.test(v) ? 'right' : /through/.test(v) ? 'through' : null; if (!kind) return;
+        ent.forEach((v2, i) => {
+          const kind = /left/.test(v2) ? 'left' : /right/.test(v2) ? 'right' : /through/.test(v2) ? 'through' : null; if (!kind) return;
           const o = -e.width / 2 + (e.lb + i + 0.5) * lw, x = p.x + (-dz / dl) * o, z = p.z + (dx / dl) * o;
           if (inTile(t, x, z)) arrow(x, z, dx / dl, dz / dl, kind, (e.bridge ? p.y : terrainHeight(x, z)) + 0.09);
         });
       }
     }
   }
-  // junction discs, crosswalks and stop lines at nodes in this tile
+  // junction polygons, crosswalks and stop lines at nodes in this tile
   const N = G.nodes;
   const zebra = (e, sA, sB, yy) => {
     const p0 = pointOnEdge(e, sA), p1 = pointOnEdge(e, sB), ux = p1.x - p0.x, uz = p1.z - p0.z, ul = Math.hypot(ux, uz) || 1, nx = -uz / ul, nz = ux / ul;
     for (let o = -e.width / 2 + 0.5; o <= e.width / 2 - 0.4; o += 1.1) flat(markB, p0.x + nx * o, p0.z + nz * o, p1.x + nx * o, p1.z + nz * o, 0.55, yy(p0), yy(p1), WHITE);
   };
+  // a convex polygon fanned from the node through a half-way ring, so it follows the ground on a slope
+  const fan = (B, poly, x, z, yAt, lift, c, uvs) => {
+    const ctr = B.v(x, yAt(x, z) + lift, z, 0, 1, 0, ...c, x / uvs, z / uvs), mid = [], out = [];
+    for (const [px, pz] of poly) {
+      const hx = (x + px) / 2, hz = (z + pz) / 2;
+      mid.push(B.v(hx, yAt(hx, hz) + lift, hz, 0, 1, 0, ...c, hx / uvs, hz / uvs)); out.push(B.v(px, yAt(px, pz) + lift, pz, 0, 1, 0, ...c, px / uvs, pz / uvs));
+    }
+    for (let s = 0, n = poly.length; s < n; s++) { const s1 = (s + 1) % n; B.i.push(ctr, mid[s1], mid[s]); B.quad(mid[s], mid[s1], out[s1], out[s]); }
+  };
   const nodes = new Set(); for (const id of t.e) { const e = G.edges[id]; if (e) { nodes.add(e.a); nodes.add(e.b); } }
   for (const k of nodes) {
     const x = N.x[k], z = N.z[k];
     if (!inTile(t, x, z)) continue;
-    const adj = G.adj[k].filter((id) => G.edges[id]); if (adj.length < 2) continue;
-    const r = nodeRadius(k), onBridge = adj.some((id) => G.edges[id].bridge);
-    const ny = onBridge ? N.y[k] : null;
-    const walk = adj.some((id) => roadLook(G.edges[id], t).sw.length);
-    const disc = (B, rad, lift, c, uvs) => {
-      const seg = 18, ctr = B.v(x, (ny ?? terrainHeight(x, z)) + lift, z, 0, 1, 0, ...c, x / uvs, z / uvs), ring = [];
-      for (let s = 0; s < seg; s++) { const a = (s / seg) * Math.PI * 2, px = x + Math.cos(a) * rad, pz = z + Math.sin(a) * rad; ring.push(B.v(px, (ny ?? terrainHeight(px, pz)) + lift, pz, 0, 1, 0, ...c, px / uvs, pz / uvs)); }
-      for (let s = 0; s < seg; s++) B.i.push(ctr, ring[(s + 1) % seg], ring[s]);
-    };
-    const e0 = G.edges[adj[0]], l0 = roadLook(e0, t);
-    disc(roadB, r, 0.065, lin(l0.gravel ? 0xa39b8a : l0.brick ? 0x8a4b3b : ROAD_COL[e0.cls] || 0x5a5d61), 6);
-    if (walk && adj.length >= 3) disc(walkB, r + WALK_W, 0.03, lin(0xc9c5bd), 1.5);
+    const J = junction(k); if (!J) continue;
+    const adj = legs(k).filter((e) => !(e.flags & 1)); if (adj.length < 3) continue;
+    const r = J.r, onBridge = adj.some((e) => e.bridge), yAt = onBridge ? () => N.y[k] : terrainHeight;
+    let top = adj[0]; for (const e of adj) if (RANKC[e.cls] > RANKC[top.cls]) top = e;
+    fan(roadB, J.poly, x, z, yAt, 0.07, lin(surfCol(top, roadLook(top, t))), 6); // a hair over the legs where a short leg's end falls inside the polygon
+    // sidewalk corners: the same polygon out to the back of each leg's sidewalk, under the road
+    if (adj.some((e) => roadLook(e, t).sw.length)) {
+      const ring = [[x, z]];
+      for (const e of adj) { const s = J.trim.get(e.id) ?? r, at = e.a === k ? s : e.len - s, L = roadLook(e, t), o = e.width / 2 + (L.sw.length ? walkLayers(L, BIG.has(e.cls), C3).at(-1)[1] : 0); ring.push(stripAt(e, at, o), stripAt(e, at, -o)); }
+      fan(walkB, hull(ring), x, z, yAt, 0.03, WALKC, 1.5);
+    }
     const ctrl = N.ctrl[k], core = coreAt(x, z);
     // painted crosswalks at signals, and on every leg in a town core
-    if ((!ctrl && !core) || adj.length < 3) continue;
-    for (const id of adj) {
-      const e = G.edges[id]; if (e.len < r + 8) continue;
+    if (lite || (!ctrl && !core)) continue;
+    for (const e of adj) {
+      const rr = J.trim.get(e.id) ?? r; if (e.len < rr + 8) continue;
       const fromA = e.a === k, dirIn = fromA ? e.lb > 0 : e.lf > 0; // traffic arrives at this node along e
       const yy = (p) => (e.bridge ? p.y : terrainHeight(p.x, p.z)) + 0.09;
-      if ((ctrl === 1 || core) && roadLook(e, t).sw.length && !roadLook(e, t).brick) zebra(e, fromA ? r + 0.6 : e.len - r - 0.6, fromA ? r + 3.6 : e.len - r - 3.6, yy);
+      if ((ctrl === 1 || core) && roadLook(e, t).sw.length && !roadLook(e, t).brick) zebra(e, fromA ? rr + 0.6 : e.len - rr - 0.6, fromA ? rr + 3.6 : e.len - rr - 3.6, yy);
       if (dirIn && ctrl) { // stop line across the lanes coming in
         const lanes = e.lf + e.lb, lw = e.width / Math.max(1, lanes), nIn = fromA ? e.lb : e.lf;
-        const q = pointOnEdge(e, fromA ? r + 4.2 : e.len - r - 4.2), q2 = pointOnEdge(e, fromA ? r + 4.7 : e.len - r - 4.7);
+        const q = pointOnEdge(e, fromA ? rr + 4.2 : e.len - rr - 4.2), q2 = pointOnEdge(e, fromA ? rr + 4.7 : e.len - rr - 4.7);
         const tx = q.x - q2.x, tz = q.z - q2.z, tl = Math.hypot(tx, tz) || 1; // incoming travel direction
         const rx = -tz / tl, rz = tx / tl; // its right-hand side
         const oFar = e.lf > 0 && e.lb > 0 ? nIn * lw : e.width / 2, oNear = e.lf > 0 && e.lb > 0 ? 0.1 : -e.width / 2;
@@ -215,9 +290,10 @@ function buildRoads(t, roadB, walkB, markB, groundB) {
     }
   }
   // mapped mid-block / uncontrolled crossings (highway=crossing)
-  for (const p of pointsOf(t, 'cw')) {
-    const q = nearestEdge(p.x, p.z, 10); if (!q || q.e.cls === 'motor' || q.e.cls === 'trunk' || roadLook(q.e, t).gravel) continue;
-    const e = q.e, ra = G.adj[e.a].length >= 3 ? nodeRadius(e.a) : 0, rb = G.adj[e.b].length >= 3 ? nodeRadius(e.b) : 0;
+  if (!lite) for (const p of pointsOf(t, 'cw')) {
+    const q = nearestEdge(p.x, p.z, 10); if (!q || q.e.cls === 'motor' || q.e.cls === 'trunk' || (q.e.flags & 1) || roadLook(q.e, t).gravel) continue;
+    const e = q.e, ra = trimAt(e, e.a), rb = trimAt(e, e.b);
+    if (q.s < ra + 0.5 || q.s > e.len - rb - 0.5) continue; // inside the junction polygon
     if ((q.s < ra + 5 && (G.nodes.ctrl[e.a] === 1 || coreAt(p.x, p.z))) || (q.s > e.len - rb - 5 && (G.nodes.ctrl[e.b] === 1 || coreAt(p.x, p.z)))) continue; // already painted at the junction
     zebra(e, Math.max(0, q.s - 1.5), Math.min(e.len, q.s + 1.5), (pp) => (e.bridge ? pp.y : terrainHeight(pp.x, pp.z)) + 0.09);
   }
@@ -493,7 +569,7 @@ function buildBuildings(t, B, boxes, foot, SB, GB, junk, X) {
           const segs = Math.ceil(len / 4);
           for (let k = 0; k < segs; k++) {
             const a0 = (k / segs) * len, b0 = ((k + 1) / segs) * len, Pd = (o, w) => { const x = sx + ox * o + ux * w, z = sz + oz * o + uz * w; return [x, terrainHeight(x, z) + 0.05, z]; };
-            face(B, [Pd(a0, -half), Pd(a0, half), Pd(b0, half), Pd(b0, -half)], [0, 1, 0], CONCRETE, pl, [[0, 0], [1, 0], [1, 1], [0, 1]]);
+            face(X.lotB || B, [Pd(a0, -half), Pd(a0, half), Pd(b0, half), Pd(b0, -half)], [0, 1, 0], CONCRETE, pl, [[0, 0], [1, 0], [1, 1], [0, 1]]);
           }
           if (len > 6.5 && hash(seed + 64) < 0.5) newK.push(sx + ox * Math.min(len - 3, 3.6) - t.ox, sz + oz * Math.min(len - 3, 3.6) - t.oz, Math.atan2(ox, oz), 1);
         }
@@ -506,8 +582,8 @@ function buildBuildings(t, B, boxes, foot, SB, GB, junk, X) {
       if (hash(seed + 62) < (a.style === 'farmhouse' ? 0.15 : newer ? 0.25 : 0.3)) items.push('shed');
       items.forEach((kd, k) => {
         const back = depth + 4 + hash(seed + 63 + k) * 4, lat = (k - (items.length - 1) / 2) * 4.5, x = cx - ox * back + ux * lat, z = cz - oz * back + uz * lat;
-        if (occupied(x, z, kd === 'tramp' ? 2.2 : 1.8) || nearestEdge(x, z, 6)) return;
-        junk.push({ kind: kd, x, z, y: terrainHeight(x, z), h: Math.atan2(ox, oz) + (kd === 'shed' ? Math.PI : 0) });
+        if (occupied(x, z, kd === 'tramp' ? 2.2 : 1.8) || nearestEdge(x, z, 6) || !placeOff(x, z, 2.2, { drop: true })) return;
+        junk.push({ kind: kd, placed: true, x, z, y: terrainHeight(x, z), h: Math.atan2(ox, oz) + (kd === 'shed' ? Math.PI : 0) });
         if (kd === 'shed') X.solid.push(makeBox(x, z, ox, oz, 1.6, 1.3, terrainHeight(x, z) - 0.3, 3));
       });
       // farmhouses: a mailbox on a post at the road
@@ -534,7 +610,7 @@ function buildBuildings(t, B, boxes, foot, SB, GB, junk, X) {
     }
     // farmsteads keep a grass yard (no crop rows) and get hay bales by the barn
     if (farm) yards.push({ x: cx, z: cz, r: Math.sqrt(fp) * 0.7 + 14 });
-    if (a.style === 'barn' && hash(seed + 71) < 0.55) for (let k = 0; k < 3; k++) { const hx = cx + (hash(seed + 72 + k) - 0.5) * 6 + Math.sqrt(fp) * 0.7 + 2, hz = cz + (hash(seed + 75 + k) - 0.5) * 6; if (!occupied(hx, hz, 1)) { junk.push({ kind: 'haybale', x: hx, z: hz, y: terrainHeight(hx, hz), h: hash(seed + k) * 3 }); X.solid.push(makeBox(hx, hz, 1, 0, 0.75, 0.75, terrainHeight(hx, hz) - 0.2, 1.5)); } }
+    if (a.style === 'barn' && hash(seed + 71) < 0.55) for (let k = 0; k < 3; k++) { const hx = cx + (hash(seed + 72 + k) - 0.5) * 6 + Math.sqrt(fp) * 0.7 + 2, hz = cz + (hash(seed + 75 + k) - 0.5) * 6; if (!occupied(hx, hz, 1) && placeOff(hx, hz, 0.8, { drop: true })) { junk.push({ kind: 'haybale', placed: true, x: hx, z: hz, y: terrainHeight(hx, hz), h: hash(seed + k) * 3 }); X.solid.push(makeBox(hx, hz, 1, 0, 0.75, 0.75, terrainHeight(hx, hz) - 0.2, 1.5)); } }
     // car dealerships: shop=car on the building (rows of cars and flags in its lot, see detail.js)
     if (a.shop === 'car' || /\b(Motors|Auto Sales|Chevrolet|Ford|Toyota|Honda|Nissan|Hyundai|Kia|Subaru|Dodge|Jeep|Buick|GMC|Cadillac|Lexus|Mazda|Volkswagen)\b/.test(name)) dealers.push({ x: cx, z: cz });
     // a lit sign over the shop fronts on the wall facing the street: the real name when the map has one
@@ -554,7 +630,10 @@ function buildBuildings(t, B, boxes, foot, SB, GB, junk, X) {
     }
     // strip pads (fast food, gas, banks along the arterials): a tall pylon sign at the road
     if (a.area === 'strip' && !sloped && fp > 110 && fp < 650 && road && PADROAD.has(road.e.cls) && road.d < 60 && hash(seed + 86) < 0.8) {
-      const l = Math.hypot(cx - road.x, cz - road.z) || 1, o = road.e.width / 2 + 3.2, px = road.x + (cx - road.x) / l * o, pz = road.z + (cz - road.z) / l * o, py = terrainHeight(px, pz);
+      const l = Math.hypot(cx - road.x, cz - road.z) || 1, o = road.e.width / 2 + 3.2, pp = placeOff(road.x + (cx - road.x) / l * o, road.z + (cz - road.z) / l * o, 0.5) || { x: NaN };
+      const px = pp.x, pz = pp.z, py = terrainHeight(px, pz);
+      if (isFinite(px)) {
+      X.posts?.push({ kind: 'pylon', x: px, z: pz });
       const nx = Math.sin(road.h), nz = Math.cos(road.h), ux = nz, uz = -nx, txt = label || pick(STRIP_FOOD, seed + 85);
       for (const s of [-1.1, 1.1]) obox(B, px + ux * s, pz + uz * s, 1, 0, 0.16, 0.16, py - 0.3, py + 7.4, lin(0x6d7175), pl);
       obox(B, px, pz, ux, uz, 1.95, 0.25, py + 7.4, py + 8.4, lin(0x2a2c2e), pl);
@@ -563,6 +642,7 @@ function buildBuildings(t, B, boxes, foot, SB, GB, junk, X) {
       // drive-through menu board along the side
       const mx = cx + ux * (Math.sqrt(fp) / 2 + 2.2), mz = cz + uz * (Math.sqrt(fp) / 2 + 2.2);
       if (!occupied(mx, mz, 0.8) && !nearestEdge(mx, mz, 4, (e) => e.cls !== 'service')) junk.push({ kind: 'menuboard', x: mx, z: mz, y: terrainHeight(mx, mz), h: Math.atan2(-ux, -uz) });
+      }
     }
     // big boxes: the store's name in big letters over the entrance and a glass vestibule; cart corrals go in its lot
     if (bigBox && best) {
@@ -789,9 +869,10 @@ function streetLights(t, junk, mapped) {
     for (let s = s0, k = 0; s < e.len - 8; s += gap, k++) {
       const p = pointOnEdge(e, s);
       const side = (k + id) % 2 ? 1 : -1, off = e.width / 2 + 0.6;
-      const x = p.x + Math.cos(p.h) * off * side, z = p.z - Math.sin(p.h) * off * side;
+      const q = placeOff(p.x + Math.cos(p.h) * off * side, p.z - Math.sin(p.h) * off * side, 0.2, { side }); if (!q) continue;
+      const x = q.x, z = q.z;
       if (!inTile(t, x, z) || mapped.some((m) => (m.x - x) ** 2 + (m.z - z) ** 2 < 500)) continue;
-      const l = { x, z, y: terrainHeight(x, z), h: p.h + (side > 0 ? -Math.PI / 2 : Math.PI / 2) };
+      const l = { x, z, y: terrainHeight(x, z), h: p.h + (side > 0 ? -Math.PI / 2 : Math.PI / 2), placed: true };
       out.push(l);
       if (core && k % 2 === 0) junk.push({ kind: 'banner', x, z, y: l.y, h: l.h }); // seasonal banners downtown
     }
@@ -808,9 +889,9 @@ function streetProps(t, junk, boxes, has) {
     const busy = L.a === 'core', big = e.cls === 'primary' || e.cls === 'secondary';
     const put = (kind, s, side, off, extra = {}) => {
       if (has.has(kind)) return null;
-      const p = pointOnEdge(e, s), x = p.x + Math.cos(p.h) * off * side, z = p.z - Math.sin(p.h) * off * side;
-      if (!inTile(t, x, z)) return null;
-      const j = { kind, x, z, y: terrainHeight(x, z), h: p.h + (side > 0 ? -Math.PI / 2 : Math.PI / 2), ...extra };
+      const p = pointOnEdge(e, s), q = placeOff(p.x + Math.cos(p.h) * off * side, p.z - Math.sin(p.h) * off * side, kind === 'busstop' ? 1.4 : 0.4, { side });
+      if (!q || !inTile(t, q.x, q.z)) return null;
+      const x = q.x, z = q.z, j = { kind, x, z, y: terrainHeight(x, z), h: p.h + (side > 0 ? -Math.PI / 2 : Math.PI / 2), placed: true, ...extra };
       junk.push(j); return j;
     };
     const kerb = e.width / 2 + 0.55, back = e.width / 2 + WALK_W - 0.35;
@@ -849,10 +930,11 @@ function buildRail(t, B) {
       for (let k = 0; k < n; k++) {
         const x0 = ax + (bx - ax) * (k / n), z0 = az + (bz - az) * (k / n), x1 = ax + (bx - ax) * ((k + 1) / n), z1 = az + (bz - az) * ((k + 1) / n);
         if (!inTile(t, (x0 + x1) / 2, (z0 + z1) / 2)) continue;
+        const onRoad = t.c[Math.min(49, Math.floor(((z0 + z1) / 2 - t.oz) / 4)) * 50 + Math.min(49, Math.floor(((x0 + x1) / 2 - t.ox) / 4))] === C.road; // level crossing: rails only
         const y0 = terrainHeight(x0, z0) + 0.1, y1 = terrainHeight(x1, z1) + 0.1;
         const strip = (o0, o1, lift, c) => { const p = [[x0 + nx * o0, z0 + nz * o0, y0], [x0 + nx * o1, z0 + nz * o1, y0], [x1 + nx * o1, z1 + nz * o1, y1], [x1 + nx * o0, z1 + nz * o0, y1]].map(([x, z, y]) => B.v(x, y + lift, z, 0, 1, 0, ...c, 0, 0)); B.quad(p[1], p[0], p[3], p[2]); };
-        strip(-1.6, 1.6, 0, BAL);
-        for (let tt = 0; tt < 4; tt += 0.8) { const f = tt / 4; const px = x0 + (x1 - x0) * f, pz = z0 + (z1 - z0) * f; const y = y0 + (y1 - y0) * f + 0.03; const q = [[px + nx * -1.25, pz + nz * -1.25], [px + nx * 1.25, pz + nz * 1.25], [px + nx * 1.25 + ux * 0.25, pz + nz * 1.25 + uz * 0.25], [px + nx * -1.25 + ux * 0.25, pz + nz * -1.25 + uz * 0.25]].map(([x, z]) => B.v(x, y, z, 0, 1, 0, ...TIE, 0, 0)); B.quad(q[1], q[0], q[3], q[2]); }
+        if (!onRoad) strip(-1.6, 1.6, 0, BAL);
+        if (!onRoad) for (let tt = 0; tt < 4; tt += 0.8) { const f = tt / 4; const px = x0 + (x1 - x0) * f, pz = z0 + (z1 - z0) * f; const y = y0 + (y1 - y0) * f + 0.03; const q = [[px + nx * -1.25, pz + nz * -1.25], [px + nx * 1.25, pz + nz * 1.25], [px + nx * 1.25 + ux * 0.25, pz + nz * 1.25 + uz * 0.25], [px + nx * -1.25 + ux * 0.25, pz + nz * -1.25 + uz * 0.25]].map(([x, z]) => B.v(x, y, z, 0, 1, 0, ...TIE, 0, 0)); B.quad(q[1], q[0], q[3], q[2]); }
         strip(-0.8, -0.68, 0.14, RAIL); strip(0.68, 0.8, 0.14, RAIL);
       }
     }
@@ -867,26 +949,29 @@ export function buildTile(t) {
   // one buffer per material: grass parkways join the terrain, poles / posts / pylons / silos join the buildings
   // (plain atlas cell), and every text panel shares one material (lit ones flagged per vertex)
   const groundB = new Buf(); buildTerrain(t, groundB);
-  const roadB = new Buf(), walkB = new Buf(), markB = new Buf();
+  const roadB = new Buf(), roadLoB = new Buf(), lotB = new Buf(), walkB = new Buf(), markB = new Buf();
   const bB = new Buf(true), sB = new Buf(), gB = new Buf(), glowB = new Buf(true), namesB = new Buf(true), cropB = new Buf();
   const litB = namesB, solidB = bB;
   // boxes: the old per-prop boxes (not registered; stream.js makes walls from the data). solid: new things that block
   // (utility poles, walls, billboards, silos, towers, sheds, pylons), registered by stream.js with the tile
-  const boxes = [], solid = [], foot = [], junk = [], trees = [], wires = [], newK = [], bigBoxes = [], yards = [], dealers = [];
-  buildRoads(t, roadB, walkB, markB, groundB);
+  const boxes = [], solid = [], foot = [], junk = [], trees = [], wires = [], newK = [], bigBoxes = [], yards = [], dealers = [], posts = [];
+  buildRoads(t, roadB, roadLoB, walkB, markB, groundB);
   const lightsMapped = [];
-  const has = dataPoints(t, junk, lightsMapped, solid, solidB, namesB, trees);
-  Object.assign(has, dataLines(t, junk, solid, solidB, roadB));
-  buildBuildings(t, bB, boxes, foot, sB, gB, junk, { glowB, litB, namesB, solidB, newK, bigBoxes, yards, dealers, has, solid });
+  const has = dataPoints(t, junk, lightsMapped, solid, solidB, namesB, trees, posts);
+  Object.assign(has, dataLines(t, junk, solid, solidB, lotB));
+  buildBuildings(t, bB, boxes, foot, sB, gB, junk, { glowB, litB, namesB, solidB, lotB, newK, bigBoxes, yards, dealers, has, solid, posts });
   const lights = [...lightsMapped, ...streetLights(t, junk, lightsMapped)];
   parkingDetail(t, markB, lights, junk, bigBoxes, dealers);
-  streetSigns(t, namesB, solidB, boxes);
+  streetSigns(t, namesB, solidB, boxes, posts);
+  regionPlaces(t, { junk, lights, trees, posts, solid, SB: solidB, NB: namesB, walkB, groundB, lotB });
   powerLines(t, junk, wires, solid);
   crops(t, cropB, yards);
   if (!t.kAdded) { for (const v of newK) t.k.push(v); t.kAdded = true; } // driveway cars join the parked-car spots (once)
   add(cropB.geometry(), M.crop, false);
   add(groundB.geometry(), M.terrain, false);
   add(walkB.geometry(), M.walk, false);
+  add(lotB.geometry(), M.lot || M.road, false);
+  add(roadLoB.geometry(), M.roadLo || M.road, false);
   add(roadB.geometry(), M.road, false);
   add(markB.geometry(), M.mark, false);
   add(bB.geometry(), M.building, true);
@@ -902,6 +987,59 @@ export function buildTile(t) {
     boxes.push(makeBox(x, z, 1, 0, 0.22 * t.t[i + 3] / 10, 0.22 * t.t[i + 3] / 10, terrainHeight(x, z) - 1, 6));
   }
   streetProps(t, junk, boxes, has);
+  validatePlacements(t, junk, lights); // the last word: nothing on a carriageway, in a junction or inside a building
   for (const l of lights) boxes.push(makeBox(l.x, l.z, 1, 0, 0.12, 0.12, l.y - 0.5, 8));
-  return { group, boxes, solid, trees, lights, foot, junk };
+  return { group, boxes, solid, trees, lights, foot, junk, posts };
+}
+
+// ---------- far LOD: what a tile looks like past the full-detail radius (stream.js swaps it for buildTile up close) ----------
+// Coarser ground, the road surfaces and sidewalks (no paint), and every building as one plain extruded shell (gabled when
+// its archetype has a pitched roof) in one vertex-coloured mesh: about five draw calls a tile. No props, signs or lights.
+const LOD_WALL = { brick: 0xa8705c, brick2: 0x9a5a48, brick3: 0xb58a6e, stone: 0xcdbf9f, siding: 0xd8d4c8, glass: 0x7d97ab, office: 0x8a9aa6, stucco: 0xd9cfbd, metal: 0xa9adb0, store: 0xb59a80, church: 0xb9ab95, ramp: 0x9d9a93, garage: 0xd0ccc0, plain: 0xc8c2b6 };
+export function buildTileLite(t) {
+  applyArchetypes(t);
+  const group = new THREE.Group();
+  const add = (geo, mat, shadow) => { if (!geo) return; const m = new THREE.Mesh(geo, mat); m.castShadow = shadow; m.receiveShadow = true; m.matrixAutoUpdate = false; group.add(m); };
+  const groundB = new Buf(), roadB = new Buf(), roadLoB = new Buf(), walkB = new Buf(), bB = new Buf();
+  buildTerrain(t, groundB, 8);
+  buildRoads(t, roadB, roadLoB, walkB, null, groundB, true);
+  const foot = [], trees = [], FLAT = lin(0x9a9893);
+  t.b.forEach((rec, bi) => {
+    const [rel, baseY, hgt, pitched, style] = rec, a = rec.arch || {}, n = rel.length / 2; if (n < 3 || a.canopy) return;
+    const pts = new Float32Array(rel.length); for (let i = 0; i < rel.length; i++) pts[i] = rel[i] + (i % 2 ? t.oz : t.ox);
+    foot.push(pts);
+    const seed = t.tx * 7919 + t.tz * 104729 + bi * 31, HS = HOUSE[a.style];
+    const cell = HS ? (hash(seed + 13) < (STYLE_LOOK[a.style]?.[1] ?? 0) ? 'brick' : 'siding') : a.style === 'barn' ? 'brick2' : STYLE_CELL[style] || 'plain';
+    let wc = lin(LOD_WALL[cell] ?? 0xc8c2b6);
+    if (HS && cell === 'siding') wc = lin(pick(STYLE_LOOK[a.style][0], seed + 3));
+    const tc = tagCol(a.col); if (tc != null) wc = lin(tc);
+    const sloped = pitched && a.style !== 'shed_big' && a.style !== 'bin' && !(a.roofTag && /flat/.test(a.roofTag));
+    const top = baseY + hgt, yb = baseY - 1;
+    let cx = 0, cz = 0; for (let i = 0; i < n; i++) { cx += pts[i * 2]; cz += pts[i * 2 + 1]; } cx /= n; cz /= n;
+    for (let i = 0; i < n; i++) {
+      const x0 = pts[i * 2], z0 = pts[i * 2 + 1], x1 = pts[((i + 1) % n) * 2], z1 = pts[((i + 1) % n) * 2 + 1], L = Math.hypot(x1 - x0, z1 - z0); if (L < 0.05) continue;
+      let ox = (z1 - z0) / L, oz = -(x1 - x0) / L; if (pointInPoly((x0 + x1) / 2 + ox * 0.3, (z0 + z1) / 2 + oz * 0.3, pts)) { ox = -ox; oz = -oz; }
+      face(bB, [[x0, yb, z0], [x1, yb, z1], [x1, top, z1], [x0, top, z0]], [ox, 0, oz], wc, PLAIN, [[0, 0], [1, 0], [1, 1], [0, 1]]);
+    }
+    if (sloped) { // a gable over the footprint's oriented box, like the detailed roof
+      let lb = 0, ux = 1, uz = 0; for (let i = 0; i < n; i++) { const dx = pts[((i + 1) % n) * 2] - pts[i * 2], dz = pts[((i + 1) % n) * 2 + 1] - pts[i * 2 + 1], l = Math.hypot(dx, dz); if (l > lb) { lb = l; ux = dx / l; uz = dz / l; } }
+      const vx = -uz, vz = ux; let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+      for (let i = 0; i < n; i++) { const pu = (pts[i * 2] - cx) * ux + (pts[i * 2 + 1] - cz) * uz, pv = (pts[i * 2] - cx) * vx + (pts[i * 2 + 1] - cz) * vz; u0 = Math.min(u0, pu); u1 = Math.max(u1, pu); v0 = Math.min(v0, pv); v1 = Math.max(v1, pv); }
+      const rise = Math.max(0.8, Math.min(5, (v1 - v0) / 2 * (HS ? HS.pitch : 0.5))), W = (pu, pv, y) => [cx + ux * pu + vx * pv, y, cz + uz * pu + vz * pv], vm = (v0 + v1) / 2;
+      const rc = lin(tagCol(a.roofCol) ?? (STYLE_LOOK[a.style] ? pick(STYLE_LOOK[a.style][2], seed + 8) : 0x5d5a52));
+      for (const [va, sgn] of [[v0, -1], [v1, 1]]) { const sl = Math.hypot(vm - va, rise); face(bB, [W(u0, va, top), W(u1, va, top), W(u1, vm, top + rise), W(u0, vm, top + rise)], [vx * sgn * rise / sl, Math.abs(vm - va) / sl, vz * sgn * rise / sl], rc, PLAIN, [[0, 0], [1, 0], [1, 1], [0, 1]]); }
+      for (const ue of [u0, u1]) tri(bB, W(ue, v0, top), W(ue, v1, top), W(ue, vm, top + rise), wc, PLAIN, [[0, 0], [1, 0], [0.5, 1]], [cx, top, cz]);
+    } else {
+      const contour = []; for (let i = 0; i < n; i++) contour.push(new THREE.Vector2(pts[i * 2], pts[i * 2 + 1]));
+      const idx = contour.map((p) => bB.v(p.x, top, p.y, 0, 1, 0, ...FLAT, 0, 0));
+      for (const [ia, ib, ic] of THREE.ShapeUtils.triangulateShape(contour, [])) { const pa = contour[ia], pb = contour[ib], pc = contour[ic], cr = (pb.x - pa.x) * (pc.y - pa.y) - (pb.y - pa.y) * (pc.x - pa.x); if (cr < 0) bB.i.push(idx[ia], idx[ib], idx[ic]); else bB.i.push(idx[ia], idx[ic], idx[ib]); }
+    }
+  });
+  for (let i = 0; i < t.t.length; i += 4) { const x = t.t[i] + t.ox, z = t.t[i + 1] + t.oz; trees.push({ x, z, y: terrainHeight(x, z), kind: t.t[i + 2], s: t.t[i + 3] / 10, seed: hash(x * 3.1 + z) }); }
+  add(groundB.geometry(), M.terrain, false);
+  add(walkB.geometry(), M.walk, false);
+  add(roadLoB.geometry(), M.roadLo || M.road, false);
+  add(roadB.geometry(), M.road, false);
+  add(bB.geometry(), M.lod, true);
+  return { group, boxes: [], solid: [], trees, lights: [], foot, junk: [], posts: [], lite: true };
 }

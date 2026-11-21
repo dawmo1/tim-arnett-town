@@ -74,7 +74,12 @@ export function addChat(name, msg) {
   setTimeout(() => li.classList.add('old'), 15000);
 }
 let promptHold = 0;
-export function setPrompt(t) { if (performance.now() < promptHold) return; el.prompt.textContent = t || ''; el.prompt.hidden = !t; }
+// bar (0..1 or null): a GTA-style progress bar under the text (robbery bag filling)
+export function setPrompt(t, bar = null) {
+  if (performance.now() < promptHold) return;
+  el.prompt.textContent = t || ''; el.prompt.hidden = !t;
+  if (t && bar !== null) { const b = document.createElement('i'); b.className = 'pbar'; const f = document.createElement('b'); f.style.width = Math.round(bar * 100) + '%'; b.append(f); el.prompt.append(b); }
+}
 export function flashPrompt(t) { el.prompt.textContent = t; el.prompt.hidden = false; promptHold = performance.now() + 1500; }
 export function setArmor(a) { el.armorfill.style.width = Math.max(0, Math.min(100, a)) + '%'; }
 // yellow bar under the minimap (GTA's special ability slot): nitro in a car, how drunk you are on foot (0..1)
@@ -347,31 +352,32 @@ const ICON = {
   arrow: (g) => { g.beginPath(); g.moveTo(0, -7); g.lineTo(5.5, 6); g.lineTo(0, 3); g.lineTo(-5.5, 6); g.fill(); },
   car: (g) => { g.beginPath(); g.moveTo(-6.5, 2.5); g.lineTo(-6.5, -0.5); g.lineTo(-4, -1.2); g.lineTo(-2.5, -4.5); g.lineTo(2.5, -4.5); g.lineTo(4, -1.2); g.lineTo(6.5, -0.5); g.lineTo(6.5, 2.5); g.fill(); g.beginPath(); g.arc(-3.8, 3, 1.9, 0, 7); g.fill(); g.beginPath(); g.arc(3.8, 3, 1.9, 0, 7); g.fill(); },
 };
-// legend order; important = also on the minimap from anywhere (the rest only within ~150 m) and labelled first
+// legend order; tier = how far out the pause map still shows it (0 = always, 1 = mid zoom, 2 = close in).
+// Tier 0 is also what the minimap keeps beyond ~150 m (main.js filters the rest by distance).
 export const BLIP_TYPES = {
   you: { name: 'You', color: '#20262d', icon: ICON.arrow, fixed: true },
-  waypoint: { name: 'Waypoint', color: MAP_COLORS.route },
-  rob: { name: 'Convenience store', color: '#2fbf4a', icon: ICON.text('$'), important: true },
-  guns: { name: 'Gun store', color: '#d23c30', icon: ICON.gun, important: true },
-  clothes: { name: 'Clothing', color: '#b45ad6', icon: ICON.shirt, important: true },
-  garage: { name: 'Mechanic / garage', color: '#3f8fe0', icon: ICON.wrench, important: true },
-  car: { name: 'Personal vehicle', color: '#2f80ed', icon: ICON.car, important: true },
-  casino: { name: 'Casino', color: '#d4a017', icon: ICON.diamond, important: true },
-  hospital: { name: 'Hospital', color: '#fff', ink: '#d23c30', icon: ICON.cross, important: true },
-  police: { name: 'Police', color: '#2f6fdc', icon: ICON.star, important: true },
-  fire: { name: 'Fire station', color: '#e8622c', icon: ICON.flame },
-  event: { name: 'Event', color: '#ff9100', icon: ICON.text('!'), important: true },
-  gas: { name: 'Gas station', color: '#7d8a97', icon: ICON.pump },
-  shop: { name: 'Shop', color: '#23a090', icon: ICON.cart },
-  food: { name: 'Restaurant', color: '#e0962c', icon: ICON.food },
-  cafe: { name: 'Cafe', color: '#9a6a45', icon: ICON.cup },
-  bar: { name: 'Bar', color: '#b8427c', icon: ICON.glass },
-  bank: { name: 'Bank', color: '#3d8a5a', icon: ICON.bank },
-  pharmacy: { name: 'Pharmacy', color: '#3fae6a', icon: ICON.cross },
-  park: { name: 'Park', color: '#4f8a3e', icon: ICON.tree },
-  school: { name: 'School', color: '#c9a227', icon: ICON.school },
-  landmark: { name: 'Landmark', color: '#7c6bd0', icon: ICON.monument },
-  player: { name: 'Players', color: '#40c4ff' },
+  waypoint: { name: 'Waypoint', color: MAP_COLORS.route, tier: 0 },
+  rob: { name: 'Convenience store', color: '#2fbf4a', icon: ICON.text('$'), tier: 0 },
+  guns: { name: 'Gun store', color: '#d23c30', icon: ICON.gun, tier: 0 },
+  clothes: { name: 'Clothing', color: '#b45ad6', icon: ICON.shirt, tier: 1 },
+  garage: { name: 'Mechanic / garage', color: '#3f8fe0', icon: ICON.wrench, tier: 0 },
+  car: { name: 'Personal vehicle', color: '#2f80ed', icon: ICON.car, tier: 0 },
+  casino: { name: 'Casino', color: '#d4a017', icon: ICON.diamond, tier: 0 },
+  hospital: { name: 'Hospital', color: '#fff', ink: '#d23c30', icon: ICON.cross, tier: 0 },
+  police: { name: 'Police', color: '#2f6fdc', icon: ICON.star, tier: 0 },
+  fire: { name: 'Fire station', color: '#e8622c', icon: ICON.flame, tier: 1 },
+  event: { name: 'Event', color: '#ff9100', icon: ICON.text('!'), tier: 0 },
+  gas: { name: 'Gas station', color: '#7d8a97', icon: ICON.pump, tier: 1 },
+  shop: { name: 'Shop', color: '#23a090', icon: ICON.cart, tier: 2 },
+  food: { name: 'Restaurant', color: '#e0962c', icon: ICON.food, tier: 2 },
+  cafe: { name: 'Cafe', color: '#9a6a45', icon: ICON.cup, tier: 2 },
+  bar: { name: 'Bar', color: '#b8427c', icon: ICON.glass, tier: 1 },
+  bank: { name: 'Bank', color: '#3d8a5a', icon: ICON.bank, tier: 1 },
+  pharmacy: { name: 'Pharmacy', color: '#3fae6a', icon: ICON.cross, tier: 2 },
+  park: { name: 'Park', color: '#4f8a3e', icon: ICON.tree, tier: 2 },
+  school: { name: 'School', color: '#c9a227', icon: ICON.school, tier: 2 },
+  landmark: { name: 'Landmark', color: '#7c6bd0', icon: ICON.monument, tier: 1 },
+  player: { name: 'Players', color: '#40c4ff', tier: 0 },
 };
 // one blip: typed blips get their colour + glyph (grey when b.dim); untyped ones (cops, players) keep b.color / b.label
 function drawBlip(g, b, x, y, r) {
@@ -441,10 +447,117 @@ export function drawMinimap(view, me, blips, zoom = 1, cones = null, waypoint = 
   mm.restore();
 }
 
-// pause map view: centre + pixels per metre (wheel zooms, drag pans). w/h = the canvas's CSS size; it fills the pause panel.
-// off = blip types switched off in the legend, hl = the type whose legend row is hovered
-const big = { cx: 0, cz: 0, s: 0, fit: 0, w: el.bigmap.width, h: el.bigmap.height, last: null, drag: null, moved: false, off: new Set(), hl: null };
+// ---------- pause map ----------
+// Zoom bands in pixels per metre. Far out: IOWA / ILLINOIS and the river; mid: town names over soft tinted town limits;
+// in: neighbourhood names and borders; closest: street names and every place. Each fades over a 1.7x zoom band.
+const Z = { city: 0.035, t1: 0.1, hood: 0.2, t2: 0.35, street: 0.9, max: 3 };
+const TIER_S = [0, Z.t1, Z.t2];
+const fade = (s, at) => Math.max(0, Math.min(1, Math.log(s / at) / Math.log(1.7) + 0.5));
+// view: centre + pixels per metre; ts/za = zoom target and the world point kept under the cursor while easing there.
+// w/h = the canvas's CSS size; off = blip types switched off in the legend, hl = the type whose legend row is hovered
+const big = { cx: 0, cz: 0, s: 0, ts: 0, za: null, fit: 0, w: el.bigmap.width, h: el.bigmap.height, last: null, drag: null, moved: false, off: new Set(), hl: null, keys: new Set(), raf: 0, t: 0 };
 const bm = el.bigmap.getContext('2d');
+// towns, counties, states, neighbourhoods and the river label, built once from the region index (paths in world metres)
+const IOWA_COUNTIES = new Set(['Scott County', 'Clinton County', 'Muscatine County', 'Cedar County']);
+let regions = null;
+function regionData() {
+  if (regions) return regions;
+  const I = W.D.index;
+  const pathOf = (rings) => { const p = new Path2D(); for (const r of rings) { p.moveTo(r[0], r[1]); for (let i = 2; i < r.length; i += 2) p.lineTo(r[i], r[i + 1]); p.closePath(); } return p; };
+  const centre = (rings) => { let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity; for (const r of rings) for (let i = 0; i < r.length; i += 2) { x0 = Math.min(x0, r[i]); x1 = Math.max(x1, r[i]); z0 = Math.min(z0, r[i + 1]); z1 = Math.max(z1, r[i + 1]); } return [(x0 + x1) / 2, (z0 + z1) / 2]; };
+  const circle = (x, z, r) => { const p = new Path2D(); p.arc(x, z, r, 0, Math.PI * 2); return p; };
+  const counties = (I.counties || []).filter((c) => c.rings?.length).map((c) => { const [x, z] = centre(c.rings); return { path: pathOf(c.rings), x, z, iowa: IOWA_COUNTIES.has(c.name) }; });
+  const states = [];
+  for (const [name, iowa] of [['IOWA', true], ['ILLINOIS', false]]) {
+    const cs = counties.filter((c) => c.iowa === iowa);
+    if (cs.length) states.push({ name, x: cs.reduce((a, c) => a + c.x, 0) / cs.length, z: cs.reduce((a, c) => a + c.z, 0) / cs.length });
+  }
+  const towns = (I.towns || []).map((t, i) => ({ name: t.name, place: t.place, x: t.x, z: t.z, hue: Math.round((i * 137.5) % 360), path: t.rings?.length ? pathOf(t.rings) : null }));
+  const hoods = (I.hoods || []).map((h) => ({ name: h.name, x: h.x, z: h.z, path: h.rings?.length ? pathOf(h.rings) : circle(h.x, h.z, h.r || 500) }));
+  let river = null;
+  const R = I.river;
+  if (R?.length > 8) {
+    const n = R.length / 2, i = Math.floor(n / 2) * 2, a = Math.max(0, i - 20), b = Math.min(R.length - 2, i + 20);
+    let ang = Math.atan2(R[b + 1] - R[a + 1], R[b] - R[a]);
+    if (ang > Math.PI / 2) ang -= Math.PI; else if (ang < -Math.PI / 2) ang += Math.PI;
+    river = { x: R[i], z: R[i + 1], ang };
+  }
+  return (regions = { counties, states, towns, hoods, river });
+}
+// world-space layers under the roads: tinted town limits, dashed county lines, neighbourhood borders
+function drawRegions(g, s) {
+  const R = regionData();
+  const tint = fade(s, Z.city) * (1 - 0.7 * fade(s, Z.street));
+  if (tint > 0.02) {
+    g.lineWidth = 1.5 / s;
+    for (const t of R.towns) if (t.path) {
+      g.fillStyle = `hsla(${t.hue},60%,62%,${(0.14 * tint).toFixed(3)})`; g.fill(t.path, 'evenodd');
+      g.strokeStyle = `hsla(${t.hue},60%,72%,${(0.5 * tint).toFixed(3)})`; g.stroke(t.path);
+    }
+  }
+  const ca = 1 - fade(s, Z.street);
+  if (ca > 0.02) { g.setLineDash([8 / s, 6 / s]); g.lineWidth = 1.2 / s; g.strokeStyle = `rgba(255,255,255,${(0.25 * ca).toFixed(3)})`; for (const c of R.counties) g.stroke(c.path); }
+  const ha = fade(s, Z.hood);
+  if (ha > 0.02) { g.setLineDash([4 / s, 4 / s]); g.lineWidth = 1.2 / s; g.strokeStyle = `rgba(255,255,255,${(0.4 * ha).toFixed(3)})`; for (const h of R.hoods) g.stroke(h.path); }
+  g.setLineDash([]);
+}
+// screen-space labels; free(box) reserves a rectangle and says no if it would overlap one already placed
+function regionLabels(g, P, s, Wd, Ht, free) {
+  const R = regionData();
+  g.textAlign = 'center'; g.textBaseline = 'middle'; g.lineJoin = 'round'; g.lineWidth = 3; g.strokeStyle = 'rgba(0,0,0,.6)';
+  const label = (text, wx, wz, font, color, a, spacing = '0px', ang = 0) => {
+    if (a < 0.05) return;
+    const [x, y] = P(wx, wz);
+    if (x < -150 || y < -40 || x > Wd + 150 || y > Ht + 40) return;
+    g.font = font; g.letterSpacing = spacing;
+    const w = g.measureText(text).width, h = parseInt(font.match(/(\d+)px/)[1], 10), c = Math.abs(Math.cos(ang)), sn = Math.abs(Math.sin(ang));
+    const hw = (w * c + h * sn) / 2 + 3, hh = (w * sn + h * c) / 2;
+    if (free([x - hw, y - hh, x + hw, y + hh])) {
+      g.save(); g.globalAlpha = a; g.fillStyle = color; g.translate(x, y); g.rotate(ang);
+      g.strokeText(text, 0, 1); g.fillText(text, 0, 1); g.restore();
+    }
+    g.letterSpacing = '0px';
+  };
+  const far = 1 - fade(s, Z.city * 2.5);
+  for (const st of R.states) label(st.name, st.x, st.z, `700 34px ${MAP_FONT}`, 'rgba(255,255,255,.6)', far, '10px');
+  if (R.river) label('MISSISSIPPI RIVER', R.river.x, R.river.z, `italic 600 16px ${MAP_FONT}`, '#b9cddd', 1 - fade(s, Z.hood), '3px', R.river.ang);
+  const out = 1 - fade(s, Z.street * 1.5);
+  for (const t of R.towns) {
+    const big_ = t.place === 'city', at = big_ ? Z.city * 0.8 : t.place === 'town' ? Z.city * 1.4 : t.place === 'village' ? Z.t1 : Z.hood;
+    const font = big_ ? `700 21px ${MAP_FONT}` : t.place === 'town' ? `600 18px ${MAP_FONT}` : t.place === 'village' ? `600 16px ${MAP_FONT}` : `500 14px ${MAP_FONT}`;
+    label(big_ ? t.name.toUpperCase() : t.name, t.x, t.z, font, '#fff', fade(s, at) * out, big_ ? '2px' : '0px');
+  }
+  for (const h of R.hoods) label(h.name, h.x, h.z, `italic 500 15px ${MAP_FONT}`, '#e6ecf2', fade(s, Z.hood) * (1 - 0.4 * fade(s, Z.street)));
+}
+// street names along the longest straight bit of each named street, one label per name per ~260 px
+const nameW = new Map();
+function streetLabels(g, P, s, Wd, Ht, free) {
+  const a = fade(s, Z.street);
+  if (a < 0.05) return;
+  g.font = `500 13px ${MAP_FONT}`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.lineJoin = 'round'; g.lineWidth = 3; g.strokeStyle = 'rgba(20,24,28,.85)'; g.fillStyle = '#e8edf2'; g.globalAlpha = a;
+  const placed = new Map();
+  let n = 0;
+  for (const id of W.edgesNear(big.cx, big.cz, Math.hypot(Wd, Ht) / s * 0.55)) {
+    const e = W.G.edges[id];
+    if (!e.name || e.cls === 'service' || n > 90) continue;
+    let w = nameW.get(e.name); if (w === undefined) { w = g.measureText(e.name).width; nameW.set(e.name, w); }
+    const pts = e.pts;
+    let best = 0, bi = 0;
+    for (let i = 0; i + 3 < pts.length; i += 2) { const l = Math.hypot(pts[i + 2] - pts[i], pts[i + 3] - pts[i + 1]); if (l > best) { best = l; bi = i; } }
+    if (best * s < w + 12) continue;
+    const [x, y] = P((pts[bi] + pts[bi + 2]) / 2, (pts[bi + 1] + pts[bi + 3]) / 2);
+    if (x < 0 || y < 0 || x > Wd || y > Ht) continue;
+    const prev = placed.get(e.name);
+    if (prev && prev.some(([px, py]) => Math.hypot(px - x, py - y) < 260)) continue;
+    let ang = Math.atan2(pts[bi + 3] - pts[bi + 1], pts[bi + 2] - pts[bi]);
+    if (ang > Math.PI / 2) ang -= Math.PI; else if (ang < -Math.PI / 2) ang += Math.PI;
+    const c = Math.abs(Math.cos(ang)), sn = Math.abs(Math.sin(ang)), hw = (w * c + 13 * sn) / 2 + 2, hh = (w * sn + 13 * c) / 2;
+    if (!free([x - hw, y - hh, x + hw, y + hh])) continue;
+    (prev || placed.set(e.name, []).get(e.name)).push([x, y]); n++;
+    g.save(); g.translate(x, y); g.rotate(ang); g.strokeText(e.name, 0, 1); g.fillText(e.name, 0, 1); g.restore();
+  }
+  g.globalAlpha = 1;
+}
 export function drawBigMap(me, blips, waypoint, route) {
   big.last = [me, blips, waypoint, route];
   // match the buffer to the on-screen size (sharp on hi-dpi); a hidden tab keeps the last size
@@ -456,7 +569,7 @@ export function drawBigMap(me, blips, waypoint, route) {
   }
   const Wd = big.w, Ht = big.h;
   big.fit = Math.min(Wd / (maxX - minX), Ht / (maxZ - minZ));
-  if (!big.s) { big.s = big.fit * 2.2; big.cx = me.x; big.cz = me.z; }
+  if (!big.s) { big.s = big.ts = Math.min(Z.max, Math.max(big.fit * 2.2, 0.12)); big.cx = me.x; big.cz = me.z; }
   const s = big.s;
   // keep the view on the map: past its edge there is no data (that showed as a blank strip)
   const keep = (c, lo, hi, half) => (hi - lo <= half * 2 ? (lo + hi) / 2 : Math.max(lo + half, Math.min(hi - half, c)));
@@ -466,34 +579,37 @@ export function drawBigMap(me, blips, waypoint, route) {
   bm.fillStyle = MAP_COLORS.offmap; bm.fillRect(0, 0, Wd, Ht);
   bm.translate(Wd / 2, Ht / 2); bm.scale(s, s); bm.translate(-big.cx, -big.cz);
   if (base) { bm.imageSmoothingEnabled = true; bm.drawImage(base, minX, minZ, base.width / BASE_S, base.height / BASE_S); }
+  drawRegions(bm, s);
   if (s > 0.45) drawVectors(bm, big.cx, big.cz, Math.hypot(Wd, Ht) / s * 0.55, s);
   drawTurfs(bm, 2 / s);
   drawRoute(bm, route, s);
   bm.restore();
   const P = (x, z) => [Wd / 2 + (x - big.cx) * s, Ht / 2 + (z - big.cz) * s];
-  // blips: minor places underneath, important ones on top; hovering a legend row enlarges that type and fades the rest
-  const zoomed = s / big.fit;
+  const boxes = [], free = (b) => { if (boxes.some((o) => b[0] < o[2] && b[2] > o[0] && b[1] < o[3] && b[3] > o[1])) return false; boxes.push(b); return true; };
+  regionLabels(bm, P, s, Wd, Ht, free);
+  // blips by tier (further out only the important ones); minor underneath; hovering a legend row shows that type at any zoom
   const shown = [];
   for (const b of blips) {
     if (b.type && big.off.has(b.type)) continue;
+    const T = BLIP_TYPES[b.type], tier = b.tier ?? T?.tier ?? 0, hl = !!big.hl && b.type === big.hl;
+    if (!hl && s < TIER_S[tier]) continue;
     const [x, y] = P(b.x, b.z);
     if (x < -20 || y < -20 || x > Wd + 20 || y > Ht + 20) continue;
-    const T = BLIP_TYPES[b.type], imp = !T || T.important, hl = big.hl && b.type === big.hl;
-    shown.push({ b, x, y, r: (imp ? 7.5 : zoomed > 2 ? 6.5 : 4.5) * (hl ? 1.35 : 1), imp, hl });
+    shown.push({ b, x, y, r: (tier === 0 ? 7.5 : s > Z.street ? 6.5 : 5) * (hl ? 1.35 : 1), imp: tier === 0, hl });
   }
   shown.sort((a, b) => a.hl - b.hl || a.imp - b.imp);
   for (const d of shown) { bm.globalAlpha = big.hl && !d.hl ? 0.3 : 1; drawBlip(bm, d.b, d.x, d.y, d.r); }
   bm.globalAlpha = 1;
-  // names: hovered type first, then important ones, minor places only when zoomed right in; skip any that would overlap
-  const boxes = [];
+  // names: hovered type first, then important ones, minor places only close in; skip any that would overlap
   bm.font = `600 15px ${MAP_FONT}`; bm.textAlign = 'left'; bm.textBaseline = 'middle'; bm.lineWidth = 3; bm.strokeStyle = 'rgba(0,0,0,.8)'; bm.fillStyle = '#fff';
   for (let i = shown.length - 1; i >= 0; i--) {
     const { b, x, y, r: rr, imp, hl } = shown[i];
-    if (!b.name || big.hl && !hl || !hl && zoomed < (imp ? 1.6 : 4)) continue;
-    const bx = x + rr + 5, w = bm.measureText(b.name).width, box = [bx - 2, y - 9, bx + w + 2, y + 9];
-    if (boxes.some((o) => box[0] < o[2] && box[2] > o[0] && box[1] < o[3] && box[3] > o[1])) continue;
-    boxes.push(box); bm.strokeText(b.name, bx, y + 1); bm.fillText(b.name, bx, y + 1);
+    if (!b.name || big.hl && !hl || !hl && s < (imp ? Z.hood : Z.street)) continue;
+    const bx = x + rr + 5, w = bm.measureText(b.name).width;
+    if (!free([bx - 2, y - 9, bx + w + 2, y + 9])) continue;
+    bm.strokeText(b.name, bx, y + 1); bm.fillText(b.name, bx, y + 1);
   }
+  streetLabels(bm, P, s, Wd, Ht, free);
   if (waypoint && !big.off.has('waypoint')) { const [x, y] = P(waypoint.x, waypoint.z); drawBlip(bm, { type: 'waypoint' }, x, y, 8 * (big.hl === 'waypoint' ? 1.35 : 1)); }
   const [px, py] = P(me.x, me.z);
   bm.save(); bm.translate(px, py); bm.rotate(Math.atan2(Math.cos(me.h), Math.sin(me.h)));
@@ -509,11 +625,49 @@ export function bigMapToWorld(ev) {
   return { x: big.cx + (x - big.w / 2) / big.s, z: big.cz + (y - big.h / 2) / big.s };
 }
 export const bigMapDragged = () => big.moved;
+export const mapActive = () => !el.pause.hidden && !el.bigmap.closest('[data-panel]').hidden;
 const redraw = () => big.last && drawBigMap(...big.last);
 addEventListener('resize', () => { if (!el.pause.hidden) redraw(); });
-// legend: one row per blip type with its icon; click toggles the type, hover highlights it
+// Smooth zoom and key panning: frames run only while something moves; at rest the map is drawn once per change.
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
+const PAN = { KeyW: [0, -1], ArrowUp: [0, -1], KeyS: [0, 1], ArrowDown: [0, 1], KeyA: [-1, 0], ArrowLeft: [-1, 0], KeyD: [1, 0], ArrowRight: [1, 0] };
+function tick(now) {
+  big.raf = 0;
+  if (!mapActive()) { big.keys.clear(); big.za = null; big.s = big.ts || big.s; big.t = 0; return; }
+  const dt = big.t ? Math.min(0.05, (now - big.t) / 1000) : 1 / 60; big.t = now;
+  let moving = false;
+  const gap = Math.log((big.ts || big.s) / big.s);
+  if (Math.abs(gap) > 0.003 && !reduceMotion.matches) { big.s *= Math.exp(gap * (1 - Math.exp(-dt * 12))); moving = true; } else big.s = big.ts || big.s;
+  if (big.za) { big.cx = big.za.wx - (big.za.sx - big.w / 2) / big.s; big.cz = big.za.wz - (big.za.sy - big.h / 2) / big.s; if (!moving) big.za = null; }
+  let kx = 0, kz = 0;
+  for (const c of big.keys) { kx += PAN[c][0]; kz += PAN[c][1]; }
+  if (kx || kz) { const l = Math.hypot(kx, kz) || 1; big.cx += (kx / l) * 650 * dt / big.s; big.cz += (kz / l) * 650 * dt / big.s; moving = true; }
+  redraw();
+  if (moving) big.raf = requestAnimationFrame(tick); else big.t = 0;
+}
+const kick = () => { if (!big.raf) { big.t = 0; big.raf = requestAnimationFrame(tick); } };
+function zoomAt(ev, f) {
+  if (!big.s) return;
+  const [x, y] = canvasPt(ev), p = bigMapToWorld(ev);
+  big.ts = Math.max(big.fit * 0.9, Math.min(Z.max, (big.ts || big.s) * f));
+  big.za = { wx: p.x, wz: p.z, sx: x, sy: y };
+  kick();
+}
+// legend: a small tab on the map's edge (or L) slides it in over the right side; closed by default
+const legend = $('mapLegend'), legendTab = $('mapLegendTab');
+function toggleLegend(open = !legend.classList.contains('open')) { legend.classList.toggle('open', open); legend.inert = !open; legendTab.setAttribute('aria-expanded', String(open)); }
+legend.inert = true;
+legendTab.addEventListener('click', () => toggleLegend());
+addEventListener('keydown', (e) => {
+  if (!mapActive() || e.target.tagName === 'INPUT') return;
+  if (PAN[e.code]) { e.preventDefault(); big.keys.add(e.code); big.za = null; kick(); }
+  else if (e.code === 'KeyL' && !e.repeat) toggleLegend();
+});
+addEventListener('keyup', (e) => { big.keys.delete(e.code); });
+addEventListener('blur', () => { big.keys.clear(); });
+// legend rows: one per blip type with its icon; click toggles the type, hover highlights it
 {
-  const ul = $('mapLegend').querySelector('ul'), dpr = Math.min(devicePixelRatio || 1, 2);
+  const ul = legend.querySelector('ul'), dpr = Math.min(devicePixelRatio || 1, 2);
   for (const [type, T] of Object.entries(BLIP_TYPES)) {
     const li = document.createElement('li'), row = document.createElement(T.fixed ? 'div' : 'button'), ic = document.createElement('canvas');
     ic.width = ic.height = 22 * dpr; const g = ic.getContext('2d'); g.scale(dpr, dpr); drawBlip(g, { type }, 11, 11, 9);
@@ -531,19 +685,18 @@ el.bigmap.addEventListener('mousemove', (ev) => { const p = bigMapToWorld(ev), [
 el.bigmap.addEventListener('mouseleave', () => { mapLoc.hidden = true; });
 el.bigmap.addEventListener('wheel', (ev) => {
   ev.preventDefault();
-  const p = bigMapToWorld(ev), f = ev.deltaY > 0 ? 1 / 1.25 : 1.25;
-  const ns = Math.max(big.fit * 0.9, Math.min(3, big.s * f));
-  // keep the point under the cursor still
-  const [x, y] = canvasPt(ev);
-  big.s = ns; big.cx = p.x - (x - big.w / 2) / ns; big.cz = p.z - (y - big.h / 2) / ns;
-  redraw();
+  const dy = ev.deltaY * (ev.deltaMode === 1 ? 33 : ev.deltaMode === 2 ? 400 : 1);
+  zoomAt(ev, Math.exp(-Math.max(-150, Math.min(150, dy)) * 0.0035));
 }, { passive: false });
-el.bigmap.addEventListener('mousedown', (ev) => { big.drag = canvasPt(ev); big.moved = false; });
-addEventListener('mousemove', (ev) => {
+el.bigmap.addEventListener('dblclick', (ev) => zoomAt(ev, 2.4));
+// drag to pan (pointer events, so a finger works too)
+el.bigmap.addEventListener('pointerdown', (ev) => { big.drag = canvasPt(ev); big.moved = false; big.za = null; });
+addEventListener('pointermove', (ev) => {
   if (!big.drag) return;
   const [x, y] = canvasPt(ev), dx = x - big.drag[0], dy = y - big.drag[1];
   if (Math.abs(dx) + Math.abs(dy) > 4) big.moved = true;
   if (!big.moved) return;
   big.cx -= dx / big.s; big.cz -= dy / big.s; big.drag = [x, y]; redraw();
 });
-addEventListener('mouseup', () => { big.drag = null; });
+addEventListener('pointerup', () => { big.drag = null; });
+addEventListener('pointercancel', () => { big.drag = null; });

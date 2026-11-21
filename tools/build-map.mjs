@@ -17,7 +17,7 @@
 //       7 cemetery 8 sand 9 road 10 walk 11 building 12 pitch 14 farmland 15 meadow 16 orchard 17 golf 18 railway
 //       19 wetland 20 creek (stream bed) 21 pond (water above the river level) 22 residential 23 scrub 24 farmyard 25 quarry
 //   b   buildings: [footprint [x,z,...], base y, height, pitched, style, name, kind, extra?]
-//       extra (only when OSM has it): {t: building type, l: levels, mh: min height, r: roof shape, rc: roof colour,
+//       extra: {id: OSM way id ('r' + id for relations), ms: 1 = a Microsoft footprint (no OSM tags), t: building type, l: levels, mh: min height, r: roof shape, rc: roof colour,
 //       rm: roof material, m: wall material, co: wall colour, s: shop/amenity/office, a: "123 Main St", hn: house name}
 //   t   trees [x, z, kind (0 broadleaf, 1 conifer, 2 street), scale*10] (OSM natural=tree first, then generated)
 //   k   parking spots [x, z, heading, inLot]
@@ -28,7 +28,8 @@
 //       pk parking entrances, sl silos / storage tanks (x, z, height), wt water towers (x, z, height), ch chimneys/masts (x, z, height)
 //   l   lines {key: [[x, z, ...], ...]} clipped to the tile: fe fences, wa walls, he hedges, gr guard rails, rw retaining walls,
 //       pw power lines, ps minor power lines, sr streams, dc ditches/drains, dw driveways, pa parking aisles, dt drive-throughs,
-//       al alleys, fw footways/paths, cy cycleways, tk farm tracks (not in the graph), tr tree rows, pi piers, rl rail tracks,
+//       al alleys, fw footways/paths, cy cycleways, tk farm tracks (not in the graph), sv service roads cut off from the graph
+//       (drawn as paved strips), tr tree rows, pi piers, rl rail tracks,
 //       dm dams/weirs, kb kerbs/embankments
 //   a   areas {key: [[x, z, ...], ...]} clipped to the tile: pk parking lots, fm farmland fields, or orchards, gf golf (fairway/green/bunker
 //       as gf/gg/gb), ce cemeteries, pi pier decks, ap aeroway (runway ra / taxiway/apron aa)
@@ -86,6 +87,7 @@ function scan(rings, cell, gx0, gz0, gw, gh, cb) {
 }
 const fillPoly = (rings, code, onlyIf) => scan(rings, CELL, GX0, GZ0, GW, GH, (k) => { if (!onlyIf || onlyIf(cls[k])) cls[k] = code; });
 const pointInPoly = (x, z, pts) => { let c = false; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { const [xi, zi] = pts[i], [xj, zj] = pts[j]; if ((zi > z) !== (zj > z) && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) c = !c; } return c; };
+const bboxOf = (pl) => { let a = Infinity, b = -Infinity, c = Infinity, d = -Infinity; for (const [x, z] of pl) { if (x < a) a = x; if (x > b) b = x; if (z < c) c = z; if (z > d) d = z; } return [a, b, c, d]; };
 const ringArea = (r) => { let a = 0; for (let i = 0, j = r.length - 1; i < r.length; j = i++) a += r[j][0] * r[i][1] - r[i][0] * r[j][1]; return a / 2; };
 // multipolygon members -> closed rings (members come with full geometry: no bbox clipping)
 function assembleRings(members) {
@@ -334,7 +336,10 @@ for (const w of roadWays) {
       const flags = (t.tunnel === 'yes' || t.tunnel === 'building_passage' ? 1 : 0) | (SURF[t.surface] || 0) | (sw === 'both' || sw === 'yes' ? 8 : sw === 'left' ? 16 : sw === 'right' ? 32 : 0) | (t.lit === 'yes' ? 64 : 0)
         | (t['turn:lanes'] || t['turn:lanes:forward'] || t['turn:lanes:backward'] ? 128 : 0) | (t.junction === 'roundabout' ? 256 : 0) | (t['bridge:movable'] || t.bridge === 'movable' ? 512 : 0)
         | (t.cycleway && t.cycleway !== 'no' ? 1024 : 0) | (t['parking:lane:both'] || t['parking:both'] || t['parking:lane:right'] || t['parking:right'] ? 2048 : 0) | (t.median || t.dual_carriageway === 'yes' ? 4096 : 0) | (t.toll === 'yes' ? 8192 : 0);
-      const width = parseWidth(t.width) || Math.max(WIDTH[w.cl], (lf + lb) * lw + (w.cl === 'residential' && !oneway ? 2 : 0));
+      // one carriageway of a divided road or a ramp: its lanes plus shoulders, not the class's two-way width (15 m motorway
+      // ramps overlapped everything at the interchanges)
+      const width = parseWidth(t.width) || (oneway ? Math.max(4.5, lf * lw + (w.cl === 'motor' || w.cl === 'trunk' ? 3 : w.cl === 'primary' || w.cl === 'secondary' ? 1.2 : 0.6))
+        : Math.max(WIDTH[w.cl], (lf + lb) * lw + (w.cl === 'residential' ? 2 : 0)));
       edges.push({ a: A, b: B, pts: PTS, cl: w.cl, lf, lb, speed: Math.min(ms || SPEED[w.cl], 33), name: t.name || '', ref: t.ref || '', bridge: t.bridge && t.bridge !== 'no' ? 1 : 0, layer: +t.layer || 0, width: r1(width), flags, turn: t['turn:lanes'] || t['turn:lanes:forward'] || '' });
       start = i;
     }
@@ -352,6 +357,8 @@ const elen = (e) => { let l = 0; for (let i = 1; i < e.pts.length; i++) l += dis
     while (st.length) { const k = st.pop(); for (const ei of adj[k]) { const e = edges[ei], o = e.a === k ? e.b : e.a; if (e.a === k) L += elen(e); if (comp[o] < 0) { comp[o] = c; st.push(o); } } }
     compLen.push(L); c++;
   }
+  // the dropped bits are mostly service roads that reach the network only through parking aisles: still drawn, as paved strips
+  for (const e of edges) if (compLen[comp[e.a]] <= 400 && elen(e) > 15) lineFeat.push({ key: e.cl === 'track' ? 'tk' : 'sv', pts: e.pts });
   edges = edges.filter((e) => compLen[comp[e.a]] > 400);
 }
 const used = new Map(), nodes2 = [];
@@ -381,11 +388,44 @@ for (const e of edges) {
       const t = (acc + s2) / L, x = e.pts[i - 1][0] + (e.pts[i][0] - e.pts[i - 1][0]) * s2 / d, z = e.pts[i - 1][1] + (e.pts[i][1] - e.pts[i - 1][1]) * s2 / d;
       if (heightAt(x, z) > -1 || t < 0.15 || t > 0.85) continue; // the ends can't lift: interior bridge nodes already sit high
       const base = ya + (yb - ya) * t * t * (3 - 2 * t), need = clear - base;
-      if (need > 0) e.rise = Math.max(e.rise, Math.min(15, need / Math.max(0.51, 4 * t * (1 - t))));
+      if (need > 0) e.rise = Math.max(e.rise, Math.min(15, 0.08 * L, need / Math.max(0.51, 4 * t * (1 - t)))); // short spans stay low (a 15 m hump over 80 m is a ramp)
     }
     acc += d;
   }
   e.rise = r1(e.rise);
+}
+// overpasses: a bridge that crosses another road (no shared node, so grade-separated) clears it by 5.5 m; the deck's
+// mid-span lift (rise) grows where the abutment heights alone would leave it on top of the road below
+{
+  const SG = 60, sgrid = new Map();
+  edges.forEach((e, i) => { if (e.flags & 1) return; for (let k = 1; k < e.pts.length; k++) { const [ax, az] = e.pts[k - 1], [bx, bz] = e.pts[k]; for (let gx = Math.floor(Math.min(ax, bx) / SG); gx <= Math.floor(Math.max(ax, bx) / SG); gx++) for (let gz = Math.floor(Math.min(az, bz) / SG); gz <= Math.floor(Math.max(az, bz) / SG); gz++) { const key = gx * 100000 + gz; let a = sgrid.get(key); if (!a) sgrid.set(key, (a = [])); a.push(i, k); } } });
+  const yAt = (e, t) => { const ya = nodes2[e.a].y, yb = nodes2[e.b].y; return e.bridge ? ya + (yb - ya) * t * t * (3 - 2 * t) + e.rise * 4 * t * (1 - t) : null; };
+  let raised = 0;
+  edges.forEach((e, i) => {
+    if (!e.bridge) return;
+    const L = elen(e); let acc = 0;
+    for (let k = 1; k < e.pts.length; k++) {
+      const [ax, az] = e.pts[k - 1], [bx, bz] = e.pts[k], sl = dist(e.pts[k - 1], e.pts[k]), seen = new Set();
+      for (let gx = Math.floor(Math.min(ax, bx) / SG); gx <= Math.floor(Math.max(ax, bx) / SG); gx++) for (let gz = Math.floor(Math.min(az, bz) / SG); gz <= Math.floor(Math.max(az, bz) / SG); gz++) {
+        const a = sgrid.get(gx * 100000 + gz) || [];
+        for (let q = 0; q < a.length; q += 2) {
+          const j = a[q], kk = a[q + 1], o = edges[j]; if (j === i || seen.has(j * 4096 + kk) || o.a === e.a || o.a === e.b || o.b === e.a || o.b === e.b) continue;
+          seen.add(j * 4096 + kk);
+          if (o.bridge && (o.layer || 1) >= (e.layer || 1)) continue; // the other one is the upper deck (or the same level)
+          const [cx, cz] = o.pts[kk - 1], [dx, dz] = o.pts[kk], den = (bx - ax) * (dz - cz) - (bz - az) * (dx - cx); if (Math.abs(den) < 1e-9) continue;
+          const u = ((cx - ax) * (dz - cz) - (cz - az) * (dx - cx)) / den, v = ((cx - ax) * (bz - az) - (cz - az) * (bx - ax)) / den;
+          if (u < 0 || u > 1 || v < 0 || v > 1) continue;
+          const t = (acc + u * sl) / L; if (t < 0.06 || t > 0.94) continue;
+          let oy = heightAt(ax + (bx - ax) * u, az + (bz - az) * u);
+          if (o.bridge) { let oacc = 0; for (let m = 1; m < kk; m++) oacc += dist(o.pts[m - 1], o.pts[m]); oy = yAt(o, (oacc + v * dist(o.pts[kk - 1], o.pts[kk])) / elen(o)); }
+          const need = oy + 5.5 - yAt(e, t);
+          if (need > 0.2) { e.rise = r1(Math.min(12, e.rise + need / (4 * t * (1 - t)))); raised++; }
+        }
+      }
+      acc += sl;
+    }
+  });
+  log(`overpass decks raised to clear the road below: ${raised}`);
 }
 // node lookup grid
 const NG = 40, ngrid = new Map();
@@ -450,7 +490,7 @@ const HOUSEY = new Set(['house', 'detached', 'semidetached_house', 'residential'
 const FARMY = new Set(['barn', 'farm_auxiliary', 'cowshed', 'stable', 'silo', 'greenhouse', 'sty', 'grain_bin', 'storage_tank']);
 const parseH = (v) => { if (!v) return 0; const n = parseFloat(v); return /ft|'/.test(v) ? n * 0.3048 : n || 0; };
 const MAT = (v) => (v ? String(v).toLowerCase().slice(0, 16) : undefined);
-function addBuilding(geomPts, t) {
+function addBuilding(geomPts, t, src = {}) {
   if (geomPts.length < 4) return;
   const { pts, area } = simplify(geomPts);
   if (pts.length < 3 || area < 12) return;
@@ -467,7 +507,7 @@ function addBuilding(geomPts, t) {
   else if (HOUSEY.has(type) || (d !== 'downtown' && d !== 'north' && area < 260 && type === 'yes')) h = 5.5 + rand() * 2.5;
   else if (type === 'apartments' || type === 'dormitory') h = 10 + rand() * 10;
   else if (type === 'church') h = 14 + rand() * 6;
-  else if (d === 'downtown') h = area > 2500 ? 18 + rand() * 30 : area > 800 ? 11 + rand() * 14 : 8 + rand() * 6;
+  else if (d === 'downtown') h = area > 2500 ? 12 + rand() * 12 : area > 800 ? 10 + rand() * 8 : 8 + rand() * 6; // real towers carry height/levels tags
   else if (d === 'village') h = 7 + rand() * 6;
   else if (d === 'north') h = area > 3000 ? 8 + rand() * 4 : 5 + rand() * 3;
   else if (d === 'rural') h = area > 1500 ? 7 + rand() * 4 : 5 + rand() * 3;
@@ -487,7 +527,7 @@ function addBuilding(geomPts, t) {
   let ymin = Infinity, ymax = -Infinity; for (const [x, z] of pts) { const y = heightAt(x, z); ymin = Math.min(ymin, y); ymax = Math.max(ymax, y); }
   // kind code for the game: 0 other, 1 parking garage, 2 church, 3 school/college, 4 warehouse/industrial, 5 shop/commercial, 6 house, 7 farm building
   const kind = type === 'parking' || t.parking === 'multi-storey' ? 1 : type === 'church' || type === 'cathedral' || type === 'chapel' ? 2 : ['school', 'university', 'college'].includes(type) ? 3 : ['warehouse', 'industrial', 'manufacture'].includes(type) ? 4 : ['retail', 'commercial', 'supermarket', 'office'].includes(type) ? 5 : pitched && !FARMY.has(type) ? 6 : FARMY.has(type) ? 7 : 0;
-  if (kind === 1) { style = 1; h = Math.max(h, (levels || 4) * 3); }
+  if (kind === 1) { style = 1; h = parseH(t.height) || (levels || 5) * 3.1; } // parking ramps: about 3 m a deck
   const x = {};
   if (type !== 'yes') x.t = type;
   if (levels) x.l = levels;
@@ -500,21 +540,73 @@ function addBuilding(geomPts, t) {
   const s = t.shop || t.amenity || t.office || t.tourism || t.craft; if (s) x.s = s;
   if (t['addr:housenumber'] && t['addr:street']) x.a = `${t['addr:housenumber']} ${t['addr:street']}`;
   if (t['addr:housename']) x.hn = t['addr:housename'];
-  bld.push({ pts, cx, cz, h: Math.round(h * 10) / 10, y: Math.round(ymin * 10) / 10, pitched, style, name: t.name || '', type, area, kind, x: Object.keys(x).length ? x : null });
+  if (src.id) x.id = src.id; // OSM way id ('r' + id for relations): src/regions name overrides match on it
+  if (src.ms) x.ms = 1; // a Microsoft footprint (no tags; areas.js gives it its archetype's height and look)
+  bld.push({ pts, cx, cz, h: Math.round(h * 10) / 10, y: Math.round(ymin * 10) / 10, pitched, style, name: t.name || '', type, area, kind, ms: !!src.ms, x: Object.keys(x).length ? x : null });
   fillPoly([pts], C.building, (c) => c !== C.water);
 }
+const wayTowers = []; // water towers mapped as outlines: drawn as tower points (see below), not as boxes
 for (const e of readAll('buildings')) {
   const t = e.tags || {}; if (!t.building || t.building === 'no') continue; // building:part outlines duplicate their building
-  if (e.type === 'way' && e.geometry) addBuilding(P(e.geometry), t);
-  else if (e.type === 'relation' && e.members) for (const ring of relRings(e).outer) addBuilding(ring, t);
+  if ((t.man_made === 'water_tower' || t.building === 'water_tower') && e.type === 'way' && e.geometry) {
+    const g = P(e.geometry); let cx = 0, cz = 0; for (const [x, z] of g) { cx += x; cz += z; } wayTowers.push([cx / g.length, cz / g.length, parseH(t.height) || 38]); continue;
+  }
+  if (e.type === 'way' && e.geometry) addBuilding(P(e.geometry), t, { id: e.id });
+  else if (e.type === 'relation' && e.members) for (const ring of relRings(e).outer) addBuilding(ring, t, { id: 'r' + e.id });
 }
-log(`buildings ${bld.length}`);
+const nOSM = bld.length;
+log(`buildings ${nOSM}`);
+// Microsoft footprints (cache/ms/qc.json from ms-extract.mjs) where OSM has none: dropped when one overlaps an OSM
+// building by more than 30% of either's area, sits on a road or in water (25% of it), or is long and thin (rail cars,
+// semi trailers and barges the imagery model traced)
+{
+  const MSF = here('cache/ms/qc.json');
+  if (fs.existsSync(MSF)) {
+    const OG = 50, og = new Map();
+    const toGrid = (i) => {
+      const b = bld[i], [a, c, d, f] = bboxOf(b.pts); b.bb = [a, c, d, f];
+      for (let gx = Math.floor(a / OG); gx <= Math.floor(c / OG); gx++) for (let gz = Math.floor(d / OG); gz <= Math.floor(f / OG); gz++) { const k = gx * 100000 + gz; let l = og.get(k); if (!l) og.set(k, (l = [])); l.push(i); }
+    };
+    for (let i = 0; i < bld.length; i++) toGrid(i);
+    const why = { overlap: 0, road: 0, water: 0, thin: 0, small: 0 };
+    let added = 0;
+    for (const flat of JSON.parse(fs.readFileSync(MSF))) {
+      const ring = []; for (let i = 0; i < flat.length; i += 2) ring.push([flat[i], flat[i + 1]]);
+      const area = Math.abs(ringArea(ring)); if (area < 12) { why.small++; continue; }
+      { let rx = 0, rz = 0; for (const [x, z] of ring) { rx += x; rz += z; } rx /= ring.length; rz /= ring.length; if (wayTowers.some(([tx, tz]) => Math.hypot(tx - rx, tz - rz) < 15)) { why.small++; continue; } }
+      const [a, b, c, d] = bboxOf(ring);
+      // oriented size along the longest side
+      let lb = 0, ux = 1, uz = 0; for (let i = 0; i < ring.length; i++) { const p = ring[i], q = ring[(i + 1) % ring.length], l = dist(p, q); if (l > lb) { lb = l; ux = (q[0] - p[0]) / l; uz = (q[1] - p[1]) / l; } }
+      let v0 = Infinity, v1 = -Infinity, u0 = Infinity, u1 = -Infinity; for (const [x, z] of ring) { const u = x * ux + z * uz, v = -x * uz + z * ux; u0 = Math.min(u0, u); u1 = Math.max(u1, u); v0 = Math.min(v0, v); v1 = Math.max(v1, v); }
+      const wid = Math.min(u1 - u0, v1 - v0), len = Math.max(u1 - u0, v1 - v0);
+      if (wid < 4 && len / wid > 3.5) { why.thin++; continue; }
+      const cand = new Set();
+      for (let gx = Math.floor(a / OG); gx <= Math.floor(b / OG); gx++) for (let gz = Math.floor(c / OG); gz <= Math.floor(d / OG); gz++) for (const i of og.get(gx * 100000 + gz) || []) { const o = bld[i].bb; if (o[0] < b && o[1] > a && o[2] < d && o[3] > c) cand.add(i); }
+      const st = Math.max(0.7, Math.sqrt(area / 250)), hit = new Map();
+      let n = 0, road = 0, wet = 0;
+      for (let z = c + st / 2; z < d; z += st) for (let x = a + st / 2; x < b; x += st) {
+        if (!pointInPoly(x, z, ring)) continue;
+        n++; const cl = clsAt(x, z); if (cl === C.road) road++; else if (cl === C.water) wet++;
+        for (const i of cand) { const o = bld[i]; if (x > o.bb[0] && x < o.bb[1] && z > o.bb[2] && z < o.bb[3] && pointInPoly(x, z, o.pts)) hit.set(i, (hit.get(i) || 0) + 1); }
+      }
+      if (!n) { why.small++; continue; }
+      if (road > n * 0.25) { why.road++; continue; }
+      if (wet > n * 0.25) { why.water++; continue; }
+      let dup = false; for (const [i, k] of hit) if (k > n * 0.3 || k * st * st > 0.3 * bld[i].area) { dup = true; break; }
+      if (dup) { why.overlap++; continue; }
+      const before = bld.length; addBuilding(ring, { building: 'yes' }, { ms: true }); if (bld.length > before) { added++; for (let i = before; i < bld.length; i++) toGrid(i); } // later footprints dedupe against this one too (the dataset has duplicates)
+    }
+    log(`Microsoft footprints: ${added} added; dropped ${JSON.stringify(why)}`);
+  } else log('no cache/ms/qc.json: OSM buildings only (run npm run ms)');
+}
+log(`buildings ${bld.length} (OSM ${nOSM}, Microsoft ${bld.length - nOSM})`);
 
 // ---------- tile features: points, lines, areas ----------
 const tileKey = (x, z) => `${Math.floor(x / TILE)}_${Math.floor(z / TILE)}`;
 const buckets = new Map();
 const bucket = (k) => { let b = buckets.get(k); if (!b) buckets.set(k, (b = { b: [], t: [], k: [], e: new Set(), p: {}, l: {}, a: {} })); return b; };
 const addPoint = (key, x, z, ...extra) => { if (!inBox(x, z)) return; const b = bucket(tileKey(x, z)); (b.p[key] = b.p[key] || []).push(x, z, ...extra); };
+for (const [x, z, hh] of wayTowers) addPoint('wt', x, z, Math.round(hh));
 const trees = [];
 const PKEY = (t) => {
   if (t.highway === 'street_lamp') return 'lm'; if (t.highway === 'traffic_signals') return 'sg'; if (t.highway === 'stop') return 'st'; if (t.highway === 'give_way') return 'gw';
@@ -581,7 +673,6 @@ function clipPoly(ring, x0, z0, x1, z1) {
   }
   return poly;
 }
-const bboxOf = (pl) => { let a = Infinity, b = -Infinity, c = Infinity, d = -Infinity; for (const [x, z] of pl) { if (x < a) a = x; if (x > b) b = x; if (z < c) c = z; if (z > d) d = z; } return [a, b, c, d]; };
 function addLineToTiles(key, pl) {
   const [a, b, c, d] = bboxOf(pl);
   for (let tz = Math.floor(c / TILE); tz <= Math.floor(d / TILE); tz++) for (let tx = Math.floor(a / TILE); tx <= Math.floor(b / TILE); tx++) {
@@ -732,7 +823,9 @@ const crossings = [];
     const ids = g.edges.map((e) => edges.indexOf(e));
     const allPts = g.edges.flatMap((e) => e.pts), [a, b, c, d] = bboxOf(allPts);
     const mx = (a + b) / 2, mz = (c + d) / 2, wp = areaPolys.find((w) => w.code === C.water && w.tags.name && w.outer.some((r) => { const [p0, p1, p2, p3] = bboxOf(r); return mx > p0 && mx < p1 && mz > p2 && mz < p3; }));
-    const river = wp ? wp.tags.name : 'Mississippi River';
+    let river = wp ? wp.tags.name : null;
+    if (!river) { let bd = Infinity; for (const w of areaPolys) { if (w.code !== C.water || !w.tags.name) continue; for (const r of w.outer) { const [p0, p1, p2, p3] = bboxOf(r); const dd = Math.hypot(Math.max(p0 - mx, 0, mx - p1), Math.max(p2 - mz, 0, mz - p3)); if (dd < bd) { bd = dd; river = w.tags.name; } } } }
+    river = river || 'Mississippi River';
     crossings.push({ name: g.name, ref: g.ref, river, edges: ids, box: [Math.round(a), Math.round(c), Math.round(b), Math.round(d)], deck: r1(Math.max(...g.edges.map((e) => Math.max(nodes2[e.a].y, nodes2[e.b].y) + e.rise))), lines: g.edges.map((e) => simplifyLine(e.pts, 1).flatMap(([x, z]) => [Math.round(x), Math.round(z)])) });
   }
   log(`river crossings: ${crossings.map((c) => c.name).join(', ')}`);
@@ -858,7 +951,17 @@ const b64 = (arr) => Buffer.from(arr.buffer, arr.byteOffset, arr.byteLength).toS
 for (const b of bld) bucket(tileKey(b.cx, b.cz)).b.push(b);
 for (const t of trees) if (inBox(t[0], t[1])) bucket(tileKey(t[0], t[1])).t.push(t);
 for (const p of parking) bucket(tileKey(p[0], p[1])).k.push(p);
-edges.forEach((e, idx) => { for (const [x, z] of e.pts) bucket(tileKey(x, z)).e.add(idx); for (let i = 1; i < e.pts.length; i++) { const L = dist(e.pts[i], e.pts[i - 1]); for (let s = 0; s < L; s += 50) bucket(tileKey(e.pts[i - 1][0] + (e.pts[i][0] - e.pts[i - 1][0]) * s / L, e.pts[i - 1][1] + (e.pts[i][1] - e.pts[i - 1][1]) * s / L)).e.add(idx); } });
+// every tile an edge's carriageway touches lists it (sampled every 2 m along the centre line and both kerbs: the old
+// 50 m steps missed the tiles a long straight road only clips at a corner, so those tiles drew no road there)
+const keysAlong = (e, step, key) => {
+  const ks = new Set(), o = e.width / 2 + 0.5;
+  for (let i = 1; i < e.pts.length; i++) {
+    const [ax, az] = e.pts[i - 1], [bx, bz] = e.pts[i], L = dist(e.pts[i], e.pts[i - 1]) || 1, nx = -(bz - az) / L, nz = (bx - ax) / L;
+    for (let s = 0; s < L + step; s += step) { const f = Math.min(1, s / L), x = ax + (bx - ax) * f, z = az + (bz - az) * f; for (const m of [0, o, -o]) ks.add(key(x + nx * m, z + nz * m)); }
+  }
+  return ks;
+};
+edges.forEach((e, idx) => { for (const k of keysAlong(e, 2, tileKey)) bucket(k).e.add(idx); });
 function encodeHeights(H) { // see the format note at the top
   if (H.every((v) => v === H[0])) return { h: H[0] };
   const bytes = []; const q = Array.from(H, (v) => Math.round(v / 2));
@@ -902,8 +1005,7 @@ log(`tiles ${tileCount} (land ${tileList.length}), ${(totalBytes / 1e6).toFixed(
 // every edge touching its area, and both of their end nodes.
 const rchunks = new Map(), chunkOf = (x, z) => `${Math.floor(x / ROAD_CHUNK)}_${Math.floor(z / ROAD_CHUNK)}`;
 edges.forEach((e, id) => {
-  const ks = new Set();
-  for (let i = 0; i < e.pts.length; i++) { ks.add(chunkOf(...e.pts[i])); if (i) { const L = dist(e.pts[i], e.pts[i - 1]); for (let s = 25; s < L; s += 25) ks.add(chunkOf(e.pts[i - 1][0] + (e.pts[i][0] - e.pts[i - 1][0]) * s / L, e.pts[i - 1][1] + (e.pts[i][1] - e.pts[i - 1][1]) * s / L)); } }
+  const ks = keysAlong(e, 5, chunkOf);
   for (const k of ks) { let c = rchunks.get(k); if (!c) rchunks.set(k, (c = { n: new Set(), e: [] })); c.e.push(id); c.n.add(e.a); c.n.add(e.b); }
 });
 let roadBytes = 0, roadMax = 0;
@@ -925,7 +1027,7 @@ for (let j = 0; j < CH; j++) for (let i = 0; i < CW; i++) {
   coarseW[j * CW + i] = wet >= 3 ? 1 : 0;
 }
 // far boxes: everything but small houses/sheds outside Davenport (they're invisible from far away anyway)
-const farB = bld.filter((b) => b.area > 600 || b.h > 12 || (b.area > 90 && districtFast(b.cx, b.cz) !== 'rural' && districtFast(b.cx, b.cz) !== 'town'));
+const farB = bld.filter((b) => b.area > 600 || b.h > 12 || (!b.ms && b.area > 90 && districtFast(b.cx, b.cz) !== 'rural' && districtFast(b.cx, b.cz) !== 'town')); // (Microsoft houses stay out: startup size)
 const mapRoads = {};
 for (const e of edges) if (['motor', 'trunk', 'primary', 'secondary', 'tertiary'].includes(e.cl)) (mapRoads[e.cl] = mapRoads[e.cl] || []).push(simplifyLine(e.pts, 4).flatMap(([x, z]) => [Math.round(x), Math.round(z)]));
 fs.writeFileSync(OUT + 'overview.json', JSON.stringify({

@@ -379,6 +379,7 @@ function stepTab(d) { const i = pauseTabs.findIndex((b) => b.classList.contains(
 // GTA keys while paused: Q/E or arrows switch tabs, Esc goes back to the game (click the game to grab the mouse again)
 function pauseKey(e) {
   if (e.repeat || e.target.tagName === 'INPUT') return; // sliders keep their arrow keys
+  if (e.key.startsWith('Arrow') && ui.mapActive()) return; // on the map the arrows pan it (ui.js)
   if (e.code === 'KeyQ' || e.key === 'ArrowLeft') stepTab(-1);
   else if (e.code === 'KeyE' || e.key === 'ArrowRight') stepTab(1);
   else if (e.key === 'Escape' && performance.now() - pausedAt > 400) closePause(); // the Esc that unlocked the mouse also opened this
@@ -409,12 +410,17 @@ function drawGoals() {
 }
 ui.el.pauseTabs.addEventListener('click', (e) => { const t = e.target.closest('button'); if (t) t.dataset.dir ? stepTab(+t.dataset.dir) : showTab(t.dataset.tab); });
 ui.el.resumeBtn.addEventListener('click', () => { closePause(); lockMouse(); fx.unlockAudio(); });
+// click sets / clears the waypoint; held back a moment so a double-click (zoom in, ui.js) doesn't also move it
+let wpClickT = 0;
 ui.el.bigmap.addEventListener('click', (e) => {
-  if (ui.bigMapDragged()) return;
+  clearTimeout(wpClickT);
+  if (ui.bigMapDragged() || e.detail > 1) return;
   const p = ui.bigMapToWorld(e);
-  waypoint = waypoint && Math.hypot(waypoint.x - p.x, waypoint.z - p.z) < 40 ? null : p;
-  gpsRoute = waypoint ? W.route(me.veh ? me.veh.x : me.x, me.veh ? me.veh.z : me.z, waypoint.x, waypoint.z) : null; routeT = 3;
-  drawPauseMap();
+  wpClickT = setTimeout(() => {
+    waypoint = waypoint && Math.hypot(waypoint.x - p.x, waypoint.z - p.z) < 40 ? null : p;
+    gpsRoute = waypoint ? W.route(me.veh ? me.veh.x : me.x, me.veh ? me.veh.z : me.z, waypoint.x, waypoint.z) : null; routeT = 3;
+    drawPauseMap();
+  }, 260);
 });
 // ---------- GPS: a route along real streets to the waypoint ----------
 let gpsRoute = null, routeT = 0;
@@ -474,8 +480,9 @@ function storeList(all) {
   const out = [];
   for (const s of stores) {
     const type = STORE_TYPE[s.kind];
-    // robbable: the minimap shows the ones within 400 m (more would pile up on its edge); dimmed while the till is empty
-    if (type && (all || (s.kind !== 'rob' && s.kind !== 'bar') || Math.hypot(s.x - me.x, s.z - me.z) < (s.kind === 'bar' ? 150 : 400))) out.push({ x: s.x, z: s.z, type, name: s.kind === 'casino' ? 'The Arnett Belle casino' : s.name, dim: s.cooldown > 0 });
+    // minimap: gun stores, garages and the casino from anywhere, robbable stores within 400 m (more would pile up on its edge),
+    // clothes and bars only within 150 m; dimmed while the till is empty
+    if (type && (all || s.kind === 'guns' || s.kind === 'body' || s.kind === 'casino' || Math.hypot(s.x - me.x, s.z - me.z) < (s.kind === 'rob' ? 400 : 150))) out.push({ x: s.x, z: s.z, type, name: s.kind === 'casino' ? 'The Arnett Belle casino' : s.name, dim: s.cooldown > 0 });
   }
   return out;
 }
@@ -493,7 +500,7 @@ function poiBlips() {
   if (!stores.length) return []; // stores aren't placed yet; try again next time
   // our own stores sit on some of these spots (Tim-Mart on a real gas station): don't double them up
   poiCache = W.D.index.poi.filter((p) => POI_TYPE[p.kind] && !stores.some((s) => s.kind !== 'meds' && (s.kind !== 'bar' || POI_TYPE[p.kind] === 'bar') && Math.hypot(s.x - p.x, s.z - p.z) < 60))
-    .map((p) => ({ x: p.x, z: p.z, type: POI_TYPE[p.kind], name: p.name }));
+    .map((p) => ({ x: p.x, z: p.z, type: POI_TYPE[p.kind], name: p.name, tier: POI_TYPE[p.kind] === 'garage' ? 2 : undefined })); // OSM repair shops aren't Arnett Auto: close-in only
   for (const f of W.places.fire) poiCache.push({ x: f.x, z: f.z, type: 'fire', name: f.name });
   return poiCache;
 }
@@ -1538,7 +1545,11 @@ function launchMe(v, vx, vy, vz) {
   me.exitT = 0;
   if (v.driver === net.uid) { v.driver = ''; v.localSim = true; writeVeh(v, true); }
   const f = { x: Math.sin(v.h), z: Math.cos(v.h) };
-  me.x = v.x + f.x * (v.T.len / 2 + 0.8); me.z = v.z + f.z * (v.T.len / 2 + 0.8); me.y = v.y + 1.3;
+  // start at the windshield, not past the bumper (that's inside whatever you hit)
+  me.x = v.x + f.x * v.T.len * 0.2; me.z = v.z + f.z * v.T.len * 0.2; me.y = v.y + 1.2; me.h = v.h;
+  // the body mesh was left where you got in: move it here first, the ragdoll is built from its matrix
+  me.ch.g.position.set(me.x, me.y, me.z); me.ch.g.rotation.set(0, v.h, 0); me.ch.g.visible = true;
+  syncPhysics(me.x, me.z); // ground/walls exist only near the last sync point; a fast car can outrun it
   if (!knockMe({ x: vx, y: vy, z: vz }, 2.6)) me.rag = { t: 2.6, vx, vy, vz, spin: 8 + Math.random() * 5, landed: false };
   fx.glass(me.x, me.y, me.z, 20);
   ui.announce('THROUGH THE WINDSHIELD', '', '#ff5e5b');
@@ -1724,7 +1735,7 @@ function driveUpdate(dt, fwd, side) {
     damageVehicle(v, (total - 5) * 2 * (1 + (total - 5) / 60) * (1.3 / v.T.mass) ** 0.5);
     if (total > 14) damageMe((total - 14) * (v.T.bike ? 4 : 2), 'a crash', '');
     if (me.dead) return;
-    if (v.T.bike && total > 13) { ejectMe(); me.vy = 4; return; }
+    if (v.T.bike && total > 13) { ejectMe(); syncPhysics(me.x, me.z); if (!knockMe({ x: pre.vx * 0.6, y: 4, z: pre.vz * 0.6 }, 2.2)) me.vy = 4; return; }
   }
   // run people over
   if (Math.abs(v.speed) > 5) {
@@ -1807,37 +1818,43 @@ function updateRemotes(dt) {
   for (const [uid, r] of remotes) if (!net.players[uid]) { scene.remove(r.ch.g); remotes.delete(uid); ui.addFeed(`${r.name} left`); }
 }
 
-let peakStars = 0, survive5 = 0, robberyPrompt = '';
+let peakStars = 0, survive5 = 0, robberyPrompt = '', robberyBar = null;
 function updateWantedLevel(dt) {
   peakStars = Math.max(peakStars, wanted.stars);
   if (tickWanted(dt, me) === 'lost') { if (peakStars >= 4) goalDone('lose4'); if (peakStars >= 5) goalDone('lose5'); peakStars = 0; }
   if (wanted.stars === 0) peakStars = 0;
   updateRobbery(dt);
 }
-// Robbing: inside, point a gun at the clerk (or the casino cashier) and keep it there while they fill the bag.
+// Robbing, GTA V style: inside, point any gun (hip or aimed) roughly at the clerk, the bartender or the casino cashier.
+// Hands go up at once and the bag fills; looking away only slows it, shots near the till speed it up, walking out drops it.
 // Corner stores: the clerk hits the silent alarm partway through. The casino calls it in at once.
+const ROB_SHOUTS = ['Fill the bag!', 'Empty the register!', 'Hands up! The cash, now!', "Don't try anything!", 'Move it, move it!'];
+const CLERK_PLEAS = ['Okay, okay!', "Don't shoot!", 'Take it, take it!', 'Please!'];
 function updateRobbery(dt) {
-  robberyPrompt = '';
+  robberyPrompt = ''; robberyBar = null;
   const R = interior.room;
   if (!R || !R.clerk || (R.kind !== 'rob' && R.kind !== 'casino' && R.kind !== 'bar')) return;
   const st = R.store, w = WEAPONS[me.weapon], c = R.clerk, casino = R.kind === 'casino', who = casino ? 'cashier' : R.kind === 'bar' ? 'bartender' : 'clerk', till = casino ? 'cage' : 'till';
-  const facing = aiming && Math.abs(angDiff(camYaw, Math.atan2(c.x - me.x, c.z - me.z))) < 0.35, close = Math.hypot(c.x - me.x, c.z - me.z) < 16;
-  R.held = facing && close && w.kind === 'gun' && !(st.cooldown > 0);
+  const gun = w.kind === 'gun' && !me.dead, facing = Math.abs(angDiff(camYaw, Math.atan2(c.x - me.x, c.z - me.z))) < 0.6 && Math.hypot(c.x - me.x, c.z - me.z) < 16;
+  const started = (st.progress || 0) > 0, pointing = gun && facing && !(st.cooldown > 0);
+  R.held = pointing || (started && !(st.cooldown > 0));
   if (!R.held && (interior.nearExit(me.x, me.z) || canBuyAtCounter())) return; // let "E: Leave" / "E: Buy ammo" show
   if (st.cooldown > 0) { const s = Math.ceil(st.cooldown); robberyPrompt = `The ${till} is empty. Come back in ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; return; }
-  if (!R.held) {
-    st.progress = Math.max(0, (st.progress || 0) - dt * 0.15);
-    robberyPrompt = facing && w.kind !== 'gun' ? `The ${who} laughs at your ${w.name.toLowerCase()}. Point a gun.` : facing ? `Get closer to the ${who}` : st.progress > 0 ? `Keep aiming at the ${who}!` : '';
-    return;
+  if (!R.held) { robberyPrompt = facing && !gun && w.melee ? `The ${who} laughs at your ${w.name.toLowerCase()}. Point a gun.` : ''; return; }
+  if (!started) { say(me, ROB_SHOUTS[Math.floor(Math.random() * ROB_SHOUTS.length)]); say(c, CLERK_PLEAS[Math.floor(Math.random() * CLERK_PLEAS.length)]); }
+  // a shot landing near the clerk or the till hurries them along
+  if (R.robShot !== me.shotSeq) {
+    if (R.robShot !== undefined && started && me.shot && Math.hypot(me.shot[0] - c.x, me.shot[2] - c.z) < 4) { st.progress += 0.08; say(c, CLERK_PLEAS[Math.floor(Math.random() * CLERK_PLEAS.length)]); }
+    R.robShot = me.shotSeq;
   }
-  st.progress = (st.progress || 0) + dt / (casino ? 14 : 8);
+  st.progress = Math.max(st.progress || 0, 0.001) + (pointing ? 1 : gun ? 0.35 : 0) * dt / (casino ? 12 : 7);
   if (!st.alarm && (casino || st.progress > 0.35)) {
     st.alarm = true; st.alarmed = true;
     crime(casino ? 'casino' : 'robbery', st.x, me.outside ? me.outside.y : me.y, st.z);
     ui.help(casino ? 'Casino security called it in. The whole department is coming.' : 'The clerk hit the silent alarm. Grab the cash and get out!', 4);
   }
   const bars = Math.round(Math.min(1, st.progress) * 10);
-  robberyPrompt = `${st.progress < 0.5 ? `The ${who} is emptying the ${till}` : `The ${who} is filling your bag`}, keep aiming  ${'▮'.repeat(bars)}${'▯'.repeat(10 - bars)}`;
+  robberyPrompt = `${st.progress < 0.5 ? `The ${who} is emptying the ${till}` : `The ${who} is filling your bag`}${pointing ? '' : `, keep your gun on the ${who}`}`; robberyBar = Math.min(1, st.progress);
   if (st.progress >= 1) {
     const take = casino ? 2500 + Math.floor(Math.random() * 2000) : 150 + Math.floor(Math.random() * 300);
     st.progress = 0; st.cooldown = casino ? 900 : 300; st.alarm = false; R.held = false;
@@ -1863,7 +1880,7 @@ function leaveRoom() {
   fadeEl.style.opacity = '1';
   setTimeout(() => {
     const st = interior.room && interior.room.store;
-    if (st) Object.assign(st, { alarmed: false, alarm: false, progress: 0 }); // walking out drops the robbery
+    if (st) { Object.assign(st, { alarmed: false, alarm: false, progress: 0 }); interior.room.held = false; } // walking out drops the robbery
     interior.leave();
     // the casino brings you back to its door; a storefront (e.g. passing out inside) puts you on the sidewalk outside
     const o = me.outside || (st && st.w ? { x: st.x, z: st.z, y: W.groundHeight(st.x, st.z), h: st.face + Math.PI } : { x: me.x, z: me.z, y: W.groundHeight(me.x, me.z), h: 0 });
@@ -2247,7 +2264,7 @@ function updateHud(dt, t) {
     ui.setPlayers(net.room, list, net.online);
   }
   const prompt = robberyPrompt; // no key hints: the Controls tab explains E, Tab and the rest
-  ui.setPrompt(prompt);
+  ui.setPrompt(prompt, robberyPrompt && prompt === robberyPrompt ? robberyBar : null);
   mmT -= dt;
   if (mmT <= 0) {
     mmT = 0.1;

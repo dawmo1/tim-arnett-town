@@ -8,6 +8,7 @@ export const GROUND_LIFT = 0.08; // feet stand this far above the raw terrain (r
 export const C = { lawn: 0, water: 1, park: 2, wood: 3, parking: 4, paved: 5, industrial: 6, cemetery: 7, sand: 8, road: 9, walk: 10, building: 11, pitch: 12, offmap: 13,
   farm: 14, meadow: 15, orchard: 16, golf: 17, rail: 18, wetland: 19, creek: 20, pond: 21, residential: 22, scrub: 23, farmyard: 24, quarry: 25 };
 
+import { loadRegionsNear, onRegion, nameFor, loaded as regionsLoaded } from '../regions/index.js';
 export const D = { index: null, roads: null, overview: null, coarse: null };
 const base = new URL('../../data/', import.meta.url);
 const getJSON = async (p) => { const r = await fetch(new URL(p, base)); if (!r.ok) throw new Error(`${p}: ${r.status}`); return r.json(); };
@@ -57,8 +58,8 @@ export function fetchTile(tx, tz) {
   if (tiles.has(key)) return Promise.resolve(tiles.get(key));
   if (pending.has(key)) return pending.get(key);
   const ox = tx * TILE, oz = tz * TILE;
-  const p = Promise.all([rawTile(key), lotsReady(ox + TILE / 2, oz + TILE / 2)]).then(([j]) => {
-    const t = { key, tx, tz, ox, oz, h: decodeHeights(j), c: decodeClasses(j), b: clearLots(j.b, ox, oz), t: j.t, k: j.k, e: j.e.filter((id) => G.edges[id]), p: j.p || {}, l: j.l || {}, a: j.a || {}, used: performance.now() };
+  const p = Promise.all([rawTile(key), lotsReady(ox + TILE / 2, oz + TILE / 2), loadRegionsNear(ox + TILE / 2, oz + TILE / 2)]).then(([j]) => {
+    const t = { key, tx, tz, ox, oz, h: decodeHeights(j), c: decodeClasses(j), b: regionNames(clearLots(j.b, ox, oz), ox, oz), t: j.t, k: j.k, e: j.e.filter((id) => G.edges[id]), p: j.p || {}, l: j.l || {}, a: j.a || {}, used: performance.now() };
     tiles.set(key, t); pending.delete(key);
     return t;
   }).catch((e) => { pending.delete(key); throw e; });
@@ -100,6 +101,17 @@ export function lotHits(L, rel, ox, oz) {
 }
 // the tiles clearLots checks a lot against (their centre within TILE / 2 + 30 m of the lot's centre)
 export const lotNear = (L, ox, oz) => Math.abs(L.x - ox - TILE / 2) < TILE / 2 + 30 && Math.abs(L.z - oz - TILE / 2) < TILE / 2 + 30;
+// src/regions name overrides: by OSM id (extra.id) or position; the new name shows on the shop / pylon / big-box signs
+function regionNames(b, ox, oz) {
+  if (!regionsLoaded.length) return b;
+  for (const rec of b) {
+    const r = rec[0]; let cx = 0, cz = 0; for (let i = 0; i < r.length; i += 2) { cx += r[i]; cz += r[i + 1]; }
+    const n = nameFor(rec[7]?.id, cx / (r.length / 2) + ox, cz / (r.length / 2) + oz); if (n) rec[5] = n;
+  }
+  return b;
+}
+// a region model's `clear` boxes knock the OSM buildings under it out of the tiles, like the landmarks' (lots.extra)
+onRegion((r) => { for (const L of r.models) for (const [x, z, hw, hd] of L.clear) { const lot = { x, z, fx: 0, fz: 1, hw, hd }; lots.extra.push(lot); if (lots.list) lots.list.push(lot); } });
 function clearLots(b, ox, oz) {
   const near = (lots.list || lots.extra).filter((L) => lotNear(L, ox, oz));
   if (!near.length) return b;

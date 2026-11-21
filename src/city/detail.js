@@ -7,12 +7,13 @@
 //   one side of the street elsewhere, buried in post-1975 subdivisions and downtowns)
 // - OSM fences / walls / hedges, driveways, parking aisles, drive-throughs, farm tracks, tree rows
 // - parking-lot striping, lot lights, cart corrals, dealership rows; crop rows on farmland fields
-import { TILE, C, G, terrainHeight, pointOnEdge, nearestEdge, townAt } from './data.js';
+import { TILE, C, G, tiles, terrainHeight, pointOnEdge, nearestEdge, townAt, edgesNear, closestOnEdge } from './data.js';
 import { makeBox } from './collide.js';
 import { face, obox, panel, lin, hash, PLAIN } from './geom.js';
 import { nameUV } from './names.js';
+import { regionsIn } from '../regions/index.js';
 import { edgeArea, tileStats, pointsOf, linesOf, areasOf, inPoly, longAxis, isFarmClass, coreAt } from './areas.js';
-import { nodeRadius } from './tile.js';
+import { nodeRadius, junction } from './tile.js';
 
 const inTile = (t, x, z) => x >= t.ox && x < t.ox + TILE && z >= t.oz && z < t.oz + TILE;
 const RANK = { motor: 7, trunk: 6, primary: 5, secondary: 4, tertiary: 3, minor: 2, residential: 1, service: 0, track: 0 };
@@ -27,21 +28,107 @@ function nodesIn(t) {
 }
 const sub = (q) => q && [q[0] + (q[2] - q[0]) * 0.375, q[1], q[0] + (q[2] - q[0]) * 0.625, q[3]]; // the square middle of a slot
 
+// ---------- placement: nothing on a carriageway, in a junction or inside a building ----------
+const pipA = (x, z, P) => { let c = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) if ((P[i][1] > z) !== (P[j][1] > z) && x < ((P[j][0] - P[i][0]) * (z - P[i][1])) / (P[j][1] - P[i][1]) + P[i][0]) c = !c; return c; };
+// What a thing of radius r at (x, z) stands on: {e, q} a road (carriageway + r), {k, J} a junction polygon, or null.
+// Bridge decks well above the ground don't count (you can stand under them); tunnels don't either.
+export function roadHit(x, z, r = 0.4) {
+  let best = null;
+  const near = edgesNear(x, z, 20);
+  for (const id of near) {
+    const e = G.edges[id]; if (!e || (e.flags & 1)) continue;
+    const q = closestOnEdge(e, x, z); if (q.d >= e.width / 2 + r) continue;
+    if (e.bridge && q.y - terrainHeight(x, z) > 3) continue;
+    if (!best || q.d - e.width / 2 < best.q.d - best.e.width / 2) best = { e, q };
+  }
+  if (best) return best;
+  for (const id of near) {
+    const e = G.edges[id]; if (!e) continue;
+    for (const k of [e.a, e.b]) { const J = junction(k); if (J && Math.hypot(G.nodes.x[k] - x, G.nodes.z[k] - z) < J.r * 1.5 + r && pipA(x, z, J.poly)) return { k, J }; }
+  }
+  return null;
+}
+// tile footprints in world metres (cached per tile), for "is this spot inside a building"
+function footsOf(t) {
+  if (t._fpw) return t._fpw;
+  return (t._fpw = t.b.filter((rec) => !rec.arch?.canopy).map((rec) => { const rel = rec[0], p = new Float32Array(rel.length); let a = Infinity, b = -Infinity, c = Infinity, d = -Infinity; for (let i = 0; i < rel.length; i += 2) { p[i] = rel[i] + t.ox; p[i + 1] = rel[i + 1] + t.oz; a = Math.min(a, p[i]); b = Math.max(b, p[i]); c = Math.min(c, p[i + 1]); d = Math.max(d, p[i + 1]); } return { p, a, b, c, d }; }));
+}
+export function inBuilding(x, z, r = 0) {
+  const tx = Math.floor(x / TILE), tz = Math.floor(z / TILE);
+  for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+    const t = tiles.get(`${tx + dx}_${tz + dz}`); if (!t) continue;
+    for (const f of footsOf(t)) if (x > f.a - r && x < f.b + r && z > f.c - r && z < f.d + r && (inPoly(x, z, f.p) || (r > 0 && (inPoly(x + r, z, f.p) || inPoly(x - r, z, f.p) || inPoly(x, z + r, f.p) || inPoly(x, z - r, f.p))))) return true;
+  }
+  return false;
+}
+// Where a thing of radius r can stand near (x, z): the spot itself, or pushed sideways to just past the kerb of the road
+// it was on (keeping its side; side = 1 / -1 picks one when it's dead on the centre line), or out of the junction
+// polygon; null when there's no clear spot (squeezed between roads, or inside a building). opts.drop: never move it.
+export function placeOff(x, z, r = 0.4, opts = {}) {
+  let moved = false;
+  for (let it = 0; it < 4; it++) {
+    const hit = roadHit(x, z, r); if (!hit) break;
+    if (opts.drop || it === 3) return null;
+    moved = true;
+    if (hit.J) {
+      const cx = G.nodes.x[hit.k], cz = G.nodes.z[hit.k]; let dx = x - cx, dz = z - cz; const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;
+      let d = l; while (d < 60 && pipA(cx + dx * d, cz + dz * d, hit.J.poly)) d += 0.5;
+      x = cx + dx * (d + r + 0.3); z = cz + dz * (d + r + 0.3);
+    } else {
+      const { e, q } = hit; let nx = x - q.x, nz = z - q.z, l = Math.hypot(nx, nz);
+      if (l < 0.05) { const sd = opts.side || 1; nx = Math.cos(q.h) * sd; nz = -Math.sin(q.h) * sd; l = 1; }
+      const want = e.width / 2 + r + 0.35; x = q.x + (nx / l) * want; z = q.z + (nz / l) * want;
+    }
+  }
+  if (!opts.noBuilding && inBuilding(x, z, Math.min(r, 0.5))) return null;
+  return { x, z, moved };
+}
+// how big each kind of street / yard prop is (its radius for placeOff)
+const PROP_R = { busstop: 1.4, bench: 0.8, planter: 0.6, dumpster: 1.1, corral: 1.5, shed: 1.8, swing: 1.8, tramp: 2.1, haybale: 0.8, upole: 0.25, upolet: 0.25, hydrant: 0.3, meter: 0.15, mailbox: 0.3, ruralbox: 0.3, newsbox: 0.35, bin: 0.35, flagpole: 0.2, gnome: 0.2, flowers: 0.5, menuboard: 0.6, featherflag: 0.3, balloons: 0.4, bag: 0.3, swingset: 1.8 };
+const ON_BUILDING = new Set(['ac', 'tank', 'fesc', 'banner']); // roof / wall / pole attachments: not on the ground
+const LINEAR = new Set(['picket', 'chainlink', 'hedge']); // fence and hedge pieces: dropped, not moved
+// The last pass over a built tile: props and lights off the roads and out of buildings (moved to the kerb or dropped),
+// parked cars out of junctions, travel lanes and buildings. Returns how many were moved / dropped.
+export function validatePlacements(t, junk, lights) {
+  let moved = 0, dropped = 0;
+  const fix = (o, r, opts) => { const p = placeOff(o.x, o.z, r, opts); if (!p) { dropped++; return false; } if (p.moved) { o.x = p.x; o.z = p.z; o.y = terrainHeight(p.x, p.z); moved++; } return true; };
+  for (let i = junk.length - 1; i >= 0; i--) { const j = junk[i]; if (ON_BUILDING.has(j.kind) || j.placed) continue; if (!fix(j, PROP_R[j.kind] ?? 0.4, { drop: LINEAR.has(j.kind) || j.kind === 'bag' })) junk.splice(i, 1); }
+  for (let i = lights.length - 1; i >= 0; i--) { const l = lights[i]; if (l.placed) continue; if (!fix(l, 0.2, {})) lights.splice(i, 1); }
+  if (!t.kChecked) {
+    t.kChecked = true;
+    const k = t.k, out = [];
+    for (let i = 0; i < k.length; i += 4) {
+      const x = k[i] + t.ox, z = k[i + 1] + t.oz, lot = k[i + 3];
+      let ok;
+      if (lot) ok = !roadHit(x, z, 1.1) && !inBuilding(x, z, 0.8);
+      else { // kerb parking sits in its own street's parking lane: only travel lanes, junctions and buildings are out
+        const h = roadHit(x, z, 2.5); ok = !(h && h.J);
+        if (ok) for (const id of edgesNear(x, z, 20)) { const e = G.edges[id]; if (!e || (e.flags & 1)) continue; const q = closestOnEdge(e, x, z); if (q.d < e.width / 2 - 1.6 && !(e.bridge && q.y - terrainHeight(x, z) > 3)) { ok = false; break; } }
+        ok = ok && !inBuilding(x, z, 0.5);
+      }
+      if (ok) out.push(k[i], k[i + 1], k[i + 2], k[i + 3]); else dropped++;
+    }
+    t.k = out;
+  }
+  return { moved, dropped };
+}
+
 // ---------- mapped point features ----------
 // returns which kinds the data covered in this tile, so the made-up street furniture skips them
-export function dataPoints(t, junk, lights, boxes, SB, NB, trees) {
+export function dataPoints(t, junk, lights, boxes, SB, NB, trees, posts) {
   const has = new Set();
-  const put = (kind, p, extra = {}) => { const y = terrainHeight(p.x, p.z); const j = { kind, x: p.x, z: p.z, y, h: faceRoad(p.x, p.z).h, ...extra }; junk.push(j); return j; };
+  const put = (kind, p, extra = {}) => { const o = placeOff(p.x, p.z, PROP_R[kind] ?? 0.4); if (!o) return null; const y = terrainHeight(o.x, o.z); const j = { kind, x: o.x, z: o.z, y, h: faceRoad(o.x, o.z).h, placed: true, ...extra }; junk.push(j); return j; };
   const KIND = { hy: 'hydrant', bn: 'bench', wb: 'bin', pb: 'mailbox', fp: 'flagpole', vm: 'newsbox' };
   for (const [key, kind] of Object.entries(KIND)) for (const p of pointsOf(t, key)) { put(kind, p); has.add(kind); }
   for (const p of pointsOf(t, 'bs')) {
-    const { h, q } = faceRoad(p.x, p.z, 25), j = put('busstop', p, { h, busStop: true }); has.add('busstop');
+    const { h, q } = faceRoad(p.x, p.z, 25), j = put('busstop', p, { busStop: true }); has.add('busstop'); if (!j) continue; void h;
     boxes.push(makeBox(j.x - Math.sin(h) * 0.6, j.z - Math.cos(h) * 0.6, Math.cos(h), -Math.sin(h), 1.6, 0.1, j.y, 2.5)); void q;
   }
-  for (const p of pointsOf(t, 'lm')) { const { h } = faceRoad(p.x, p.z, 25); lights.push({ x: p.x, z: p.z, y: terrainHeight(p.x, p.z), h, mapped: true }); has.add('light'); }
+  for (const p0 of pointsOf(t, 'lm')) { has.add('light'); const p = placeOff(p0.x, p0.z, 0.2); if (!p) continue; const { h } = faceRoad(p.x, p.z, 25); lights.push({ x: p.x, z: p.z, y: terrainHeight(p.x, p.z), h, mapped: true, placed: true }); }
   for (const p of pointsOf(t, 'pl')) { put('swing', p, { h: hash(p.x) * 6.28 }); }
   // billboards: two steel legs and a 14.6 x 3.1 m face toward the road, with a local ad
-  for (const p of pointsOf(t, 'bb')) {
+  for (const p0 of pointsOf(t, 'bb')) {
+    const p = placeOff(p0.x, p0.z, 1.5); if (!p) continue; posts?.push({ kind: 'billboard', x: p.x, z: p.z });
     const { h } = faceRoad(p.x, p.z, 80), y = terrainHeight(p.x, p.z), nx = Math.sin(h), nz = Math.cos(h), ux = nz, uz = -nx;
     for (const s of [-3.5, 3.5]) obox(SB, p.x + ux * s, p.z + uz * s, nx, nz, 0.25, 0.25, y - 0.3, y + 7, lin(0x6d7175), PL);
     obox(SB, p.x - nx * 0.25, p.z - nz * 0.25, ux, uz, 7.5, 0.2, y + 6.6, y + 10.2, lin(0x55595d), PL);
@@ -50,24 +137,27 @@ export function dataPoints(t, junk, lights, boxes, SB, NB, trees) {
     boxes.push(makeBox(p.x, p.z, nx, nz, 0.3, 3.8, y - 0.5, 7));
   }
   // railroad crossbucks at level crossings
-  for (const p of pointsOf(t, 'lc')) {
+  for (const p0 of pointsOf(t, 'lc')) { // the mapped node is where the track crosses the road: the post goes on the verge
+    const p = placeOff(p0.x, p0.z, 0.3); if (!p) continue; posts?.push({ kind: 'crossbuck', x: p.x, z: p.z });
     const { h } = faceRoad(p.x, p.z, 20), y = terrainHeight(p.x, p.z), xb = nameUV('xbuck', 'RAILROAD CROSSING', t.key);
     obox(SB, p.x, p.z, 1, 0, 0.05, 0.05, y - 0.2, y + 3.4, lin(0xe8e8e8), PL);
     if (xb) { const nx = Math.sin(h), nz = Math.cos(h); panel(NB, p.x + nx * 0.06, y + 3.0, p.z + nz * 0.06, nx, nz, 1.6, 0.34, xb); }
   }
   // silos / storage tanks, water towers (with the town's name), chimneys and masts
   for (const p of pointsOf(t, 'sl')) { const y = terrainHeight(p.x, p.z), hh = p.v || 14, r = hh >= 10 ? 2.8 : 5; lathe(SB, p.x, y, p.z, [[r, -0.5], [r, hh], [r * 0.7, hh + r * 0.35], [0.01, hh + r * 0.55]], lin(hh >= 10 ? 0xcfcabd : 0xd9dbdc)); boxes.push(makeBox(p.x, p.z, 1, 0, r, r, y - 1, hh)); }
-  for (const p of pointsOf(t, 'wt')) {
-    const y = terrainHeight(p.x, p.z), hh = p.v || 38, tr = Math.max(6, hh * 0.22), ty = hh - tr * 1.2;
-    lathe(SB, p.x, y, p.z, [[1.6, -0.5], [1.6, ty - tr * 0.4], [tr * 0.55, ty], [tr, ty + tr * 0.55], [tr * 0.95, ty + tr * 0.9], [tr * 0.5, ty + tr * 1.15], [0.01, ty + tr * 1.2]], lin(0xe9eef0), 18);
-    const town = (townAt?.(p.x, p.z)?.name || t.st?.town?.name || '').toUpperCase(), uv = town && nameUV('tower', town, t.key);
-    if (uv) for (const a of [0.6, 0.6 + Math.PI]) { const nx = Math.sin(a), nz = Math.cos(a); panel(NB, p.x + nx * (tr + 0.05), y + ty + tr * 0.6, p.z + nz * (tr + 0.05), nx, nz, tr * 1.3, tr * 1.3 / 4, uv, null); }
-    boxes.push(makeBox(p.x, p.z, 1, 0, 1.8, 1.8, y - 1, ty));
-  }
+  for (const p of pointsOf(t, 'wt')) waterTower(t, SB, NB, boxes, p.x, p.z, p.v || 38, (townAt?.(p.x, p.z)?.name || t.st?.town?.name || ''));
   for (const p of pointsOf(t, 'ch')) { const y = terrainHeight(p.x, p.z), hh = p.v || 30; lathe(SB, p.x, y, p.z, [[1.4, -0.5], [0.8, hh], [0.01, hh]], lin(hh > 60 ? 0xc8442f : 0x8a4a3a), 8); boxes.push(makeBox(p.x, p.z, 1, 0, 1.2, 1.2, y - 1, hh)); }
   // OSM tree rows (windbreaks along farm fields, rows along drives)
   for (const l of linesOf(t, 'tr')) walk(l, 7, (x, z) => { if (inTile(t, x, z)) trees.push({ x, z, y: terrainHeight(x, z), kind: hash(x * 1.3 + z) < 0.35 ? 1 : 0, s: 0.85 + hash(x + z * 3) * 0.4, seed: hash(x * 3.1 + z) }); });
   return has;
+}
+// a water tower (tank on a pedestal) with the town's name round the tank
+function waterTower(t, SB, NB, boxes, x, z, hh, text, col = 0xe9eef0) {
+  const y = terrainHeight(x, z), tr = Math.max(6, hh * 0.22), ty = hh - tr * 1.2;
+  lathe(SB, x, y, z, [[1.6, -0.5], [1.6, ty - tr * 0.4], [tr * 0.55, ty], [tr, ty + tr * 0.55], [tr * 0.95, ty + tr * 0.9], [tr * 0.5, ty + tr * 1.15], [0.01, ty + tr * 1.2]], lin(col), 18);
+  const uv = text && nameUV('tower', text.toUpperCase(), t.key);
+  if (uv) for (const a of [0.6, 0.6 + Math.PI]) { const nx = Math.sin(a), nz = Math.cos(a); panel(NB, x + nx * (tr + 0.05), y + ty + tr * 0.6, z + nz * (tr + 0.05), nx, nz, tr * 1.3, tr * 1.3 / 4, uv, null); }
+  boxes.push(makeBox(x, z, 1, 0, 1.8, 1.8, y - 1, ty));
 }
 // a surface of revolution (silos, water towers) straight into a vertex buffer
 function lathe(B, x, y, z, prof, tint, seg = 14) {
@@ -92,16 +182,17 @@ function walk(l, step, fn, start = step / 2) {
 }
 
 // ---------- street-name blades and stop signs ----------
-export function streetSigns(t, NB, SB, boxes) {
+export function streetSigns(t, NB, SB, boxes, posts) {
   const N = G.nodes, stops = pointsOf(t, 'st');
   const stopUV = nameUV('stop', 'STOP', t.key), backUV = nameUV('stopback', 'BACK', t.key);
   const stopSign = (e, fromA, r) => {
     const p = pointOnEdge(e, fromA ? Math.min(e.len * 0.5, r + 1.8) : Math.max(e.len * 0.5, e.len - r - 1.8));
     const q = pointOnEdge(e, fromA ? Math.min(e.len, r + 4) : Math.max(0, e.len - r - 4));
     let tx = p.x - q.x, tz = p.z - q.z; const tl = Math.hypot(tx, tz) || 1; tx /= tl; tz /= tl; // incoming travel direction
-    const o = e.width / 2 + 0.9, sx = p.x - tz * o, sz = p.z + tx * o;
+    const o = e.width / 2 + 0.9, sp = placeOff(p.x - tz * o, p.z + tx * o, 0.15, { side: 1 }); if (!sp) return;
+    const sx = sp.x, sz = sp.z;
     if (!inTile(t, sx, sz)) return;
-    const y = terrainHeight(sx, sz);
+    const y = terrainHeight(sx, sz); posts?.push({ kind: 'stopsign', x: sx, z: sz });
     obox(SB, sx, sz, 1, 0, 0.035, 0.035, y - 0.2, y + 2.3, POST, PL);
     panel(NB, sx - tx * 0.05, y + 2.25, sz - tz * 0.05, -tx, -tz, 0.76, 0.76, sub(stopUV), sub(backUV)); // signs break, so no wall
   };
@@ -116,11 +207,14 @@ export function streetSigns(t, NB, SB, boxes) {
       const d0 = dirOf(e0), d1 = dirOf(e1);
       let bx = d0[0] + d1[0], bz = d0[1] + d1[1]; const bl = Math.hypot(bx, bz);
       if (bl < 0.2) { bx = -d0[1]; bz = d0[0]; } else { bx /= bl; bz /= bl; }
-      const off = Math.max(e0.width, e1.width) / 2 + 2.8, px = x + bx * off, pz = z + bz * off, y = terrainHeight(px, pz);
-      obox(SB, px, pz, 1, 0, 0.035, 0.035, y - 0.2, y + 3.3, POST, PL);
-      // each blade runs along its own street, readable from both sides
-      panel(NB, px, y + 3.12, pz, -d0[1], d0[0], 1.4, 0.3, nameUV('street', e0.name, t.key));
-      panel(NB, px, y + 2.8, pz, -d1[1], d1[0], 1.4, 0.3, nameUV('street', e1.name, t.key));
+      const off = Math.max(e0.width, e1.width) / 2 + 2.8, bp = placeOff(x + bx * off, z + bz * off, 0.15);
+      if (bp) {
+        const px = bp.x, pz = bp.z, y = terrainHeight(px, pz); posts?.push({ kind: 'streetblade', x: px, z: pz });
+        obox(SB, px, pz, 1, 0, 0.035, 0.035, y - 0.2, y + 3.3, POST, PL);
+        // each blade runs along its own street, readable from both sides
+        panel(NB, px, y + 3.12, pz, -d0[1], d0[0], 1.4, 0.3, nameUV('street', e0.name, t.key));
+        panel(NB, px, y + 2.8, pz, -d1[1], d1[0], 1.4, 0.3, nameUV('street', e1.name, t.key));
+      }
     }
     // stop signs from the junction's control (mapped stop signs nearby are drawn from the points instead)
     if (N.ctrl[k] !== 2 || stops.some((s) => Math.hypot(s.x - x, s.z - z) < 30)) continue;
@@ -154,7 +248,12 @@ function wireSpan(W, a, b) {
 }
 export function powerLines(t, junk, W, boxes) {
   let n = 0;
-  const put = (x, z, h) => { const y = terrainHeight(x, z), j = { kind: n++ % 4 === 2 ? 'upolet' : 'upole', x, z, y, h }; if (inTile(t, x, z)) { junk.push(j); boxes.push(makeBox(x, z, 1, 0, 0.18, 0.18, y - 0.5, 11)); } return j; };
+  const put = (x0, z0, h) => {
+    const p = inTile(t, x0, z0) ? placeOff(x0, z0, 0.25) : null, x = p ? p.x : x0, z = p ? p.z : z0; // off the road (wires follow it)
+    const y = terrainHeight(x, z), j = { kind: n++ % 4 === 2 ? 'upolet' : 'upole', x, z, y, h, placed: true };
+    if (p && inTile(t, x, z)) { junk.push(j); boxes.push(makeBox(x, z, 1, 0, 0.18, 0.18, y - 0.5, 11)); }
+    return j;
+  };
   const mapped = [...linesOf(t, 'ps'), ...linesOf(t, 'pw')];
   const poles = pointsOf(t, 'pp');
   if (mapped.length || poles.length) {
@@ -209,7 +308,7 @@ export function dataLines(t, junk, boxes, SB, roadB) {
     }
   }
   // paved strips that aren't in the road graph
-  const STRIP = { dw: [3.0, 0x9a9890], pa: [6.0, 0x5d6064], dt: [3.6, 0x55585c], tk: [3.2, 0x9b8e74] };
+  const STRIP = { dw: [3.0, 0x9a9890], pa: [6.0, 0x5d6064], dt: [3.6, 0x55585c], tk: [3.2, 0x9b8e74], sv: [4.6, 0x66686a] }; // sv: service roads cut off from the graph
   for (const [key, [w, hex]] of Object.entries(STRIP)) for (const P of linesOf(t, key)) {
     if (key === 'dw') has.drive = true;
     const c = lin(hex);
@@ -230,6 +329,7 @@ export function dataLines(t, junk, boxes, SB, roadB) {
 export function parkingDetail(t, markB, lights, junk, bigBoxes, dealers) {
   const WHITE = lin(0xe8e6df), cellAt = (i, j) => (i < 0 || j < 0 || i > 49 || j > 49 ? -1 : t.c[j * 50 + i]);
   const flat = (ax, az, bx, bz, w) => {
+    if (cellAt(Math.floor(((ax + bx) / 2 - t.ox) / 4), Math.floor(((az + bz) / 2 - t.oz) / 4)) === C.road) return; // no stall paint across a road through the lot
     const dx = bx - ax, dz = bz - az, l = Math.hypot(dx, dz) || 1, px = (-dz / l) * w / 2, pz = (dx / l) * w / 2;
     const y0 = terrainHeight(ax, az) + 0.09, y1 = terrainHeight(bx, bz) + 0.09;
     face(markB, [[ax + px, y0, az + pz], [ax - px, y0, az - pz], [bx - px, y1, bz - pz], [bx + px, y1, bz + pz]], [0, 1, 0], WHITE, PL, [[0, 0], [0, 0], [0, 0], [0, 0]]);
@@ -307,3 +407,70 @@ export function crops(t, B, yards) {
   }
 }
 export { coreAt };
+
+// ---------- town modules' places (src/regions/<id>.js; README there lists the kinds) ----------
+// Point places go through placeOff like every other prop (moved off a carriageway, dropped inside a building), except the
+// street features that belong on the road (roundabout islands, medians, parking surfaces). Unknown kinds warn once.
+const warned = new Set();
+export function regionPlaces(t, X) {
+  const regs = regionsIn(t.ox, t.oz, t.ox + TILE, t.oz + TILE); if (!regs.length) return;
+  const { junk, lights, trees, posts, solid, SB, NB, groundB, lotB } = X;
+  const CONC = lin(0xbdb8ae), GRASS = lin(0x80a359);
+  for (const reg of regs) for (const p of reg.places) {
+    const P = p.pts, px = P ? P[0] : p.x, pz = P ? P[1] : p.z;
+    if (!inTile(t, px, pz)) continue; // each place is drawn by the tile its (first) point is in
+    const h = p.h ?? faceRoad(px, pz).h + Math.PI, at = (r, o = {}) => placeOff(px, pz, r, o);
+    switch (p.kind) {
+      case 'prop': { const q = at(PROP_R[p.prop] ?? 0.4); if (q) junk.push({ kind: p.prop, x: q.x, z: q.z, y: terrainHeight(q.x, q.z), h, s: p.scale || 1, placed: true }); break; }
+      case 'tree': { const q = at(0.5); if (q) trees.push({ x: q.x, z: q.z, y: terrainHeight(q.x, q.z), kind: p.tree ?? 0, s: p.scale || 1, seed: hash(q.x * 3.1 + q.z) }); break; }
+      case 'light': { const q = at(0.2); if (q) lights.push({ x: q.x, z: q.z, y: terrainHeight(q.x, q.z), h, placed: true }); break; }
+      case 'sign': { // a post with a text panel: style 'street' (green blade), 'shop', 'pole' (big lit pylon face)
+        const q = at(0.2); if (!q) break;
+        const y = terrainHeight(q.x, q.z), w = p.w || 2.4, hgt = p.height || 2.6, nx = Math.sin(h), nz = Math.cos(h);
+        obox(SB, q.x, q.z, 1, 0, 0.05, 0.05, y - 0.2, y + hgt, POST, PL);
+        panel(NB, q.x + nx * 0.06, y + hgt - w / 8, q.z + nz * 0.06, nx, nz, w, w / 4.67, nameUV(p.style || 'shop', p.text || reg.name, t.key), undefined, false, p.lit ? 1 : 0);
+        posts.push({ kind: 'region sign', x: q.x, z: q.z }); break;
+      }
+      case 'statue': { // a stone plinth and a bronze figure (until a modelled one replaces it: put it in models)
+        const q = at(1.3); if (!q) break;
+        const y = terrainHeight(q.x, q.z), k = p.scale || 1, ux = Math.cos(h), uz = -Math.sin(h);
+        obox(SB, q.x, q.z, ux, uz, 0.9 * k, 0.9 * k, y - 0.3, y + 1.6 * k, lin(0xb9b2a4), PL);
+        obox(SB, q.x, q.z, ux, uz, 0.28 * k, 0.2 * k, y + 1.6 * k, y + 2.5 * k, lin(0x4f5a3c), PL);
+        obox(SB, q.x, q.z, ux, uz, 0.22 * k, 0.16 * k, y + 2.5 * k, y + 3.25 * k, lin(0x4f5a3c), PL);
+        solid.push(makeBox(q.x, q.z, ux, uz, 0.9 * k, 0.9 * k, y - 0.3, 1.9 * k)); posts.push({ kind: 'statue', x: q.x, z: q.z }); break;
+      }
+      case 'watertower': { const q = at(4); if (q) waterTower(t, SB, NB, solid, q.x, q.z, p.height || 38, p.text ?? reg.name, p.color); break; }
+      case 'mural': { // a painted panel on a wall: x/z on the wall face, h = the way it faces, w x hgt metres
+        const q = at(0.2, { noBuilding: true }); if (!q) break;
+        const w = p.w || 8, hgt = p.hgt || w / 4.67, y = terrainHeight(q.x, q.z) + (p.y ?? 1.5);
+        panel(NB, q.x, y + hgt / 2, q.z, Math.sin(h), Math.cos(h), w, hgt, nameUV('ghost', p.text || reg.name, t.key), null); break;
+      }
+      case 'roundabout': { // the raised island in the middle of a roundabout (the ring road itself is the OSM junction)
+        const r = p.r || 6, y = terrainHeight(px, pz);
+        lathe(SB, px, y, pz, [[r, -0.3], [r, 0.3], [r - 0.3, 0.32]], CONC, 24);
+        const ctr = groundB.v(px, y + 0.33, pz, 0, 1, 0, ...GRASS, px / 7, pz / 7), ring = [];
+        for (let k = 0; k < 24; k++) { const a = (k / 24) * Math.PI * 2, x = px + Math.cos(a) * (r - 0.3), z = pz + Math.sin(a) * (r - 0.3); ring.push(groundB.v(x, y + 0.33, z, 0, 1, 0, ...GRASS, x / 7, z / 7)); }
+        for (let k = 0; k < 24; k++) groundB.i.push(ctr, ring[(k + 1) % 24], ring[k]);
+        solid.push(makeBox(px, pz, 1, 0, r * 0.7, r * 0.7, y - 0.3, 0.6)); break;
+      }
+      case 'median': { // a raised kerbed median along pts [x, z, ...], w metres wide
+        if (!P || P.length < 4) break;
+        const w = p.w || 1.6;
+        for (let i = 2; i < P.length; i += 2) {
+          const ax = P[i - 2], az = P[i - 1], bx = P[i], bz = P[i + 1], L = Math.hypot(bx - ax, bz - az); if (L < 0.2) continue;
+          const ux = (bx - ax) / L, uz = (bz - az) / L, mx = (ax + bx) / 2, mz = (az + bz) / 2, y = Math.min(terrainHeight(ax, az), terrainHeight(bx, bz));
+          obox(SB, mx, mz, ux, uz, L / 2, w / 2, y - 0.2, y + 0.25, CONC, PL);
+        }
+        break;
+      }
+      case 'parking': { // a paved lot over the polygon pts [x, z, ...] (stalls are painted by the ground-class pass)
+        if (!P || P.length < 6) break;
+        const n = P.length / 2, pts = []; for (let i = 0; i < n; i++) pts.push([P[i * 2], P[i * 2 + 1]]);
+        const c = lin(0x5d6064), ids = pts.map(([x, z]) => lotB.v(x, terrainHeight(x, z) + 0.05, z, 0, 1, 0, ...c, x / 6, z / 6));
+        for (let i = 1; i + 1 < n; i++) { const [A, B, Cc] = [pts[0], pts[i], pts[i + 1]], cr = (B[0] - A[0]) * (Cc[1] - A[1]) - (B[1] - A[1]) * (Cc[0] - A[0]); if (cr < 0) lotB.i.push(ids[0], ids[i], ids[i + 1]); else lotB.i.push(ids[0], ids[i + 1], ids[i]); } // shortcut: a fan, so the polygon must be convex; split concave lots into several
+        break;
+      }
+      default: if (!warned.has(p.kind)) { warned.add(p.kind); console.warn(`region ${reg.id}: unknown place kind '${p.kind}'`); }
+    }
+  }
+}

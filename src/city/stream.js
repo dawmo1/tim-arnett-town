@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { makeStreakMesh } from '../carlights.js';
 import { D, TILE, WATER_Y, tiles, fetchTile, isFetching, inRange, tileKey, terrainHeight } from './data.js';
 import { addBoxes, removeBoxes, makeBox } from './collide.js';
-import { buildTile } from './tile.js';
+import { buildTile, buildTileLite } from './tile.js';
 import { M, initMaterials, GLOW } from './mats.js';
 import { applyArchetypes } from './areas.js';
 import { proceduralProps } from './propgeo.js';
@@ -13,14 +13,15 @@ import { gltf } from '../assets.js';
 
 let scene;
 const built = new Map(); // key -> {t, group, trees, lights, foot}
-let R = 420; // full-detail radius
+let R = 420; // tiles are built out to here (main.js setDetailRadius by quality)
+let RD = 250; // full detail inside this; past it a tile is its far LOD (tile.js buildTileLite: plain building shells, no props)
 const listeners = { built: [], unloaded: [] };
 export const on = (ev, fn) => listeners[ev].push(fn);
 export const builtTiles = built;
 export function setDetailRadius(r) { R = r; }
 // Low draws small props and full tree canopies over a shorter range
 let propScale = 1, treeNear = 110;
-export function setPropQuality(q) { propScale = q === 'low' ? 0.55 : q === 'high' ? 1.25 : 1; treeNear = q === 'low' ? 55 : q === 'high' ? 150 : 110; instDirty = true; }
+export function setPropQuality(q) { propScale = q === 'low' ? 0.55 : q === 'high' ? 1.25 : 1; treeNear = q === 'low' ? 55 : q === 'high' ? 150 : 110; RD = q === 'low' ? 150 : q === 'high' ? 320 : 250; instDirty = true; }
 
 // ---------- collision walls straight from tile data (so far-off tiles still block police cars) ----------
 function pointInPoly(x, z, p) { let c = false; for (let i = 0, j = p.length - 2; i < p.length; j = i, i += 2) { if ((p[i + 1] > z) !== (p[j + 1] > z) && x < ((p[j] - p[i]) * (z - p[i + 1])) / (p[j + 1] - p[i + 1]) + p[i]) c = !c; } return c; }
@@ -168,7 +169,7 @@ function makeInstanced() {
   // at night each streetlight throws a warm pool on the ground; in the wet it also reflects as a streak
   { const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d'), gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
     gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.5, 'rgba(255,255,255,.4)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
-    M.lpool = new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), color: 0xffd9a0, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -8 }); }
+    M.lpool = new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), color: 0xffd9a0, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -40 }); }
   inst.lpool = mk(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), M.lpool, false);
   inst.lstreak = makeStreakMesh(16, 0xffc98a); scene.add(inst.lstreak);
   // fallbacks if props.glb is missing: the old simple shapes
@@ -280,31 +281,45 @@ function pumpFetch(px, pz) {
     fetchTile(w.tx, w.tz).then(onData).catch((e) => console.warn('tile', w.key, e.message)).finally(() => { fetching--; });
   }
 }
+// Build a tile (full detail or its far LOD) and swap it in for the version that was there, in the same frame.
+function place(key, t, lite) {
+  const old = built.get(key), rec = lite ? buildTileLite(t) : buildTile(t);
+  rec.t = t; t.used = performance.now();
+  scene.add(rec.group);
+  if (old) dropRec(key, old);
+  if (rec.solid?.length) addBoxes(key + '#d', rec.solid); // poles, walls, billboards, silos, sheds (tile.js)
+  built.set(key, rec);
+  hideFar(key, true);
+  instDirty = true;
+  for (const fn of listeners.built) fn(t, rec);
+}
+function dropRec(key, rec) {
+  scene.remove(rec.group);
+  rec.group.traverse((m) => { if (m.geometry) m.geometry.dispose(); });
+  removeBoxes(key + '#d'); if (!rec.lite) releaseNames(key);
+  for (const fn of listeners.unloaded) fn(rec.t, rec);
+}
 function buildOne(px, pz) {
   for (const w of wantData(px, pz, R)) {
-    if (built.has(w.key) || !D.tileSet.has(w.key)) continue;
+    if (!D.tileSet.has(w.key)) continue;
+    const lite = w.d2 > RD * RD, have = built.get(w.key);
+    if (have && (lite || !have.lite)) continue; // a full tile stays full until it's well past RD (below)
     const t = tiles.get(w.key);
     if (!t || !neighboursReady(w.tx, w.tz)) continue;
-    const rec = buildTile(t);
-    rec.t = t; t.used = performance.now();
-    scene.add(rec.group);
-    if (rec.solid?.length) addBoxes(w.key + '#d', rec.solid); // poles, walls, billboards, silos, sheds (tile.js)
-    built.set(w.key, rec);
-    hideFar(w.key, true);
-    instDirty = true;
-    for (const fn of listeners.built) fn(t, rec);
+    place(w.key, t, lite);
     return true;
   }
+  // full tiles left behind go back to their far LOD (hysteresis: 90 m), so a drive doesn't pile up draw calls
+  const lim = (RD + 90) ** 2;
+  for (const [key, rec] of built) { const d2 = dist2(rec.t.tx, rec.t.tz, px, pz); if (!rec.lite && d2 > lim && d2 < R * R) { place(key, rec.t, true); return true; } }
   return false;
 }
 function unloadFar(px, pz) {
   const lim = (R + 160) ** 2;
   for (const [key, rec] of built) {
     if (dist2(rec.t.tx, rec.t.tz, px, pz) < lim) continue;
-    scene.remove(rec.group);
-    rec.group.traverse((m) => { if (m.geometry) m.geometry.dispose(); });
-    built.delete(key); hideFar(key, false); instDirty = true; releaseNames(key); removeBoxes(key + '#d');
-    for (const fn of listeners.unloaded) fn(rec.t, rec);
+    dropRec(key, rec);
+    built.delete(key); hideFar(key, false); instDirty = true;
   }
   // forget tile data far away (keeps memory small on Chromebooks)
   if (tiles.size > 260) {

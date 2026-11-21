@@ -111,9 +111,10 @@
       </nav>
       <div class="pauseBody">
         <section data-panel="map">
-          <canvas id="bigmap" width="1000" height="560" aria-label="Map of Davenport. Click to set a waypoint, click it again to clear it."></canvas>
+          <canvas id="bigmap" width="1000" height="560" aria-label="Map of the Quad Cities. Click to set a waypoint, click it again to clear it. Scroll or double-click to zoom, drag or use WASD to pan, L for the legend."></canvas>
           <p id="mapLoc" hidden></p>
           <aside id="mapLegend" aria-label="Map legend: click a row to show or hide it"><h3>Legend</h3><ul></ul></aside>
+          <button id="mapLegendTab" aria-controls="mapLegend" aria-expanded="false">Legend <kbd>L</kbd></button>
         </section>
         <section data-panel="stats" hidden><ul id="statList"></ul></section>
         <section data-panel="goals" hidden><ul id="goalList"></ul><p class="hint">Rewards are paid in cash. Nothing is saved between sessions.</p></section>
