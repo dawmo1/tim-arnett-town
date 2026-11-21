@@ -20,7 +20,7 @@
     <div class="slides"></div>
     <script>
       // pictures come out of a shuffled bag (kept between visits), so you see them all, in a new order, before any repeats
-      window.tatNextArt = (n = 7) => {
+      window.tatNextArt = (n = 6) => {
         let bag = []; try { bag = JSON.parse(localStorage.getItem('tat-bag') || '[]').filter((i) => i < n); } catch { /* private mode */ }
         if (!bag.length) { bag = [...Array(n).keys()]; for (let i = n - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [bag[i], bag[j]] = [bag[j], bag[i]]; } }
         const i = bag.shift(); try { localStorage.setItem('tat-bag', JSON.stringify(bag)); } catch { /* ignore */ }
@@ -117,7 +117,7 @@
           <button id="mapLegendTab" aria-controls="mapLegend" aria-expanded="false">Legend <kbd>L</kbd></button>
         </section>
         <section data-panel="stats" hidden><ul id="statList"></ul></section>
-        <section data-panel="goals" hidden><ul id="goalList"></ul><p class="hint">Rewards are paid in cash. Nothing is saved between sessions.</p></section>
+        <section data-panel="goals" hidden><ul id="goalList"></ul><p class="hint">Rewards are paid in cash. Your cash, ammo, armor, garage, goals and last spot are saved.</p></section>
         <section data-panel="players" hidden><ul id="playerList"></ul><p class="hint" id="shareHint"></p></section>
         <section data-panel="controls" hidden>
           <dl id="help">
@@ -155,6 +155,8 @@
               </div>
               <p class="hint" id="qualityNote"></p>
             </fieldset>
+            <label for="nameField">Name <output id="nameOut"></output></label>
+            <input id="nameField" type="text" maxlength="16" autocomplete="off" spellcheck="false">
             <label for="sensSlider">Mouse sensitivity <output id="sensOut"></output></label>
             <input id="sensSlider" type="range" min="0.3" max="2.5" step="0.05">
             <label for="volSlider">Volume <output id="volOut"></output></label>
@@ -173,6 +175,7 @@
   <div id="menu" hidden>
     <nav class="mmList" aria-label="Main menu">
       <button id="playBtn" class="on">Story Mode</button>
+      <button data-mm="online" id="onlineBtn">Online</button>
       <button id="startIn" aria-label="Start in town (click or left/right to change)">Start in: Random</button>
       <button data-mm="controls">Controls</button>
       <button data-mm="settings">Settings</button>
@@ -186,8 +189,19 @@
       <p>Tim Arnett is not actually the mayor. Yet.</p>
     </div>
     <div class="mmKeys"><span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span><span><kbd>Enter</kbd> Select</span><span><kbd>Esc</kbd> Back</span></div>
-    <!-- name and room code come back when multiplayer is set up -->
-    <div hidden><input id="nameInput" maxlength="16" autocomplete="off"><input id="roomInput" maxlength="6" autocomplete="off"><p id="netStatus"></p></div>
+    <div id="mmOnline" hidden>
+      <p id="netStatus"></p>
+      <ul id="mmPlayers" aria-label="Players online"></ul>
+      <ul id="mmChat" aria-live="polite" aria-label="Chat"></ul>
+      <input id="mmChatInput" maxlength="120" placeholder="Say something · Enter to send" autocomplete="off" aria-label="Chat message">
+    </div>
+    <form id="namePrompt" hidden>
+      <h2>Choose your name</h2>
+      <p>Other players see it above your head and in chat. You can change it later in Settings.</p>
+      <input id="nameAsk" maxlength="16" autocomplete="off" spellcheck="false" aria-label="Your name">
+      <p class="err" id="nameErr" role="alert"></p>
+      <button type="submit">OK</button>
+    </form>
   </div>
 
   <script type="module" src="src/main.js"></script>

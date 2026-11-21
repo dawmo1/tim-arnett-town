@@ -120,15 +120,22 @@ export function showArea(name, street) {
   areaKey = key; el.areaName.textContent = name; el.streetName.textContent = street;
   el.area.classList.add('on'); clearTimeout(areaT); areaT = setTimeout(() => el.area.classList.remove('on'), 4000);
 }
-export function setPlayers(room, list, online) {
-  el.roomInfo.textContent = online ? `Room ${room} · ${list.length} playing` : 'Solo mode';
-  el.shareHint.textContent = online ? `Friends join with room code ${room}, or this link: ${location.origin}${location.pathname}#${room}` : 'Multiplayer turns on once Firebase is set up (see the README).';
-  el.playerList.innerHTML = '';
+// list: [{ name, me, host, stars, area, playing }] for the pause ONLINE tab and the main menu's Online panel
+export function renderPlayers(ul, list) {
+  ul.innerHTML = '';
   for (const p of list) {
-    const li = document.createElement('li');
-    li.textContent = `${p.name}${p.me ? ' (you)' : ''}${p.host ? ' · host' : ''}${p.stars ? ' ' + '★'.repeat(p.stars) : ''}`;
-    el.playerList.append(li);
+    const li = document.createElement('li'), b = document.createElement('b'), sp = document.createElement('span');
+    li.classList.toggle('me', !!p.me);
+    b.textContent = p.name + (p.stars ? ' ' + '★'.repeat(p.stars) : '');
+    sp.textContent = p.playing ? [p.area, p.host ? 'runs the police' : ''].filter(Boolean).join(' · ') || 'Playing' : 'In the menu';
+    li.append(b, sp); ul.append(li);
   }
+}
+export function setPlayers(list, online) {
+  const n = list.filter((p) => p.playing).length;
+  el.roomInfo.textContent = online ? `Online · ${list.length} on, ${n} playing` : 'Solo mode';
+  el.shareHint.textContent = online ? `Everyone plays in the same world. Send friends this link: ${location.origin}${location.pathname}` : 'Online play turns on once Firebase is set up (see the README).';
+  renderPlayers(el.playerList, list);
 }
 
 // Big center-screen callouts ("STUNT JUMP", "WANTED") one at a time.

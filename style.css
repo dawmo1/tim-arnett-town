@@ -40,7 +40,23 @@ button { font: inherit; }
 #loader.menu .shade { background: linear-gradient(to top, rgba(0,0,0,.6), rgba(0,0,0,0) 30%); }
 @media (max-width: 760px) { .mmList { top: 38%; left: 16px; right: 16px; width: auto; } #mmPanel { left: 16px; right: 16px; width: auto; top: auto; bottom: 64px; transform: none; max-height: 44vh; } .mmKeys { display: none; } }
 #resumeBtn:focus-visible, .mmList button:focus-visible, #pauseTabs button:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
-#netStatus { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
+#netStatus { font-size: 14px; color: var(--muted); margin: 0 0 8px; }
+/* main menu Online panel: who's on (and where), plus the same chat as T in game */
+.mmList button small { font: 500 16px var(--hud); letter-spacing: .5px; text-transform: none; opacity: .75; margin-left: 10px; }
+#mmPlayers, #mmChat { list-style: none; margin: 0 0 10px; padding: 0; display: grid; gap: 2px; }
+#mmPlayers li { display: flex; justify-content: space-between; gap: 10px; background: rgba(255,255,255,.08); padding: 7px 10px 5px; font-size: 17px; }
+#mmPlayers li span { color: var(--muted); font-size: 15px; text-align: right; }
+#mmPlayers li.me b::after { content: ' (you)'; font-weight: 400; color: var(--muted); }
+#mmChat { max-height: 26vh; overflow-y: auto; font-size: 16px; }
+#mmChat li { overflow-wrap: anywhere; }
+#mmChat li b { margin-right: 4px; }
+#mmChatInput, .settings input[type=text], #namePrompt input { width: 100%; box-sizing: border-box; font: 500 17px var(--hud); padding: 8px 10px; border: 2px solid #fff; background: rgba(0,0,0,.8); color: var(--text); }
+#pause .settings input[type=text] { display: block; margin: 0 0 2px; border-width: 0 0 2px; background: rgba(0,0,0,.6); padding: 6px 14px 10px; }
+#namePrompt { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(420px, calc(100vw - 32px)); box-sizing: border-box; background: rgba(0,0,0,.88); padding: 20px 22px; z-index: 2; }
+#namePrompt h2 { margin: 0 0 8px; font: 400 26px var(--display); text-transform: uppercase; border-bottom: 2px solid #fff; padding-bottom: 6px; }
+#namePrompt p { margin: 0 0 10px; color: #dfe5ea; }
+#namePrompt .err { color: #ff8a80; min-height: 1.2em; margin: 6px 0; }
+#namePrompt button { font: 400 22px var(--display); text-transform: uppercase; background: #fff; color: #000; border: 0; padding: 8px 22px 6px; cursor: pointer; }
 
 /* ---------- hud (GTA V: Pricedown only for hero text, a clean condensed sans for labels, black label boxes) ---------- */
 #hud { position: fixed; inset: 0; pointer-events: none; text-shadow: 0 1px 2px rgba(0,0,0,.7);
@@ -217,6 +233,9 @@ button { font: inherit; }
 /* list rows: white on black, the hovered row turns white */
 #playerList, #goalList, #statList { list-style: none; padding: 0; margin: 0 auto; max-width: 600px; display: grid; gap: 3px; }
 #playerList li, #goalList li, #statList li { background: rgba(0,0,0,.66); padding: 11px 16px 9px; font-size: 18px; letter-spacing: .5px; transition: background .1s, color .1s; }
+#playerList li { display: flex; justify-content: space-between; gap: 12px; }
+#playerList li span { opacity: .7; }
+#playerList li.me b::after { content: ' (you)'; font-weight: 400; opacity: .7; }
 #playerList li:hover, #goalList li:hover, #statList li:hover { background: #fff; color: #000; }
 #pause #playerList, #pause #goalList, #statList { max-width: 760px; gap: 2px; }
 #pause #playerList li, #pause #goalList li, #statList li { padding: 9px 14px 8px; font-size: 18px; }

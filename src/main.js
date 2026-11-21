@@ -32,14 +32,14 @@ import { planeSpots, planeVisual } from './planes.js';
 import { initBreakables, updateBreakables, setBreakQuality, hitByCar, blast as blastProps, shot as shootProps } from './breakables.js';
 import * as fx from './fx.js';
 import * as ui from './ui.js';
-import { net, connect, joinRoom, sendState, setVehicle, removeVehicle, setCops, sendEvent, sendChat, hostUid, setLook as netSetLook } from './net.js';
+import { net, connect, joinWorld, startPlaying, sendState, setVehicle, removeVehicle, setCops, sendEvent, sendChat, hostUid, setLook as netSetLook, setName as netSetName, setArea, loadProfile, saveProfile } from './net.js';
 import { clamp, angDiff, rayOBB, raySphere, fmtDist } from './util.js';
 import { wanted, crime, updateWanted as tickWanted, resetWanted, cones, initWanted } from './wanted.js';
 import { eco, initEconomy, addCash, spend, goalDone, checkCountGoals, GOALS, storeNear, dropCash, updateEconomy, stores } from './economy.js';
 import { updateRadio, nextStation, currentStation } from './radio.js';
 import { drunk, drunkPass, drinkItems, resetDrunk, updateDrunk, wobble, drunkSteer, swayCamera, blackedOut } from './drunk.js';
 import * as garage from './garage.js';
-import { applyMods, horn as modHorn, armorMul } from './carmods.js';
+import { applyMods, modsOf, horn as modHorn, armorMul } from './carmods.js';
 import * as phone from './phone.js';
 import * as minigames from './minigames/index.js';
 
@@ -251,13 +251,16 @@ initCharacters(activeQuality);
 fx.setCasingGeometry(geometryOf('weapons', 'casing'));
 await W.preload(W.places.menu.x, W.places.menu.z, 320, (p) => { pCity = p; loadBar(); });
 playBtn.disabled = false; playBtn.textContent = 'Story Mode';
+let profile = null, savedPos = null; // the saved profile and where you left off ({x, z, h, s: 1 = find a sidewalk near it})
 // main menu "Start in": the town you drop into (picked now so its streets can download while you're in the menu)
 const startBtn = document.getElementById('startIn'), startOpts = ['Random', ...W.startTowns()];
 let startI = 0, spawnP = null;
 function pickStart(d) {
   startI = (startI + d + startOpts.length) % startOpts.length;
-  startBtn.textContent = `Start in: ${startOpts[startI]}`;
-  spawnP = W.spawnIn(startOpts[startI]).then((sp) => { W.prefetch(sp.x, sp.z, 260); return sp; });
+  // saved spot wins unless you pick a town
+  const last = startI === 0 && savedPos;
+  startBtn.textContent = `Start in: ${last ? 'Where you left off' : startOpts[startI]}`;
+  spawnP = (last ? W.spawnNear(savedPos.x, savedPos.z, savedPos.h || 0, !savedPos.s) : W.spawnIn(startOpts[startI])).then((sp) => { W.prefetch(sp.x, sp.z, 260); return sp; });
 }
 pickStart(0);
 startBtn.addEventListener('click', () => pickStart(1));
@@ -391,6 +394,7 @@ function showTab(tab) {
   if (tab === 'map') drawPauseMap();
   if (tab === 'goals') drawGoals();
   if (tab === 'stats') drawStats();
+  if (tab === 'players') ui.setPlayers(playerRows(), net.online);
 }
 function drawStats() {
   const rows = [['Cash', '$' + eco.cash.toLocaleString('en-US')], ['Stores robbed', eco.robbed], ['Cars jacked', eco.jacked], ['Cop cars wrecked', eco.copCars],
@@ -562,17 +566,44 @@ function closeWheel(apply) {
   if (apply) selectWeapon(wheelSel);
 }
 
-// ---------- menu ----------
-const nameInput = document.getElementById('nameInput');
-const roomInput = document.getElementById('roomInput');
+// ---------- menu: one online world, joined straight from the main menu ----------
 const netStatus = document.getElementById('netStatus');
-const cleanCode = (s) => s.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
-const randomCode = () => Array.from({ length: 4 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ'[Math.floor(Math.random() * 24)]).join('');
-roomInput.value = cleanCode(decodeURIComponent(location.hash.slice(1))) || randomCode();
-const connecting = connect().then((ok) => {
-  netStatus.textContent = ok ? 'Multiplayer is on. Friends who enter the same room code join your game.' : net.error;
+// names: 1-16 characters, no markup or control characters (shown with textContent everywhere, this is belt and braces)
+const cleanName = (s) => String(s || '').replace(/[<>&"'`\\\u0000-\u001f\u007f]/g, '').replace(/\s+/g, ' ').trim().slice(0, 16);
+const randomName = () => 'Player' + Math.floor(100 + Math.random() * 900);
+let storedName = ''; try { storedName = cleanName(localStorage.getItem('tat-name')); } catch { /* private mode */ }
+function setMyName(n) {
+  me.name = n; storedName = n;
+  try { localStorage.setItem('tat-name', n); } catch { /* ignore */ }
+  netSetName(n);
+  for (const el of [document.getElementById('nameField')]) if (el && document.activeElement !== el) el.value = n;
+  if (me.ch && playing) markDirty();
+}
+// first launch: a small GTA-style prompt in the menu
+function askName() {
+  const f = document.getElementById('namePrompt'), inp = document.getElementById('nameAsk'), err = document.getElementById('nameErr');
+  inp.value = randomName(); f.hidden = false;
+  setTimeout(() => { inp.focus(); inp.select(); }, 0);
+  return new Promise((res) => f.addEventListener('submit', function ok(e) {
+    e.preventDefault();
+    const n = cleanName(inp.value);
+    if (!n) { err.textContent = 'Pick a name (1 to 16 letters or numbers).'; return; }
+    f.removeEventListener('submit', ok); f.hidden = true; res(n);
+  }));
+}
+const connecting = connect().then(async (ok) => {
+  netStatus.textContent = ok ? 'Everyone plays in one world. Chat here or with T in the game.' : net.error;
+  profile = await loadProfile();
+  if (profile && profile.pos && typeof profile.pos.x === 'number') savedPos = profile.pos;
+  me.name = storedName || cleanName(profile && profile.n) || randomName();
+  me.look = profile && Array.isArray(profile.look) ? normLook(profile.look) : randomLook();
+  if (startI === 0) pickStart(0); // the start picker now offers where you left off
+  try { await joinWorld(me.name, me.look); }
+  catch (e) { console.error(e); net.online = false; netStatus.textContent = "Couldn't join the online world: solo mode. (" + (e.code || e.message) + ')'; await joinWorld(me.name, me.look); }
+  initNameField();
+  refreshOnline();
+  if (!storedName) setMyName(profile && cleanName(profile.n) ? me.name : await askName()); // asked once, on first launch
 });
-for (const inp of [nameInput, roomInput]) inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') playBtn.click(); });
 // ---------- main menu: Story Mode / Controls / Settings / Credits, by mouse or arrow keys ----------
 const mmItems = [...document.querySelectorAll('.mmList button')], mmPanel = document.getElementById('mmPanel');
 const borrowed = []; // the pause menu lends its Controls and Settings panels; they go back when you start
@@ -580,7 +611,7 @@ function mmShow(which) {
   for (const b of borrowed.splice(0)) b.home.append(b.el);
   mmPanel.hidden = !which;
   if (!which) return;
-  const src = which === 'credits' ? document.getElementById('mmCredits') : document.querySelector(`[data-panel="${which}"]`);
+  const src = which === 'credits' ? document.getElementById('mmCredits') : which === 'online' ? document.getElementById('mmOnline') : document.querySelector(`[data-panel="${which}"]`);
   mmPanel.querySelector('h2').textContent = which;
   const body = mmPanel.querySelector('.mmBody');
   for (const el of [...src.children]) { borrowed.push({ el, home: src }); body.append(el); }
@@ -588,18 +619,18 @@ function mmShow(which) {
 function mmSelect(i) { mmItems.forEach((b, k) => b.classList.toggle('on', k === i)); mmShow(mmItems[i].dataset.mm || null); }
 mmItems.forEach((b, i) => { b.addEventListener('mouseenter', () => mmSelect(i)); b.addEventListener('focus', () => mmSelect(i)); if (b.dataset.mm) b.addEventListener('click', () => mmSelect(i)); });
 addEventListener('keydown', (e) => {
-  if (ui.el.menu.hidden || playing) return;
+  if (ui.el.menu.hidden || playing || !document.getElementById('namePrompt').hidden) return;
+  if (e.target.tagName === 'INPUT' && e.key !== 'Escape') return; // typing a chat message or your name
   const i = Math.max(0, mmItems.findIndex((b) => b.classList.contains('on')));
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); mmItems[(i + (e.key === 'ArrowDown' ? 1 : mmItems.length - 1)) % mmItems.length].focus(); }
   else if (e.key === 'Enter' && e.target.tagName !== 'INPUT' && e.target !== mmItems[i]) { e.preventDefault(); mmItems[i].click(); }
   else if (e.key === 'Escape') mmItems[0].focus();
 });
 playBtn.addEventListener('click', async () => {
+  if (!document.getElementById('namePrompt').hidden) return;
   playBtn.disabled = true; playBtn.textContent = 'Joining…';
-  const name = nameInput.value.trim().slice(0, 16) || 'Player' + Math.floor(100 + Math.random() * 900);
-  const room = cleanCode(roomInput.value) || randomCode();
   await connecting;
-  playBtn.textContent = `Loading ${startOpts[startI] === 'Random' ? 'the Quad Cities' : startOpts[startI]}…`;
+  playBtn.textContent = `Loading ${startI === 0 ? (savedPos ? 'your spot' : 'the Quad Cities') : startOpts[startI]}…`;
   await enginesReady;
   // drop in somewhere random in the city (load the streets around you first)
   const sp = await spawnP;
@@ -610,13 +641,13 @@ playBtn.addEventListener('click', async () => {
   ui.el.menu.hidden = true;
   await W.preload(sp.x, sp.z, 260, loadProgress);
   manageParked(0, sp.x, sp.z, true);
-  me.name = name; me.look = randomLook();
-  try { await joinRoom(room, name, me.look); }
-  catch (e) { console.error(e); netStatus.textContent = "Couldn't join the room: " + (e.code || e.message); playBtn.disabled = false; playBtn.textContent = 'Story Mode'; ui.el.menu.hidden = false; loading(true, '', 'menu'); return; }
-  history.replaceState(null, '', '#' + room);
+  applyProfile(profile);
   me.ch = makeCharacter(me.look);
   scene.add(me.ch.g);
   respawn(true, sp);
+  if (profile && profile.hp > 0) me.hp = clamp(profile.hp, 25, 100); // respawn() just set a full bar
+  startPlaying();
+  profileReady = true;
   await pics;
   ui.el.menu.hidden = true; ui.el.hud.hidden = false;
   playing = true;
@@ -627,7 +658,85 @@ playBtn.addEventListener('click', async () => {
 });
 
 // ---------- network handlers ----------
-net.handlers.chat = (c) => c && ui.addChat(String(c.n || '?').slice(0, 16), String(c.m || '').slice(0, 120));
+const mmChat = document.getElementById('mmChat'), mmChatInput = document.getElementById('mmChatInput');
+net.handlers.chat = (c) => {
+  if (!c) return;
+  const n = String(c.n || '?').slice(0, 16), m = String(c.m || '').slice(0, 120);
+  ui.addChat(n, m);
+  const li = document.createElement('li'), b = document.createElement('b'); b.textContent = n + ':';
+  li.append(b, document.createTextNode(m)); mmChat.append(li);
+  while (mmChat.children.length > 50) mmChat.firstChild.remove();
+  mmChat.scrollTop = mmChat.scrollHeight;
+};
+mmChatInput.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  const m = mmChatInput.value.trim(); if (m && me.name) sendChat(me.name, m.slice(0, 120));
+  mmChatInput.value = '';
+});
+// who's on: name, where they are, stars, playing or still in the menu (pause ONLINE tab, menu Online panel)
+function playerRows() {
+  const host = hostUid(), list = [];
+  for (const [uid, p] of Object.entries(net.players)) {
+    if (!p) continue;
+    const s = Array.isArray(p.s) ? p.s : null, mine = uid === net.uid;
+    list.push({ name: mine ? me.name : String(p.n || '?').slice(0, 16), me: mine, playing: mine ? playing : !!s, host: !!s && host === uid, stars: mine ? (playing ? wanted.stars : 0) : (s && s[7]) || 0, area: String(p.a || '').slice(0, 40) });
+  }
+  if (!list.some((p) => p.me)) list.unshift({ name: me.name, me: true, playing, host: false, stars: wanted.stars, area: '' });
+  return list.sort((a, b) => b.me - a.me || b.playing - a.playing || a.name.localeCompare(b.name));
+}
+// Settings: Name (shared by the main menu and the pause menu); updates your presence live
+function initNameField() {
+  const f = document.getElementById('nameField'), out = document.getElementById('nameOut');
+  f.value = me.name; out.textContent = '';
+  f.addEventListener('keydown', (e) => { if (e.key === 'Enter') f.blur(); });
+  f.addEventListener('change', () => {
+    const n = cleanName(f.value);
+    if (n) { setMyName(n); out.textContent = 'Saved'; } else out.textContent = '1 to 16 characters';
+    f.value = me.name; setTimeout(() => { out.textContent = ''; }, 2500);
+  });
+}
+// ---------- saved profile: cash, ammo, armor, health, stats, goals, look, garage and where you were ----------
+let profileReady = false, profT = 30, dirtyT = 0, lastCash = null;
+const markDirty = () => { if (!dirtyT) dirtyT = 3; }; // debounced: a burst of purchases is one write
+function applyProfile(p) {
+  if (!p) return;
+  if (Number.isFinite(p.cash)) eco.cash = clamp(Math.round(p.cash), 0, 1e9);
+  if (Number.isFinite(p.armor)) me.armor = clamp(p.armor, 0, 100);
+  if (Array.isArray(p.st)) { eco.robbed = +p.st[0] || 0; eco.jacked = +p.st[1] || 0; eco.copCars = +p.st[2] || 0; }
+  if (Array.isArray(p.done)) eco.done = new Set(p.done.filter((g) => GOALS.some((x) => x.id === g)));
+  if (Array.isArray(p.ammo)) WEAPONS.forEach((w, i) => { if (!w.melee && Number.isFinite(p.ammo[i * 2])) me.ammo[i] = { mag: clamp(p.ammo[i * 2] | 0, 0, w.mag || 99), res: clamp(p.ammo[i * 2 + 1] | 0, 0, 99999) }; });
+  if (p.gar) garage.setData(p.gar);
+  lastCash = eco.cash;
+}
+function profileNow() {
+  // on foot on the ground: that exact spot. In a car, swimming, up on a roof or in a shop: a sidewalk near it next time
+  if (!me.dead) {
+    const o = interior.room && me.outside, v = me.veh, x = o ? o.x : v ? v.x : me.x, z = o ? o.z : v ? v.z : me.z;
+    const odd = !!(o || v || me.swim || me.y > W.groundHeight(me.x, me.z) + 1.5);
+    savedPos = { x: Math.round(x * 10) / 10, z: Math.round(z * 10) / 10, h: Math.round(angDiff(0, v ? v.h : me.h) * 100) / 100, s: odd ? 1 : 0 };
+  }
+  const ammo = []; WEAPONS.forEach((w, i) => { const a = me.ammo[i]; ammo.push(a ? a.mag | 0 : 0, a ? a.res | 0 : 0); });
+  const p = { v: 1, n: me.name, cash: eco.cash, armor: Math.round(me.armor), hp: Math.round(clamp(me.hp, 0, 100)), ammo, st: [eco.robbed, eco.jacked, eco.copCars], done: [...eco.done], look: me.look, gar: garage.data(), t: Date.now() };
+  if (savedPos) p.pos = savedPos;
+  return JSON.parse(JSON.stringify(p)); // no undefined anywhere (the database refuses it)
+}
+function saveNow() { if (!profileReady) return; profT = 30; dirtyT = 0; profile = profileNow(); saveProfile(profile); }
+function tickProfile(dt) {
+  if (eco.cash !== lastCash) { lastCash = eco.cash; markDirty(); }
+  if (dirtyT > 0 && (dirtyT -= dt) <= 0) saveNow();
+  if ((profT -= dt) <= 0) saveNow();
+}
+addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveNow(); });
+addEventListener('pagehide', saveNow);
+const onlineBtn = document.getElementById('onlineBtn');
+function refreshOnline() {
+  if (ui.el.menu.hidden) return;
+  const list = playerRows(), n = list.length;
+  onlineBtn.innerHTML = 'Online'; const sm = document.createElement('small'); sm.textContent = net.online ? `${n} on` : 'solo'; onlineBtn.append(sm);
+  if (!playBtn.disabled) { playBtn.textContent = net.online ? 'Play Online' : 'Story Mode'; }
+  ui.renderPlayers(document.getElementById('mmPlayers'), list);
+}
+setInterval(refreshOnline, 1000);
 net.handlers.cops = (obj) => { if (!isHost) police.applyRemote(obj); };
 net.handlers.vehicle = (id, rec) => {
   let v = vehById.get(id);
@@ -650,6 +759,17 @@ net.handlers.vehicle = (id, rec) => {
   v.hp = rec.hp; v.driver = rec.d || ''; v.burnAt = rec.b || 0; v.burnBy = rec.bb || '';
   if (!v.burnAt && v.fire) { fx.stopFire(v.fire); v.fire = null; } // put out (extinguisher or a repair) on the owner's side
   if (rec.e) v.exploded = true;
+  if (typeof rec.p === 'number') { v.pitch = rec.p; v.roll = +rec.r || 0; } // planes: nose and bank (planeVisual)
+  if (Array.isArray(rec.m)) {
+    const key = rec.c + ',' + rec.m.join(',');
+    if (key !== v.modKey) {
+      v.modKey = key;
+      const [c2, f, rs, rc, tint, neon, su, plate] = rec.m, m = modsOf(v), num = (c) => (typeof c === 'number' && c >= 0 ? c : null);
+      m.paint = { c1: typeof rec.c === 'number' ? rec.c : v.color, c2: num(c2), f: f | 0 }; m.rims = { s: rs | 0, c: num(rc) };
+      m.tint = tint | 0; m.neon = num(neon); m.suspension = su | 0; m.plate = String(plate || '').slice(0, 8);
+      applyMods(v);
+    }
+  }
   if (typeof rec.l === 'number') { const l = rec.l; v.sirenOn = !!(l & 1); v.netBrake = !!(l & 2); v.netRev = !!(l & 4); v.doorOpen = l & 8 ? 1 : 0; v.flat = !!(l & 16); v.brokenHead = !!(l & 32); v.brokenTail = !!(l & 64); }
   if (Array.isArray(rec.dz)) { const [f, b, l, r] = rec.dz; if (f !== Math.round(v.dz.f) || b !== Math.round(v.dz.b) || l !== Math.round(v.dz.l) || r !== Math.round(v.dz.r)) { if (f + b + l + r === 0) { repair(v); applyMods(v); } else { v.dz = { f, b, l, r }; applyDamageVisual(v); } } } // all zero = repaired at Arnett Auto
 };
@@ -687,10 +807,25 @@ function distCam(x, z) { return Math.hypot(camera.position.x - x, camera.positio
 
 function writeVeh(v, force) {
   const n = performance.now();
-  if (!force && n - v.lastWrite < 100) return;
+  if (!force && n - v.lastWrite < (crowd ? 100 : 1000)) return; // 10 Hz with someone near, 1 Hz alone
   v.lastWrite = n;
   v.touchedAt = net.now();
-  setVehicle(v.id, { ti: v.ti, c: v.color, x: r1(v.x), y: r2(v.y), z: r1(v.z), h: r2(v.h), hp: Math.round(v.hp), d: v.driver || '', b: v.burnAt || 0, bb: v.burnBy || '', e: v.exploded ? 1 : 0, dz: [v.dz.f, v.dz.b, v.dz.l, v.dz.r].map(Math.round), l: vehBits(v) });
+  const rec = { ti: v.ti, c: v.color, x: r1(v.x), y: r2(v.y), z: r1(v.z), h: r2(v.h), hp: Math.round(v.hp), d: v.driver || '', b: v.burnAt || 0, bb: v.burnBy || '', e: v.exploded ? 1 : 0, dz: [v.dz.f, v.dz.b, v.dz.l, v.dz.r].map(Math.round), l: vehBits(v) };
+  if (v.T.plane || v.T.heli) { rec.p = r2(v.pitch || 0); rec.r = r2(v.roll || 0); }
+  if (v.mods) rec.m = modBits(v.mods);
+  setVehicle(v.id, rec);
+}
+// the looks of an Arnett Auto car (paint finish + 2nd colour, rims, tint, neon, ride height, plate); performance stays local
+function modBits(m) {
+  const pt = m.paint || {}, rm = m.rims || {}, n = (c) => (typeof c === 'number' ? c : -1);
+  return [n(pt.c2), pt.f | 0, rm.s | 0, n(rm.c), m.tint | 0, n(m.neon), m.suspension | 0, String(m.plate || '').slice(0, 8)];
+}
+// someone near you (another player within 600 m): send at full rate; nobody near: just enough for map blips
+let crowd = false, crowdT = 0;
+function updateCrowd(dt) {
+  if ((crowdT -= dt) > 0) return; crowdT = 1;
+  const x = me.veh ? me.veh.x : me.x, z = me.veh ? me.veh.z : me.z;
+  crowd = [...remotes.values()].some((r) => Math.hypot(r.x - x, r.z - z) < 600);
 }
 // siren, brake/reverse lights, open door, flat tyres and smashed lamps, packed for the network
 function vehBits(v) {
@@ -1780,6 +1915,8 @@ function updateRemotes(dt) {
       remotes.set(uid, r);
       ui.addFeed(`${r.name} joined`);
     }
+    const nm = String(p.n || '?').slice(0, 16);
+    if (nm !== r.name) { r.ch.g.remove(r.tag); r.tag = nameTag(nm); r.ch.g.add(r.tag); r.name = nm; } // renamed in Settings
     const lk = JSON.stringify(p.c || null);
     if (r.lookKey === undefined) r.lookKey = lk;
     else if (r.lookKey !== lk && Array.isArray(p.c) && !r.ch.rag) { r.lookKey = lk; const pos = r.ch.g.position.clone(); scene.remove(r.ch.g); r.ch = makeCharacter(p.c); r.ch.g.add(r.tag); r.ch.g.position.copy(pos); scene.add(r.ch.g); }
@@ -1945,7 +2082,7 @@ function gunShopItems(basic = false) {
 function bodyShop(v) { shopOpen = true; paused = true; keys.clear(); mouseDown = false; document.exitPointerLock?.(); garage.openModShop(v); }
 // fixed in place (same mesh: plate, rims, neon stay); repair() straightens panels, refits lost parts, glass and lamps, applyMods puts the tint back
 function repairCar(v) { v.hp = v.T.hp; v.burnAt = 0; v.burnBy = ''; fx.stopFire(v.fire); v.fire = null; v.flat = false; repair(v); applyMods(v); writeVeh(v, true); }
-garage.initGarage({ spawn: (ti, c, label) => deliverCar(ti, label, c), remove: (v) => { removeVehicle(v.id); resetVehicle(v); }, vehicles: () => vehicles, myVeh: () => me.veh, repair: repairCar, writeVeh: (v) => writeVeh(v, true), close: closeShop });
+garage.initGarage({ spawn: (ti, c, label) => deliverCar(ti, label, c), remove: (v) => { removeVehicle(v.id); resetVehicle(v); }, vehicles: () => vehicles, myVeh: () => me.veh, repair: repairCar, writeVeh: (v) => writeVeh(v, true), close: closeShop, saved: () => markDirty() });
 // ---- clothing store: Tim's Threads (outfits, a barber, tattoos and masks)
 const COLS = [['White', 0], ['Black', 1], ['Grey', 2], ['Navy', 4], ['Blue', 5], ['Red', 7], ['Maroon', 8], ['Green', 9], ['Olive', 10], ['Khaki', 11], ['Brown', 12], ['Gold', 14], ['Orange', 15], ['Pink', 16], ['Purple', 17], ['Teal', 18]];
 const HAIR_COLS = [['Black', 0], ['Dark brown', 1], ['Brown', 3], ['Auburn', 4], ['Blonde', 6], ['Grey', 7], ['Pink', 10], ['Blue', 11]];
@@ -1957,7 +2094,7 @@ function setLook(look) {
   me.look = look;
   const g = me.ch.g, pos = g.position.clone(), rot = g.rotation.y;
   scene.remove(g); me.ch = makeCharacter(look); scene.add(me.ch.g); me.ch.g.position.copy(pos); me.ch.g.rotation.y = rot;
-  netSetLook(look);
+  netSetLook(look); markDirty();
 }
 function clothingItems() {
   const L = () => normLook(me.look).slice();
@@ -2239,7 +2376,7 @@ function hostChores(dt, nowMs) {
   }
 }
 
-let sendT = 0, uiT = 0, mmT = 0;
+let sendT = 0, uiT = 0, mmT = 0, lastArea = '';
 function updateHud(dt, t) {
   uiT -= dt;
   if (uiT <= 0) {
@@ -2258,10 +2395,8 @@ function updateHud(dt, t) {
     const wk = WEAPONS[me.weapon];
     ui.el.crosshair.classList.toggle('off', me.dead || (!!me.veh && wk.kind !== 'gun') || (!me.veh && wk.melee));
     ui.setClock(clockText(), weather.weather, weather.night > 0.5);
-    const host = hostUid();
-    const list = [{ name: me.name, me: true, host: host === net.uid, stars: wanted.stars }];
-    for (const r of remotes.values()) list.push({ name: r.name, host: host === r.uid, stars: r.stars });
-    ui.setPlayers(net.room, list, net.online);
+    if (area !== lastArea) { lastArea = area; setArea(area); } // presence: where you are, for everyone's player list
+    if (!ui.el.pause.hidden) ui.setPlayers(playerRows(), net.online);
   }
   const prompt = robberyPrompt; // no key hints: the Controls tab explains E, Tab and the rest
   ui.setPrompt(prompt, robberyPrompt && prompt === robberyPrompt ? robberyBar : null);
@@ -2402,9 +2537,11 @@ function update(dt, t) {
   updateBreakables(dt, me.x, me.z);
   sendT -= dt;
   if (sendT <= 0) {
-    sendT = 0.1;
+    sendT = crowd ? 0.1 : 1;
     sendState([r1(me.x), r2(me.y), r1(me.z), r2(me.h), r1(me.moveSpeed), me.veh ? me.veh.id : '', Math.round(me.hp), wanted.stars, me.weapon, me.shotSeq, r1(me.shot[0]), r1(me.shot[1]), r1(me.shot[2]), wanted.search ? 1 : 0, r1(wanted.lk.x), r1(wanted.lk.z), me.ch.rag && !me.dead ? 1 : 0, me.netPose || 0, me.netPitch || 0, me.netK || 0]);
   }
+  updateCrowd(dt);
+  tickProfile(dt);
   updateHud(dt, t);
 }
 

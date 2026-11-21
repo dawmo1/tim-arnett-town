@@ -47,6 +47,12 @@ export async function spawnIn(name = 'Random') {
   for (let i = 0; i < 12 && (!sp || townAt(sp.x, sp.z) !== t); i++) sp = t.name === 'Davenport' ? sidewalkSpot() : sidewalkSpot({ x: t.x, z: t.z, r }); // inside the town limits
   return { ...sp, town: t.name };
 }
+// Where you left off (saved profile): that exact spot on foot, else (car, water, a shop inside) the nearest sidewalk.
+export async function spawnNear(x, z, h = 0, exact = true) {
+  await ensureRoads(x - 500, z - 500, x + 500, z + 500);
+  if (exact && isLand(x, z) && !offMap(x, z)) return { x, z, h };
+  return sidewalkSpot({ x, z, r: 60 });
+}
 // A random sidewalk spot somewhere in the loaded streets (downtown Davenport at start).
 export function randomSpawn() { return sidewalkSpot(); }
 // Outside the hospital nearest to (x, z).

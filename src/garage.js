@@ -6,7 +6,7 @@ import { eco, spend } from './economy.js';
 import * as fx from './fx.js';
 import * as ui from './ui.js';
 
-// main.js fills this: { spawn(ti, color, label) -> v, remove(v), vehicles(), myVeh(), repair(v), writeVeh(v), close() }
+// main.js fills this: { spawn(ti, color, label) -> v, remove(v), vehicles(), myVeh(), repair(v), writeVeh(v), close(), saved() }
 let ctx = null;
 export function initGarage(c) { ctx = c; }
 
@@ -14,7 +14,10 @@ export function initGarage(c) { ctx = c; }
 const KEY = 'tat-garage', MAX = 12;
 let store = { cars: [], sel: 0 };
 try { const s = JSON.parse(localStorage.getItem(KEY) || 'null'); if (s && Array.isArray(s.cars)) store = s; } catch { /* private mode */ }
-const save = () => { try { localStorage.setItem(KEY, JSON.stringify(store)); } catch { /* ignore */ } };
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(store)); } catch { /* ignore */ } ctx?.saved?.(); };
+// the saved profile carries the garage too (main.js); the server drops nulls, modsOf() fills them back in
+export const data = () => clone(store);
+export function setData(s) { if (s && Array.isArray(s.cars)) { store = { cars: s.cars.slice(0, MAX), sel: Math.max(0, Math.min(s.cars.length - 1, s.sel | 0)) }; try { localStorage.setItem(KEY, JSON.stringify(store)); } catch { /* ignore */ } } }
 const clone = (o) => JSON.parse(JSON.stringify(o));
 let live = null; // the delivered (or saved-in-the-shop) personal car out in the world
 const alive = (v) => v && !v.exploded && ctx.vehicles().includes(v);
