@@ -511,7 +511,7 @@ export function updateWalkers(dt, tSec, nowMs, cam) {
       } else if (w.mode === 'hostile') {
         hostileStep(w, dt, target);
         speed = w.spd || 0;
-        pose = w.hostile === 'gun' ? { aim: true, weapon: 'gun' } : w.bat ? { weapon: 'bat', swing: w.swing || 0, aim: true } : { punch: { i: w.combo || 0, t: 1 - (w.swing || 0) }, weapon: 'none' };
+        pose = w.hostile === 'gun' ? { aim: true, weapon: 'gun' } : w.bat ? { weapon: 'bat', swing: w.swing ? 1 - w.swing : 0, aim: true } : { punch: { i: w.combo || 0, t: 1 - (w.swing || 0) }, weapon: 'none' };
         if (w.hostile !== 'gun' && !w.bat && !(w.swing > 0)) pose = { punch: { i: 0, t: 0 }, weapon: 'none' };
         const foe = w.enemy || target;
         if (w.modeT <= 0 || !foe || foe.dead || Math.hypot(foe.x - w.x, foe.z - w.z) > 70) { if (w.gang) { w.mode = 'gone'; w.modeT = 30; calmDown(w); } else startFlee(w, foe ? foe.x : w.x, foe ? foe.z : w.z); }
@@ -751,7 +751,7 @@ function updateFleeing(dt) {
         if (d > 40) f.angry = false;
       }
       placeCharacter(f.ch, f.x, W.groundHeight(f.x, f.z), f.z, f.h);
-      animateCharacter(f.ch, dt, { speed: spd, swing: f.swing });
+      animateCharacter(f.ch, dt, { speed: spd, punch: f.swing ? { i: 1, t: 1 - f.swing } : undefined });
       if (f.t <= 4) { f.angry = false; f.t = 8; }
       continue;
     }

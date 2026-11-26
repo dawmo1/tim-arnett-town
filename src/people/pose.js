@@ -280,6 +280,74 @@ function actPose(P, ch, a, t, st) {
   return rate;
 }
 
+// ---------- melee (src/combat.js times them): key poses with a wind-up, a snap to the contact pose, and recovery ----------
+// Each move is a list of [k, fn] keys over the pose underneath (legs from walking or standing), so a punch can be
+// thrown on the move. Key times line up with the contact fraction in combat.js MOVES.
+const guardFists = (Q) => { armsUp(Q, 'L', -62, 0, -18, -112); armsUp(Q, 'R', -55, 0, -20, -118); set(Q, 'handL', 0, 0, -8); set(Q, 'handR', 0, 0, 8); add(Q, 'spine', 6, -10); add(Q, 'head', -6, 8); };
+const guardKnife = (Q) => { armsUp(Q, 'L', -55, 0, -12, -100); armsUp(Q, 'R', -48, 0, 12, -62); add(Q, 'spine', 8, -14); add(Q, 'head', -4, 10); };
+const guardBat = (Q) => { armsUp(Q, 'R', -100, 0, 15, -60); armsUp(Q, 'L', -90, 0, -20, -70); add(Q, 'spine', 5, -20); };
+const stance = (Q) => { set(Q, 'thighL', -14, 0, 4); set(Q, 'shinL', 12); set(Q, 'thighR', 10, 0, -5); set(Q, 'shinR', 14); set(Q, 'footR', -8); Q.root[1] -= 0.03; };
+const MELEE = {
+  jab: [[0, guardFists], [0.18, (Q) => { guardFists(Q); armsUp(Q, 'L', -55, 0, -14, -128); add(Q, 'spine', 0, 4); }],
+    [0.4, (Q) => { guardFists(Q); armsUp(Q, 'L', -93, 0, -6, -3); add(Q, 'spine', 0, -20); add(Q, 'chest', 0, -10); add(Q, 'head', 0, 6); Q.root[2] += 0.05; }],
+    [0.62, (Q) => { guardFists(Q); armsUp(Q, 'L', -86, 0, -10, -35); add(Q, 'spine', 0, -12); }], [1, guardFists]],
+  cross: [[0, guardFists], [0.2, (Q) => { guardFists(Q); armsUp(Q, 'R', -48, 0, -14, -128); add(Q, 'spine', 0, -10); }],
+    [0.42, (Q) => { guardFists(Q); armsUp(Q, 'L', -50, 0, -25, -120); armsUp(Q, 'R', -93, 0, -8, -3); add(Q, 'spine', 4, 32); add(Q, 'chest', 0, 12); add(Q, 'head', 0, -14); add(Q, 'thighR', 12); add(Q, 'footR', -12); Q.root[2] += 0.07; }],
+    [0.66, (Q) => { guardFists(Q); armsUp(Q, 'R', -80, 0, -12, -45); add(Q, 'spine', 2, 18); }], [1, guardFists]],
+  // (the hook's upper arm is twisted so the elbow bends level: the fist swings round, not up)
+  hook: [[0, guardFists], [0.25, (Q) => { guardFists(Q); armsUp(Q, 'R', -72, 80, 52, -95); add(Q, 'spine', 0, -26); add(Q, 'chest', 0, -8); }],
+    [0.48, (Q) => { guardFists(Q); armsUp(Q, 'R', -88, 85, 10, -95); add(Q, 'spine', 4, 46); add(Q, 'chest', 0, 16); add(Q, 'hips', 0, 10); add(Q, 'head', 0, -22); Q.root[2] += 0.04; }],
+    [0.7, (Q) => { guardFists(Q); armsUp(Q, 'R', -82, 80, -6, -105); add(Q, 'spine', 2, 38); }], [1, guardFists]],
+  upper: [[0, guardFists], [0.22, (Q) => { guardFists(Q); Q.root[1] -= 0.1; add(Q, 'thighL', -22); add(Q, 'shinL', 34); add(Q, 'thighR', -22); add(Q, 'shinR', 34); armsUp(Q, 'R', -12, 0, 6, -112); add(Q, 'spine', 16, -16); }],
+    [0.42, (Q) => { guardFists(Q); Q.root[1] += 0.04; armsUp(Q, 'R', -165, 0, 2, -50); add(Q, 'spine', -14, 22); add(Q, 'chest', -6, 8); add(Q, 'head', -12, -10); set(Q, 'footR', 18); }],
+    [0.66, (Q) => { guardFists(Q); armsUp(Q, 'R', -140, 0, 4, -70); add(Q, 'spine', -8, 14); }], [1, guardFists]],
+  kick: [[0, guardFists], [0.22, (Q) => { guardFists(Q); set(Q, 'thighR', -88); set(Q, 'shinR', 105); set(Q, 'footR', 10); add(Q, 'spine', -4); }],
+    [0.42, (Q) => { guardFists(Q); set(Q, 'thighR', -98); set(Q, 'shinR', 6); set(Q, 'footR', -25); add(Q, 'spine', -20); add(Q, 'head', 10); set(Q, 'thighL', 6); set(Q, 'shinL', 8); }],
+    [0.7, (Q) => { guardFists(Q); set(Q, 'thighR', -70); set(Q, 'shinR', 90); add(Q, 'spine', -6); }], [1, guardFists]],
+  stomp: [[0, guardFists], [0.3, (Q) => { armsUp(Q, 'L', -40, 0, 22, -60); armsUp(Q, 'R', -30, 0, 26, -50); set(Q, 'thighR', -88); set(Q, 'shinR', 88); set(Q, 'footR', 0); add(Q, 'spine', 12); add(Q, 'head', 24); }],
+    [0.55, (Q) => { armsUp(Q, 'L', -30, 0, 30, -40); armsUp(Q, 'R', -20, 0, 30, -40); set(Q, 'thighR', -28); set(Q, 'shinR', 22); set(Q, 'footR', 4); add(Q, 'spine', 26); add(Q, 'head', 28); Q.root[1] -= 0.06; set(Q, 'thighL', -6); set(Q, 'shinL', 18); }],
+    [0.78, (Q) => { armsUp(Q, 'L', -40, 0, 20, -70); armsUp(Q, 'R', -35, 0, 20, -70); set(Q, 'thighR', -14); set(Q, 'shinR', 18); add(Q, 'spine', 16); add(Q, 'head', 18); }], [1, guardFists]],
+  slashR: [[0, guardKnife], [0.2, (Q) => { guardKnife(Q); armsUp(Q, 'R', -96, 0, 68, -55); add(Q, 'spine', 0, -26); }],
+    [0.45, (Q) => { guardKnife(Q); armsUp(Q, 'R', -82, 0, -38, -10); add(Q, 'spine', 4, 32); add(Q, 'chest', 0, 10); Q.root[2] += 0.05; }],
+    [0.7, (Q) => { guardKnife(Q); armsUp(Q, 'R', -62, 0, -46, -36); add(Q, 'spine', 4, 34); }], [1, guardKnife]],
+  slashL: [[0, guardKnife], [0.2, (Q) => { guardKnife(Q); armsUp(Q, 'R', -92, 0, -42, -100); add(Q, 'spine', 0, 26); }],
+    [0.45, (Q) => { guardKnife(Q); armsUp(Q, 'R', -86, 0, 58, -8); add(Q, 'spine', 4, -28); add(Q, 'chest', 0, -8); Q.root[2] += 0.05; }],
+    [0.7, (Q) => { guardKnife(Q); armsUp(Q, 'R', -70, 0, 66, -30); add(Q, 'spine', 2, -30); }], [1, guardKnife]],
+  stab: [[0, guardKnife], [0.22, (Q) => { guardKnife(Q); armsUp(Q, 'R', 12, 0, 16, -118); add(Q, 'spine', 0, -18); }],
+    [0.45, (Q) => { guardKnife(Q); armsUp(Q, 'R', -90, 0, -6, -2); add(Q, 'spine', 14, 20); add(Q, 'chest', 4, 6); set(Q, 'thighL', -34); set(Q, 'shinL', 28); set(Q, 'thighR', 16); set(Q, 'shinR', 10); Q.root[1] -= 0.06; Q.root[2] += 0.12; }],
+    [0.7, (Q) => { guardKnife(Q); armsUp(Q, 'R', -84, 0, -4, -20); add(Q, 'spine', 10, 14); set(Q, 'thighL', -24); set(Q, 'shinL', 22); }], [1, guardKnife]],
+  swingR: [[0, guardBat], [0.3, (Q) => { armsUp(Q, 'R', -140, 0, 40, -100); armsUp(Q, 'L', -130, 0, -4, -110); add(Q, 'spine', 2, -55); add(Q, 'chest', 0, -20); add(Q, 'thighL', -10); }],
+    [0.5, (Q) => { armsUp(Q, 'R', -85, 0, -10, -15); armsUp(Q, 'L', -80, 0, -36, -30); add(Q, 'spine', 6, 36); add(Q, 'chest', 0, 16); add(Q, 'hips', 0, 14); add(Q, 'head', 0, -26); }],
+    [0.75, (Q) => { armsUp(Q, 'R', -96, 0, -42, -60); armsUp(Q, 'L', -90, 0, -52, -70); add(Q, 'spine', 4, 64); add(Q, 'chest', 0, 20); add(Q, 'head', 0, -40); }], [1, guardBat]],
+  swingL: [[0, guardBat], [0.3, (Q) => { armsUp(Q, 'R', -130, 0, -50, -90); armsUp(Q, 'L', -125, 0, -62, -100); add(Q, 'spine', 2, 50); add(Q, 'chest', 0, 16); }],
+    [0.5, (Q) => { armsUp(Q, 'R', -86, 0, 32, -10); armsUp(Q, 'L', -80, 0, 2, -25); add(Q, 'spine', 6, -32); add(Q, 'chest', 0, -12); add(Q, 'head', 0, 24); }],
+    [0.75, (Q) => { armsUp(Q, 'R', -92, 0, 52, -50); armsUp(Q, 'L', -88, 0, 20, -60); add(Q, 'spine', 4, -56); add(Q, 'head', 0, 36); }], [1, guardBat]],
+  smash: [[0, guardBat], [0.32, (Q) => { armsUp(Q, 'R', -176, 0, 14, -92); armsUp(Q, 'L', -170, 0, 4, -96); add(Q, 'spine', -12); add(Q, 'chest', -8); add(Q, 'head', -8); Q.root[1] += 0.02; }],
+    [0.52, (Q) => { armsUp(Q, 'R', -68, 0, 4, -6); armsUp(Q, 'L', -64, 0, -10, -12); add(Q, 'spine', 32); add(Q, 'chest', 10); Q.root[1] -= 0.12; set(Q, 'thighL', -34); set(Q, 'shinL', 40); set(Q, 'thighR', -16); set(Q, 'shinR', 36); }],
+    [0.76, (Q) => { armsUp(Q, 'R', -44, 0, 6, -20); armsUp(Q, 'L', -40, 0, -6, -24); add(Q, 'spine', 30); Q.root[1] -= 0.08; set(Q, 'thighL', -26); set(Q, 'shinL', 30); }], [1, guardBat]],
+};
+const PUNCH_N = ['jab', 'cross', 'hook', 'upper', 'kick'];
+const MB = blankPose();
+// pose a melee move over P (which holds the legs underneath); still: not walking, so plant a fighting stance
+function meleePose(P, n, k, still) {
+  const list = MELEE[n]; if (!list) return;
+  copyPose(MB, P);
+  keys(P, k, list.map(([kk, fn]) => [kk, (Q) => { copyPose(Q, MB); if (still) stance(Q); fn(Q); }]));
+}
+
+// ---------- hit reactions (combat.js react() sets ch.react = { kind, t, dur, mag, sx }) ----------
+function reactPose(P, r) {
+  const u = r.t / r.dur, a = (u < 0.14 ? sm(u / 0.14) : 1 - sm((u - 0.14) / 0.86)) * r.mag, sx = r.sx;
+  switch (r.kind) {
+    case 'head': add(P, 'head', -36 * a, 22 * sx * a); add(P, 'neck', -14 * a); add(P, 'spine', -12 * a); add(P, 'chest', -8 * a); add(P, 'upper_armL', 18 * a, 0, 10 * a); add(P, 'upper_armR', 18 * a, 0, -10 * a); P.root[2] -= 0.05 * a; break;
+    case 'gut': add(P, 'spine', 32 * a); add(P, 'chest', 16 * a); add(P, 'head', 12 * a); P.root[1] -= 0.08 * a; P.root[2] -= 0.04 * a; add(P, 'thighL', -14 * a); add(P, 'thighR', -14 * a); add(P, 'shinL', 26 * a); add(P, 'shinR', 26 * a);
+      add(P, 'upper_armL', -26 * a, 0, -12 * a); add(P, 'upper_armR', -26 * a, 0, 12 * a); add(P, 'forearmL', -45 * a); add(P, 'forearmR', -45 * a); break;
+    case 'side': add(P, 'spine', 4 * a, 20 * sx * a, 22 * sx * a); add(P, 'chest', 0, 14 * sx * a, 12 * sx * a); add(P, 'head', 0, -18 * sx * a, 18 * sx * a); add(P, sx > 0 ? 'upper_armR' : 'upper_armL', -10 * a, 0, -30 * sx * a); P.root[0] += 0.06 * sx * a; P.root[1] -= 0.03 * a; break;
+    case 'back': add(P, 'spine', 26 * a); add(P, 'chest', 10 * a); add(P, 'head', -22 * a); add(P, 'upper_armL', 28 * a, 0, 14 * a); add(P, 'upper_armR', 28 * a, 0, -14 * a); P.root[2] += 0.07 * a; break;
+    case 'leg': P.root[1] -= 0.13 * a; add(P, 'thighL', -22 * a); add(P, 'shinL', 48 * a); add(P, 'hips', 0, 0, 9 * a); add(P, 'spine', 10 * a, 0, -8 * a); add(P, 'upper_armL', -20 * a, 0, 16 * a); break;
+  }
+}
+
 // ---------- the state machine ----------
 // st: { speed, aim, weapon, swim, sit, dead, lie, cower, reach, pull, phone, handsUp, look, chat, flinch, swing,
 //       crouch, cover, smoke, drink, film, wave, point, beg, playDead, lean, preach, sign, dance, drive, climb, vault,
@@ -350,15 +418,29 @@ export function animate(ch, dt, st) {
   } else {
     // ---- on your feet: idle / walk / run, then upper-body overlays ----
     const run = clamp01((sp - 2.6) / 2.4);
-    if (sp > 0.25) { ch.walk = (ch.walk || 0) + dt * (sp < 2.6 ? sp * 2.9 * (STRIDE[ch.style] || 1) : 7.5 + sp * 0.75); locomote(P, ch.walk, sp, run, ch); }
-    else stand(P, t, ch);
+    if (sp > 0.25) {
+      // st.moveRel: which way the feet go relative to where the body faces (aiming: strafing / backpedalling).
+      // The hips turn toward the movement (or away from it, walking backwards) and the chest turns back to the aim.
+      const mr = st.moveRel || 0, back = Math.abs(mr) > 1.95;
+      ch.walk = (ch.walk || 0) + dt * (sp < 2.6 ? sp * 2.9 * (STRIDE[ch.style] || 1) : 7.5 + sp * 0.75) * (back ? -1 : 1);
+      locomote(P, ch.walk, sp, run, ch);
+      if (mr) {
+        let yaw = (back ? mr - Math.PI * Math.sign(mr) : mr) / DEG;
+        yaw = Math.max(-62, Math.min(62, yaw));
+        add(P, 'hips', 0, yaw); add(P, 'spine', 0, -yaw * 0.55); add(P, 'chest', 0, -yaw * 0.3); add(P, 'head', 0, -yaw * 0.15);
+      }
+    } else stand(P, t, ch);
     if (st.crouch) { P.root[1] -= 0.35; add(P, 'thighL', -60); add(P, 'thighR', -60); add(P, 'shinL', 85); add(P, 'shinR', 85); add(P, 'footL', -25); add(P, 'footR', -25); add(P, 'spine', 22); add(P, 'head', -12); }
     if (st.limp) { add(P, 'hips', 0, 0, Math.sin(ch.walk || 0) * 6); P.root[1] -= Math.max(0, Math.sin(ch.walk || 0)) * 0.04; add(P, 'thighR', 10); }
     if (st.cane) { add(P, 'spine', 14); add(P, 'chest', 6); add(P, 'head', -10); armsUp(P, 'R', -25 + Math.sin(ch.walk || 0) * 10, 6, -10); }
     if (st.skate) { P.root[1] -= 0.08; set(P, 'thighL', -10, 0, 12); set(P, 'thighR', 10, 0, -12); set(P, 'shinL', 15); set(P, 'shinR', 15); set(P, 'hips', 0, 70); set(P, 'spine', 5, -50); armsUp(P, 'L', 0, 25, -10); armsUp(P, 'R', 0, 25, -10); }
     const pitch = st.pitch || 0;
     if (st.cover) { P.root[1] -= 0.4; add(P, 'thighL', -70); add(P, 'thighR', -70); add(P, 'shinL', 95); add(P, 'shinR', 95); add(P, 'spine', 15); }
-    if (st.swing > 0) { // two-handed bat swing (or a big punch when unarmed)
+    if (st.melee || st.punch) { // a combo move (src/combat.js) or an NPC's punches (punch: { i: 0 jab .. 3 uppercut, 4 kick, t: 0..1 })
+      const m = st.melee || { n: PUNCH_N[st.punch.i] || 'jab', k: st.punch.t };
+      meleePose(P, m.n, clamp01(m.k), sp <= 0.25);
+      rate = 42;
+    } else if (st.swing > 0) { // two-handed bat swing (or a big punch when unarmed); swing = progress 0..1
       const k = st.swing, s1 = Math.sin(clamp01(k) * Math.PI);
       const bat = st.weapon === 'bat';
       if (bat) {
@@ -369,22 +451,18 @@ export function animate(ch, dt, st) {
         armsUp(P, 'R', -80 * s1 - 10, 0, 15 * s1, -20 - 60 * (1 - s1)); set(P, 'spine', 5, 30 * s1); armsUp(P, 'L', -40, 0, -10, -110);
       }
       rate = 30;
-    } else if (st.punch) { // punch / kick combos: i = 0 jab, 1 cross, 2 hook, 3 uppercut, 4 kick
-      const { i, t: k } = st.punch, s1 = Math.sin(clamp01(k) * Math.PI);
-      armsUp(P, 'L', -60, 0, -20, -110); armsUp(P, 'R', -60, 0, -20, -110); set(P, 'spine', 6, -10); set(P, 'head', -6); // guard
-      if (i === 0) { armsUp(P, 'L', -60 - 30 * s1, 0, -20 + 10 * s1, -110 + 105 * s1); set(P, 'spine', 6, -10 - 12 * s1); }
-      else if (i === 1) { armsUp(P, 'R', -60 - 30 * s1, 0, -20 + 15 * s1, -110 + 105 * s1); set(P, 'spine', 8, 25 * s1); add(P, 'thighR', 10 * s1); }
-      else if (i === 2) { armsUp(P, 'R', -70, 0, -20 + 70 * s1, -90); set(P, 'spine', 6, 45 * s1); }
-      else if (i === 3) { armsUp(P, 'R', -60 - 90 * s1, 0, -10, -110 + 30 * s1); set(P, 'spine', -10 * s1, 20 * s1); P.root[1] += 0.05 * s1; }
-      else { set(P, 'thighR', -95 * s1); set(P, 'shinR', 80 - 75 * s1); set(P, 'footR', 20); set(P, 'spine', -15 * s1); set(P, 'thighL', 5); }
-      rate = 30;
     } else if (st.shove) { const s1 = Math.sin(clamp01(st.shove) * Math.PI); armsUp(P, 'L', -80 * s1, 0, -10, -60 + 50 * s1); armsUp(P, 'R', -80 * s1, 0, -10, -60 + 50 * s1); set(P, 'spine', 10 * s1); rate = 28; }
     else if (st.aim && st.weapon === 'gun') {
       const rifle = st.rifle;
       if (rifle) { armsUp(P, 'R', -55 - pitch, 0, -10, -105); armsUp(P, 'L', -80 - pitch, 0, -25, -15); set(P, 'handR', 0, 0, 10); set(P, 'chest', 0, 15); set(P, 'head', -pitch * 0.3, -15); }
       else { armsUp(P, 'R', -88 - pitch, 0, 8, -4); armsUp(P, 'L', -72 - pitch, 0, -32, -38); set(P, 'chest', 0, 8); set(P, 'head', -pitch * 0.4, -6); }
       set(P, 'spine', P.spine[0] - pitch * 0.3, P.spine[1] + 6);
-      if (st.recoil > 0) { add(P, 'upper_armR', -st.recoil * 12); add(P, 'upper_armL', -st.recoil * 10); add(P, 'forearmR', -st.recoil * 8); }
+      // the upper body leads where the camera looks while the feet catch up (st.aimYaw, radians, + = to the left)
+      if (st.aimYaw) { const y = Math.max(-50, Math.min(50, st.aimYaw / DEG)); add(P, 'spine', 0, y * 0.45); add(P, 'chest', 0, y * 0.4); add(P, 'head', 0, y * 0.15); }
+      if (st.recoil > 0) { // kick: the arms snap up and the shoulders rock back, then settle
+        const r = st.recoil * (rifle ? 0.8 : 1);
+        add(P, 'upper_armR', -r * 14); add(P, 'upper_armL', -r * 11); add(P, 'forearmR', -r * 10); add(P, 'chest', -r * 5); add(P, 'head', -r * 3); P.root[2] -= r * 0.02;
+      }
       rate = 26;
     } else if (st.reload > 0) {
       // tip the gun, drop the mag (left hand to the belt), slap a fresh one in, rack it
@@ -445,7 +523,9 @@ export function animate(ch, dt, st) {
       ch.hitT = Math.max(0, ch.hitT - dt * 3); const k = ch.hitT;
       add(P, 'spine', ch.hitZ * 25 * k, 0, ch.hitX * 20 * k); add(P, 'head', ch.hitZ * 20 * k); P.root[1] -= 0.05 * k;
     }
+    if (ch.react) { reactPose(P, ch.react); rate = Math.max(rate, 30); }
   }
+  if (ch.react && (ch.react.t += dt) >= ch.react.dur) ch.react = null;
   if (st.flinch) ch.flinch = 1;
   // ease toward the target pose
   if (!ch.posed) { copyPose(cur, P); ch.posed = true; } else lerpPose(cur, P, 1 - Math.exp(-dt * rate));

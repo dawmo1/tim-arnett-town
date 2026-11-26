@@ -26,6 +26,7 @@ import { updateOccupants, emptyCar, setOccupantBudget } from './occupants.js';
 import { initCarLights, updateCarLights, setLightQuality, wetUniform } from './carlights.js';
 import { initPhysics, updateRagdolls, ragdoll, release, ragPos, syncPhysics, standUp } from './ragdoll.js';
 import * as anim from './anim.js';
+import * as combat from './combat.js';
 import { initNav, updateNav } from './nav.js';
 import { knock, flinch } from './npc.js';
 import * as police from './police.js';
@@ -357,12 +358,13 @@ addEventListener('mousemove', (e) => {
   const sens = (aiming ? (WEAPONS[me.weapon].scope ? 0.00065 : 0.0017) : 0.0034) * settings.sens;
   camYaw -= e.movementX * sens;
   camPitch = clamp(camPitch + e.movementY * sens * (settings.invertY ? -1 : 1), -0.5, 1.2);
+  if (me.lockOn && combat.pullLock(e.movementX, e.movementY)) me.lockOn = null; // a hard pull away breaks the lock-on
   lastMouse = performance.now();
 });
 addEventListener('mousedown', (e) => {
   if (!locked || wheelOpen || blackedOut() || phone.isOpen()) return; // no shooting, aiming or melee on the phone
   if (e.button === 0) { mouseDown = true; clicked = true; }
-  if (e.button === 2) { aiming = true; me.lockOn = findLockTarget(); }
+  if (e.button === 2) { aiming = true; me.lockOn = findLockTarget(); me.lockT = 0; combat.resetLock(); }
 });
 addEventListener('mouseup', (e) => { if (e.button === 0) mouseDown = false; if (e.button === 2) { aiming = false; me.lockOn = null; } });
 addEventListener('contextmenu', (e) => { if (playing) e.preventDefault(); });
@@ -537,7 +539,7 @@ function refreshWeaponHud() {
 function startReload() {
   const w = WEAPONS[me.weapon], a = ammoOf(me.weapon);
   if (w.melee || w.grenade || me.reloadT > 0 || a.mag >= w.mag || a.res <= 0) return;
-  me.reloadT = w.name === 'Shotgun' ? 1.8 : 1.3; fx.soundReload(); refreshWeaponHud();
+  me.reloadT = combat.reloadTime(w); fx.soundReload(); refreshWeaponHud();
 }
 // Right-click aim: snap onto the nearest threat (or person) roughly where you're looking.
 function findLockTarget() {
@@ -954,7 +956,7 @@ function flushBump(o) {
   else { applyBump(o, b); o.localSim = true; }
 }
 function damageCopUnit(u, dmg, crimeType = 'hitcop') {
-  if (u.kind === 2) { const dx = u.x - me.x, dz = u.z - me.z, l = Math.hypot(dx, dz) || 1; u.hitDir = { x: dx / l, z: dz / l }; u.ch.flinch = 1; }
+  if (u.kind === 2) { const dx = u.x - me.x, dz = u.z - me.z, l = Math.hypot(dx, dz) || 1; u.hitDir = { x: dx / l, z: dz / l }; combat.react(u.ch, u.h || 0, dx / l, dz / l, 1.2, Math.min(1, dmg / 30)); }
   const hp = u.kind < 2 ? u.v.hp : u.hp;
   let killed;
   if (isHost) killed = police.damageCop(u.id, dmg);
@@ -1007,11 +1009,12 @@ function hurtWalker(w, dmg, dx, dz, p, force = 3, byNpc = false) {
   if (w.hp > 0) {
     if (force >= 6) knock(w, vel, false);
     else {
-      flinch(w); if (!byNpc) provoke(w);
-      // stagger away from the hit; a leg hit makes them limp, a body hit makes them clutch the wound
-      const c = w.ch, ch_ = Math.cos(w.h), sh = Math.sin(w.h);
-      c.hitT = 1; c.hitX = dx * ch_ - dz * sh; c.hitZ = dx * sh + dz * ch_;
+      flinch(w); w.ch.flinch = 0; if (!byNpc) provoke(w);
+      // flinch the way the blow pushes them (combat.js react), a solid one shoves them back a step;
+      // a leg hit makes them limp, a body hit makes them clutch the wound
       const hy = hp.y - (w.y || 0);
+      combat.react(w.ch, w.h, dx, dz, hy, Math.min(1, force / 6));
+      if (force >= 2.5) combat.push(w, dx, dz, 0.12 * force);
       if (hy < 0.8) w.limp = 30; else if (hy < 1.5 && Math.random() < 0.6) w.clutch = 12;
     }
   }
@@ -1038,7 +1041,11 @@ function damageMe(dmg, by, bu, imp) {
   fx.blood(me.x, me.y + 1.2, me.z, 0, 0, 6);
   if (me.hp <= 0) { die(); return; }
   if (imp && Math.hypot(imp.x, imp.z) > 5 && !me.veh) knockMe(imp);
-  else me.ch.flinch = 1;
+  else if (!me.veh) { // flinch (the way a push came from, else a random one) and jolt the camera
+    const l = imp ? Math.hypot(imp.x, imp.z) : 0;
+    combat.react(me.ch, me.h, l > 0.1 ? imp.x / l : 0, l > 0.1 ? imp.z / l : 0, 1.1 + Math.random() * 0.5, Math.min(1, dmg / 12), l > 0.1 ? null : ['gut', 'head', 'side'][Math.floor(Math.random() * 3)]);
+  }
+  combat.addTrauma(Math.min(0.35, 0.08 + dmg * 0.02));
 }
 // Knocked off your feet: physics takes over until you get back up.
 function knockMe(vel, getUp = 2.2) {
@@ -1346,12 +1353,13 @@ function raycast(o, d, maxT) {
   return best;
 }
 function applyHit(hit, w, d) {
-  if (hit.kind === 'walker') ui.hitMarker(hurtWalker(hit.ref, w.dmg * (hit.head ? 2.5 : 1), d.x, d.z, hit.p, w.pellets ? 2.2 : w.name === 'Rifle' ? 4.5 : 3));
+  if (hit.kind === 'walker') { const k = hurtWalker(hit.ref, w.dmg * (hit.head ? 2.5 : 1), d.x, d.z, hit.p, w.pellets ? 2.2 : w.name === 'Rifle' ? 4.5 : 3); ui.hitMarker(k); fx.soundHitMark(k); }
   else if (hit.kind === 'player') {
     sendEvent('hit', { to: hit.ref.uid, dmg: r1(w.dmg * (hit.head ? 2 : 1)), by: me.name });
-    fx.blood(hit.p.x, hit.p.y, hit.p.z, d.x, d.z); fx.soundHit(); ui.hitMarker(false);
+    combat.react(hit.ref.ch, hit.ref.h, d.x, d.z, hit.p.y - hit.ref.y, 0.4); // (their own screen plays it too, and sends it on)
+    fx.blood(hit.p.x, hit.p.y, hit.p.z, d.x, d.z); fx.soundHitMark(false); ui.hitMarker(false);
   } else if (hit.kind === 'veh') { damageVehicle(hit.ref, w.dmg * 0.45 * (hit.ref.mods?.bp ? 0.4 : 1)); if (hit.ref.patrol) report('hitcop', hit.ref.x, hit.ref.z); }
-  else if (hit.kind === 'cop') damageCopUnit(hit.ref, w.dmg * (hit.ref.kind === 2 ? (hit.head ? 2.5 : 1) : 0.6));
+  else if (hit.kind === 'cop') { damageCopUnit(hit.ref, w.dmg * (hit.ref.kind === 2 ? (hit.head ? 2.5 : 1) : 0.6)); if (hit.ref.kind === 2) fx.soundHitMark(!!hit.ref.dead); }
 }
 function handPos() {
   if (me.veh) return { x: me.veh.x, y: me.veh.y + 1.4, z: me.veh.z };
@@ -1359,8 +1367,8 @@ function handPos() {
   return { x: me.x + Math.sin(me.h) * 0.6 - Math.cos(me.h) * 0.35, y: me.y + 1.35, z: me.z + Math.cos(me.h) * 0.6 + Math.sin(me.h) * 0.35 };
 }
 function fire(w) {
-  me.cd = 1 / w.rate;
-  if (w.melee) { me.swing = 1; me.h = camYaw; melee(w); return; }
+  if (w.melee) { me.cd = 0; melee(w); return; } // (combat.js paces the combo and buffers presses)
+  me.cd = combat.nextShot(me.cd, w, lastDt);
   const a = ammoOf(me.weapon);
   if (me.reloadT > 0) return;
   if (a.mag <= 0) { if (a.res > 0) startReload(); else { fx.soundClick(); ui.flashPrompt('Out of ammo. Buy more at Arnett Arms (red ⌖ on the map) or a corner store.'); } return; }
@@ -1373,7 +1381,7 @@ function fire(w) {
   const from = handPos();
   let last = null;
   for (let i = 0; i < (w.pellets || 1); i++) {
-    const dd = spread(d, w.spread * (aiming ? 1 : 2.2) * (me.veh ? 1.6 : 1) * (1 + Math.min(1, drunk.lvl) * 1.5));
+    const dd = spread(d, w.spread * combat.spreadMul(aiming, me.crouch) * (me.veh ? 1.6 : 1) * (1 + Math.min(1, drunk.lvl) * 1.5));
     const hit = raycast(o, dd, w.range);
     shootProps(o, dd, hit.t);
     applyHit(hit, w, dd);
@@ -1382,12 +1390,11 @@ function fire(w) {
     last = hit.p;
   }
   me.shotSeq++; me.shot = [last.x, last.y, last.z];
-  fx.muzzleFlash(from);
+  fx.muzzleFlash(from, d, w.pellets || w.name === 'Sniper' ? 1.5 : w.name === 'Pistol' ? 0.85 : 1);
   fx.soundShot(w.name === 'Sniper' ? 'sniper' : w.snd);
-  me.recoil = 1;
+  me.recoil = 1; combat.shot(w, aiming);
   if (!w.rocket && !me.veh) fx.casing({ x: from.x - Math.sin(me.h) * 0.25, y: from.y + 0.03, z: from.z - Math.cos(me.h) * 0.25 }, { x: -Math.cos(me.h), z: Math.sin(me.h) });
   if (performance.now() - lastAttack > 1000) report('gunfire'); else lastAttack = performance.now();
-  if (w.name === 'Shotgun' || w.name === 'Rifle') shake = Math.max(shake, 0.12);
   if (a.mag <= 0 && a.res > 0) startReload();
   refreshWeaponHud();
   panicNear(me.x, me.z, 30); startle(me.x, me.z, 30); scareTraffic(me.x, me.z, 60); bailOut(me.x, me.z, 22);
@@ -1414,17 +1421,41 @@ function bulletMarks(hit, d) {
     else if (Math.random() < 0.6) { const gx = p.x + d.x * 1.5, gz = p.z + d.z * 1.5; if (W.isLand(gx, gz)) fx.mark('splat', { x: gx, y: W.groundHeight(gx, gz) + 0.03, z: gz }, { x: 0, y: 1, z: 0 }, 0.7); }
   }
 }
+// Melee: combat.js runs the combo (wind-up, contact, recovery, a buffered next press); a press picks who you're
+// going for (the body turns and steps in during the wind-up) and meleeLand deals the blow at the contact frame.
+const isLow = (wk) => wk.ch.rag || wk.ch.getUp > 0 || wk.mode === 'cower' || wk.freezeT > 0 || (wk.mode === 'surrender' && wk.giveUp && wk.giveUp !== 'cash');
+function meleeTargets() {
+  const L = [];
+  for (const wk of walkers) if (!wk.dead) L.push({ x: wk.x, z: wk.z, ref: wk, kind: 'walker' });
+  for (const u of police.cops.values()) if (u.kind === 2 && !u.dead) L.push({ x: u.x, z: u.z, ref: u, kind: 'cop' });
+  for (const r of remotes.values()) if (!r.dead && !r.veh) L.push({ x: r.x, z: r.z, ref: r, kind: 'player' });
+  return L;
+}
 function melee(w) {
+  const t = combat.meleeTarget(me.x, me.z, camYaw, meleeTargets(), 3);
+  me.meleeTgt = t ? t.ref : null;
+  combat.meleePress(w, !!(t && t.kind === 'walker' && isLow(t.ref)), meleeLand);
+}
+function meleeLand(n, mv, low) {
+  const w = WEAPONS[me.weapon];
+  lastAttack = performance.now();
   const fx_ = Math.sin(me.h), fz_ = Math.cos(me.h);
-  const inFront = (x, z) => { const dx = x - me.x, dz = z - me.z, d = Math.hypot(dx, dz); return d < w.range && (dx * fx_ + dz * fz_) / (d || 1) > 0.35; };
-  lastAttack = performance.now(); me.kick = false;
-  // bare-handed at someone down low (on the ground, getting up, cowering, frozen, begging, playing dead): kick instead
-  const low = (wk) => wk.ch.rag || wk.ch.getUp > 0 || wk.mode === 'cower' || wk.freezeT > 0 || (wk.mode === 'surrender' && wk.giveUp && wk.giveUp !== 'cash');
-  for (const wk of walkers) if (!wk.dead && inFront(wk.x, wk.z)) { me.kick = w.name === 'Fists' && !!low(wk); const k = hurtWalker(wk, w.dmg, fx_, fz_, me.kick ? { x: wk.x, y: (wk.y || 0) + 0.3, z: wk.z } : null, me.kick ? 3 : w.name === 'Bat' ? 7.5 : w.force || (Math.random() < 0.25 ? 6 : 3)); if (!k) report('assault', wk.x, wk.z); ui.hitMarker(k); fx.soundHit(); if (performance.now() - lastIncident > 6000) { lastIncident = performance.now(); incident(wk.x, wk.z, 'fight'); } return; }
-  for (const u of police.cops.values()) if (u.kind === 2 && !u.dead && inFront(u.x, u.z)) { damageCopUnit(u, w.dmg); fx.soundHit(); return; }
-  for (const r of remotes.values()) if (!r.dead && !r.veh && inFront(r.x, r.z)) {
-    sendEvent('hit', { to: r.uid, dmg: w.dmg, by: me.name }); report('assault', r.x, r.z); fx.blood(r.x, r.y + 1.3, r.z, fx_, fz_); fx.soundHit(); return;
+  const inFront = (x, z) => { const dx = x - me.x, dz = z - me.z, d = Math.hypot(dx, dz); return d < mv.range && (dx * fx_ + dz * fz_) / (d || 1) > 0.3; };
+  const hy = low ? 0.3 : mv.react === 'head' ? 1.6 : mv.react === 'gut' ? 1.05 : 1.35;
+  const landed = () => { fx.soundHit(); combat.hitPause(mv.pause); combat.addTrauma(mv.down ? 0.38 : 0.1 + mv.dmg * 0.005); };
+  for (const wk of walkers) if (!wk.dead && inFront(wk.x, wk.z)) {
+    const k = hurtWalker(wk, mv.dmg, fx_, fz_, { x: wk.x, y: (wk.y || 0) + hy, z: wk.z }, mv.force);
+    if (!k) report('assault', wk.x, wk.z); ui.hitMarker(k); landed();
+    if (performance.now() - lastIncident > 6000) { lastIncident = performance.now(); incident(wk.x, wk.z, 'fight'); }
+    return;
   }
+  for (const u of police.cops.values()) if (u.kind === 2 && !u.dead && inFront(u.x, u.z)) { damageCopUnit(u, mv.dmg); landed(); return; }
+  for (const r of remotes.values()) if (!r.dead && !r.veh && inFront(r.x, r.z)) {
+    sendEvent('hit', { to: r.uid, dmg: mv.dmg, by: me.name, ...(mv.down ? { ix: r1(fx_ * 7), iz: r1(fz_ * 7) } : {}) }); // a finisher knocks them over
+    combat.react(r.ch, r.h, fx_, fz_, hy, 0.6);
+    report('assault', r.x, r.z); fx.blood(r.x, r.y + hy, r.z, fx_, fz_); landed(); return;
+  }
+  fx.soundSwish(w.kind === 'bat'); // nothing there
 }
 const nadeGeo = new THREE.SphereGeometry(0.15, 6, 5);
 const rocketGeo = new THREE.CylinderGeometry(0.09, 0.09, 0.8, 8).rotateX(Math.PI / 2), bottleGeo = new THREE.CylinderGeometry(0.07, 0.09, 0.3, 8);
@@ -1695,6 +1726,7 @@ function updateVehicles(dt, tSec, nowMs) {
 
 function updatePlayer(dt) {
   const px = me.x, pz = me.z;
+  if (me.ch.rag || me.dead || me.rag || me.enter) combat.meleeCancel();
   if (me.ch.rag) {
     // ragdolled: the body is physics-driven; we just follow it
     const p = ragPos(me.ch); me.x = p.x; me.z = p.z; me.y = W.isLand(p.x, p.z) ? W.groundHeight(p.x, p.z) : W.SWIM_Y;
@@ -1711,7 +1743,8 @@ function updatePlayer(dt) {
     if (me.deadT <= 0) beginRespawn();
     return;
   }
-  me.cd -= dt; me.hitCd -= dt; me.aimT = Math.max(0, me.aimT - dt);
+  me.cd -= dt; me.hitCd -= dt; me.aimT = Math.max(0, me.aimT - dt); lastDt = dt;
+  combat.tickMelee(dt);
   if (me.reloadT > 0) {
     me.reloadT -= dt;
     if (me.reloadT <= 0) { const w = WEAPONS[me.weapon], a = ammoOf(me.weapon), n = Math.min(w.mag - a.mag, a.res); a.mag += n; a.res -= n; refreshWeaponHud(); }
@@ -1742,8 +1775,10 @@ function updatePlayer(dt) {
   const w = WEAPONS[me.weapon];
   const wantFire = locked && still && (w.auto ? mouseDown : clicked);
   clicked = false;
-  if (wantFire && me.cd <= 0 && !me.dead && !me.swim && !(me.veh && w.melee)) fire(w);
+  if (wantFire && (me.cd <= 0 || w.melee) && !me.dead && !me.swim && !(me.veh && w.melee)) fire(w);
+  if (me.veh || me.swim || me.dead || !w.melee) combat.meleeCancel();
 }
+let lastDt = 1 / 60;
 
 // Out of the seat: swing the legs out, stand up beside the car (turning toward the door and back), then shove it shut.
 function exitStep(dt) {
@@ -1847,7 +1882,8 @@ function footUpdate(dt, fwd, side) {
     return;
   }
   const crouch = !!me.crouch && !me.swim;
-  const speed = (me.swim ? 2.6 : aiming ? 2.6 : crouch ? 2.0 : sprint ? 8 : 4.5) * adm.speed;
+  const mv = combat.meleeNow(); // throwing a punch / swinging: feet mostly planted
+  const speed = (me.swim ? 2.6 : aiming ? 2.6 : crouch ? 2.0 : sprint ? 8 : 4.5) * adm.speed * (mv ? combat.meleeMoveScale() : 1);
   if (sprint && crouch && fwd) me.crouch = false;
   const rx = -Math.cos(camYaw), rz = Math.sin(camYaw);
   let mx = Math.sin(camYaw) * fwd + rx * side, mz = Math.cos(camYaw) * fwd + rz * side;
@@ -1856,12 +1892,19 @@ function footUpdate(dt, fwd, side) {
   if (ml > 0 && drunk.lvl > 0.15 && !me.swim) { const d = wobble(dt) * 0.6; [mx, mz] = [mx + mz * d, mz - mx * d]; } // drunk: weave sideways
   const wk = WEAPONS[me.weapon].kind;
   const aimPose = wk === 'gun' && !me.swim && (aiming || me.aimT > 0 || me.robAim); // (holding up a store: gun on the clerk)
-  if (ml > 0 || aimPose || me.swing > 0) {
+  let lunge = 0;
+  if (mv) { // face who you're hitting (or where you look) and step in during the wind-up
+    const t = me.meleeTgt && !me.meleeTgt.dead ? me.meleeTgt : null;
+    const tx = t ? t.x - me.x : Math.sin(camYaw), tz = t ? t.z - me.z : Math.cos(camYaw);
+    me.h += angDiff(me.h, Math.atan2(tx, tz)) * Math.min(1, dt * 22);
+    const info = combat.moveInfo(mv.n);
+    if (combat.meleeWindup() && t && Math.hypot(tx, tz) > 1.05) lunge = (info.lunge / (info.dur * info.hit)) * dt;
+  } else if (ml > 0 || aimPose || me.swing > 0) {
     const target = aimPose || me.swing > 0 ? camYaw : Math.atan2(mx, mz);
     me.h += angDiff(me.h, target) * Math.min(1, dt * 12);
   }
   const ox = me.x, oz = me.z;
-  me.x += mx * speed * dt; me.z += mz * speed * dt;
+  me.x += mx * speed * dt + Math.sin(me.h) * lunge; me.z += mz * speed * dt + Math.cos(me.h) * lunge;
   // walls of earth: steep steps block you (but you can climb out of the river onto the bank)
   if (!interior.room && (W.offMap(me.x, me.z) || (W.isLand(me.x, me.z) && W.surfaceHeight(me.x, me.z, me.y) - me.y > (me.swim ? 1.9 : 0.7)))) { me.x = ox; me.z = oz; }
   const p = W.pushOutCircle(me.x, me.z, 0.4, me.y);
@@ -1911,7 +1954,10 @@ function footUpdate(dt, fwd, side) {
   if (phone.isOpen() && !myAct) myAct = { n: phone.inCall() ? 'call' : 'phone', k: 0, side: 1 };
   if (myAct && me.moveSpeed > 0 && !anim.busy() && myAct.n !== 'phone' && myAct.n !== 'call') { anim.stop(); myAct = null; } // walking off cancels a small action
   anim.holdProps(me.ch, myAct);
-  animateCharacter(me.ch, dt, { ...anim.poseFields(myAct), crouch: crouch && !me.inCover && !aimPose, cover: me.inCover && !aimPose, speed: aimPose ? Math.min(me.moveSpeed, 3) : me.moveSpeed, aim: aimPose, swim: me.swim, swing: me.kick && wpn.name === 'Fists' ? 0 : me.swing, punch: me.kick && wpn.name === 'Fists' && me.swing > 0 ? { i: 4, t: 0.22 * Math.sin((1 - me.swing) * Math.PI) } : undefined, weapon: me.swim ? 'none' : wk, wmodel: me.swim ? null : wpn.model, rifle: wpn.long, recoil: me.recoil, reload: me.reloadT > 0 ? 1 - me.reloadT / (wpn.name === 'Shotgun' ? 1.8 : 1.3) : 0, pitch: aimPose ? -camPitch * 57 : 0, carry: !aimPose && wpn.long });
+  animateCharacter(me.ch, dt, { ...anim.poseFields(myAct), crouch: crouch && !me.inCover && !aimPose, cover: me.inCover && !aimPose, speed: aimPose ? Math.min(me.moveSpeed, 3) : me.moveSpeed, aim: aimPose, swim: me.swim,
+    melee: me.swim ? null : mv, swing: me.swing > 0 ? 1 - me.swing : 0, // (swing: a grenade throw)
+    moveRel: aimPose && ml > 0 ? angDiff(me.h, Math.atan2(mx, mz)) : 0, aimYaw: aimPose ? angDiff(me.h, camYaw) : 0,
+    weapon: me.swim ? 'none' : wk, wmodel: me.swim ? null : wpn.model, rifle: wpn.long, recoil: me.recoil, reload: me.reloadT > 0 ? 1 - me.reloadT / combat.reloadTime(wpn) : 0, pitch: aimPose ? -camPitch * 57 : 0, carry: !aimPose && wpn.long });
 }
 
 // admin noclip: fly where the camera looks, through everything. Space up, Shift down, Ctrl fast.
@@ -2071,8 +2117,8 @@ function updateRemotes(dt) {
       const ra = anim.remoteAct(s[21], s[22]);
       anim.holdProps(r.ch, ra);
       if (bits & 24) animateCharacter(r.ch, dt, bits & 8 ? { climb: +s[19] || 0 } : { vault: +s[19] || 0 });
-      else if (ra && ra.n !== 'phone' && ra.n !== 'call') animateCharacter(r.ch, dt, { act: ra });
-      else animateCharacter(r.ch, dt, { ...anim.poseFields(ra), speed: r.speed, aim: wk === 'gun' && !(bits & 2), swim: sw, dead: r.dead, crouch: !!(bits & 1), cover: !!(bits & 2), reload: bits & 4 ? (performance.now() / 1300) % 1 : 0, pitch: +s[18] || 0, carry: !!wr?.long && wk !== 'gun', weapon: sw ? 'none' : wk, wmodel: sw ? null : wr?.model ?? null, rifle: !!wr?.long });
+      else if (ra && ra.n !== 'phone' && ra.n !== 'call' && !anim.isCombat(ra.n)) animateCharacter(r.ch, dt, { act: ra });
+      else animateCharacter(r.ch, dt, { ...anim.poseFields(ra), ...combat.remoteFields(r, ra, dt), moveRel: wk === 'gun' && r.speed > 0.5 ? angDiff(r.h, Math.atan2(r.vx, r.vz)) : 0, speed: r.speed, aim: wk === 'gun' && !(bits & 2), swim: sw, dead: r.dead, crouch: !!(bits & 1), cover: !!(bits & 2), reload: bits & 4 ? (performance.now() / 1300) % 1 : 0, pitch: +s[18] || 0, carry: !!wr?.long && wk !== 'gun', weapon: sw ? 'none' : wk, wmodel: sw ? null : wr?.model ?? null, rifle: !!wr?.long });
     }
     r.tagT = (r.tagT || 0) - dt;
     if (r.tagT <= 0) { r.tagT = 0.3; const d = Math.hypot(r.x - camera.position.x, r.z - camera.position.z); r.tagOn = !r.dead && d < 40 && W.lineOfSight(camera.position.x, camera.position.y, camera.position.z, r.x, r.y + 2.2, r.z); }
@@ -2364,7 +2410,7 @@ function openShop(title, items, rebuild) { // rebuild: () => items, re-run after
 function closeShop() { shopOpen = false; paused = false; document.getElementById('shop').hidden = true; lockMouse(); }
 document.getElementById('shopClose').addEventListener('click', closeShop);
 
-let deathSpin = 0, camLag = null, camDist = null;
+let deathSpin = 0, camLag = null, camDist = null, baseFov = 70;
 // GTA-style arrival: a high overhead shot, a few hard cuts down toward you, then a swoop into the chase cam
 let spawnCam = null;
 const SPAWN_STEPS = [420, 170, 60], SPAWN_HOLD = 0.7, SPAWN_SWOOP = 1.1;
@@ -2399,22 +2445,26 @@ function updateCamera(dt) {
   if (garage.shopCam(camera, dt)) { followSun(me.veh ? me.veh.x : me.x, me.y, me.veh ? me.veh.z : me.z); return; } // Arnett Auto orbit
   const spd = me.veh ? Math.abs(me.veh.speed) : 0;
   const aimZoom = aiming && !me.dead && WEAPONS[me.weapon].kind === 'gun';
-  const fov = aimZoom ? (WEAPONS[me.weapon].scope ? 16 : 48) : 70 + clamp(spd - 15, 0, 30) * 0.45 + (me.veh && me.veh.boosting ? 8 : 0);
-  // soft lock-on keeps the crosshair on your target while you hold aim
+  // aiming eases in and out (combat.js aimBlend): zoom, shoulder offset and field of view all follow one smooth blend
+  const ab = me.dead ? 0 : combat.aimBlend();
+  baseFov += (70 + clamp(spd - 15, 0, 30) * 0.45 + (me.veh && me.veh.boosting ? 8 : 0) - baseFov) * Math.min(1, dt * 3);
+  const fov = baseFov + (combat.feel(WEAPONS[me.weapon]).fov - baseFov) * ab;
+  // soft lock-on: eases onto your target (quickly at first, then sticky) while you hold aim; pulling away breaks it
   if (aimZoom && me.lockOn) {
     const lp = lockPos(me.lockOn);
+    me.lockT = (me.lockT || 0) + dt;
     if (!lp) me.lockOn = null;
     else {
-      const c = camera.position, dx = lp.x - c.x, dz = lp.z - c.z;
-      camYaw += angDiff(camYaw, Math.atan2(dx, dz)) * Math.min(1, dt * 9);
-      camPitch += (-Math.atan2(lp.y - c.y, Math.hypot(dx, dz)) - camPitch) * Math.min(1, dt * 9);
+      const c = camera.position, dx = lp.x - c.x, dz = lp.z - c.z, k = Math.min(1, dt * combat.lockRate(me.lockT));
+      camYaw += angDiff(camYaw, Math.atan2(dx, dz)) * k;
+      camPitch += (-Math.atan2(lp.y - c.y, Math.hypot(dx, dz)) - camPitch) * k;
     }
   }
-  if (Math.abs(camera.fov - fov) > 0.1) { camera.fov += (fov - camera.fov) * Math.min(1, dt * 3); camera.updateProjectionMatrix(); }
+  if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
   if (me.dead) { deathSpin += dt; camYaw += dt * 0.35; camPitch += (1.0 - camPitch) * Math.min(1, dt * 1.2); }
   // the chase cam trails the car a little (springy), so turns and speed read clearly
   let tx = me.veh ? me.veh.x : me.x, tz = me.veh ? me.veh.z : me.z;
-  const ty = me.veh ? me.veh.y + 1.7 : me.swim ? W.WATER_Y - 0.15 : me.y + 1.6 + (aimZoom ? 0.08 : 0);
+  const ty = me.veh ? me.veh.y + 1.7 : me.swim ? W.WATER_Y - 0.15 : me.y + 1.6 + 0.08 * ab;
   if (me.veh && !me.veh.T.heli) {
     if (!camLag || Math.hypot(camLag.x - tx, camLag.z - tz) > 20) camLag = { x: tx, z: tz };
     const k = 1 - Math.exp(-dt * 9);
@@ -2427,9 +2477,9 @@ function updateCamera(dt) {
   if (me.veh && !me.lookBack && performance.now() - lastMouse > 1200 && Math.abs(me.veh.speed) > 3) {
     camYaw += angDiff(camYaw, me.veh.speed > 0 ? me.veh.h : me.veh.h + Math.PI) * Math.min(1, dt * (1.6 + Math.min(2.4, Math.abs(me.veh.speed) * 0.08)));
   }
-  const dist = me.veh ? (me.veh.T.heli ? 16 : me.veh.T.plane ? 9 + me.veh.T.len + Math.min(6, spd * 0.06) : 4.6 + me.veh.T.len + Math.min(4, spd * 0.09)) : me.dead ? 5 + deathSpin * 4 : aimZoom ? 2.3 : 4.2;
+  const dist = me.veh ? (me.veh.T.heli ? 16 : me.veh.T.plane ? 9 + me.veh.T.len + Math.min(6, spd * 0.06) : 4.6 + me.veh.T.len + Math.min(4, spd * 0.09)) : me.dead ? 5 + deathSpin * 4 : 4.2 - 1.9 * ab;
   const cp = Math.cos(camPitch), dx = Math.sin(camYaw) * cp, dy = -Math.sin(camPitch), dz = Math.cos(camYaw) * cp;
-  const sh = me.veh ? 0 : aimZoom ? 0.85 : 0.55, ax = tx - Math.cos(camYaw) * sh, az = tz + Math.sin(camYaw) * sh;
+  const sh = me.veh ? 0 : 0.55 + 0.3 * ab, ax = tx - Math.cos(camYaw) * sh, az = tz + Math.sin(camYaw) * sh;
   let back = W.rayBuildings(ax, ty, az, -dx, -dy, -dz, dist);
   // other cars between you and the camera push it in too (looking out from inside a car is a black box)
   if (me.veh) for (const v of [...vehicles, ...[...police.cops.values()].map((u) => u.v)]) if (v && v !== me.veh && !v.exploded && Math.abs(v.x - ax) < dist + 6 && Math.abs(v.z - az) < dist + 6) back = Math.min(back, vehRay({ x: ax, y: ty, z: az }, { x: -dx, y: -dy, z: -dz }, v));
@@ -2441,14 +2491,16 @@ function updateCamera(dt) {
   const camX = ax - dx * d, camZ = az - dz * d;
   const floorY = interior.room ? interior.room.y + 0.35 : W.isLand(camX, camZ) ? W.groundHeight(camX, camZ) + 0.35 : W.WATER_Y + 0.2;
   camera.position.set(camX, Math.max(floorY, ty - dy * d), camZ);
-  camera.lookAt(ax + dx * 20, ty + dy * 20, az + dz * 20);
+  // recoil kicks the view (not the camera's orbit) up and a little sideways, then springs back
+  const lp_ = camPitch - combat.recoilPitch(), ly_ = camYaw + combat.recoilYaw(), lc = Math.cos(lp_);
+  camera.lookAt(ax + Math.sin(ly_) * lc * 20, ty - Math.sin(lp_) * 20, az + Math.cos(ly_) * lc * 20);
   swayCamera(camera);
   if (spawnCam) spawnCamera(dt, tx, ty, tz, ax + dx * 20, ty + dy * 20, az + dz * 20);
   followSun(tx, ty, tz);
-  if (shake > 0) {
-    camera.position.x += (Math.random() - 0.5) * shake; camera.position.y += (Math.random() - 0.5) * shake;
-    shake = Math.max(0, shake - dt * 2.5);
-  }
+  // shake: older code sets `shake`, it becomes combat.js trauma, which shakes smoothly (no per-frame random jumps)
+  if (shake > 0) { combat.traumaAtLeast(Math.sqrt(shake * 0.7)); shake = 0; }
+  const so = combat.shakeOffset();
+  if (so) { camera.translateX(so.x); camera.translateY(so.y); camera.rotateZ(so.roll); }
 }
 
 function policePlayers() {
@@ -2701,6 +2753,13 @@ function poseForMinigame() {
 let movingVehicles = [], physT = 0;
 function update(dt, t) {
   dt *= adm.slowmo;
+  { // combat feel (combat.js): aim blend, recoil, crosshair spread and shake run on real time; a hit pause slows the rest
+    const w = WEAPONS[me.weapon], gun = w.kind === 'gun' && !w.rocket;
+    combat.tick(dt, { aiming: aiming && !me.dead && w.kind === 'gun', weapon: w, firing: mouseDown && gun && me.cd > -0.1, moving: (me.moveSpeed || 0) > 0.5 || !!me.veh });
+    combat.tickPushes(dt, (x, z) => W.pushOutCircle(x, z, 0.4));
+    combat.crosshair(gun && !w.scope && !me.dead ? combat.spreadPx(w.spread * (w.pellets ? 1 : 1.6) * combat.spreadMul(aiming, me.crouch), camera.fov, innerHeight) + 3 : 0);
+    dt *= combat.timeScale();
+  }
   if (adm.neverWanted && wanted.stars) resetWanted();
   if (wheelOpen && remotes.size === 0) dt *= 0.3; // slow motion while choosing a weapon (solo only)
   if (me.dead && remotes.size === 0) { const k = (performance.now() - me.deadAt) / 1000; dt *= k < 3 ? 0.28 : Math.min(1, 0.28 + (k - 3) * 0.5); }
@@ -2762,7 +2821,7 @@ function update(dt, t) {
 }
 
 // the player's action for other players: [code (negative = mirrored), progress] in s[21], s[22] (src/anim.js)
-function actNet() { if (!myAct) return [0, 0]; const c = anim.codeOf(myAct.n); return [c * (myAct.side < 0 ? -1 : 1), Math.round((myAct.k || 0) * 100) / 100]; }
+function actNet() { if (!myAct) { const c = combat.netAct(me.ch); return c ? [anim.codeOf(c.n), Math.round(c.k * 100) / 100] : [0, 0]; } const c = anim.codeOf(myAct.n); return [c * (myAct.side < 0 ? -1 : 1), Math.round((myAct.k || 0) * 100) / 100]; }
 // Slow pan over the riverfront while the menu is open.
 let menuFocus = null; // once you press Play the (hidden) menu camera streams around your spawn instead
 function menuCamera(t) {

@@ -147,11 +147,21 @@ export function casing(p, side) {
   m.position.set(p.x, p.y, p.z); scene.add(m);
   parts.push({ m, vx: side.x * (1.5 + Math.random()) , vy: 1.6 + Math.random(), vz: side.z * (1.5 + Math.random()), life: 1.6, kind: 'casing', spin: 20 });
 }
-export function muzzleFlash(p) {
+// d (optional): the aim direction; the flash is a hot core plus a flame stretched along the barrel, a fresh size and
+// twist each shot, and it always stays up for at least one drawn frame (at a low frame rate it used to vanish unseen)
+const flashGeo = new THREE.OctahedronGeometry(1, 0);
+export function muzzleFlash(p, d = null, big = 1) {
   const m = new THREE.Mesh(sphere, flashMat);
-  m.position.set(p.x, p.y, p.z); m.scale.setScalar(0.18);
+  m.position.set(p.x, p.y, p.z); m.scale.setScalar((0.1 + Math.random() * 0.06) * big);
   scene.add(m);
-  tracers.push({ l: m, life: 0.05, mesh: true });
+  tracers.push({ l: m, life: 0.05, mesh: true, frames: 2 });
+  if (d) {
+    const f = new THREE.Mesh(flashGeo, flashMat), s = (0.08 + Math.random() * 0.05) * big;
+    f.position.set(p.x + d.x * s * 1.6, p.y + d.y * s * 1.6, p.z + d.z * s * 1.6);
+    f.lookAt(p.x + d.x * 2, p.y + d.y * 2, p.z + d.z * 2); f.rotateZ(Math.random() * Math.PI);
+    f.scale.set(s * 0.9, s * 0.9, s * (2.6 + Math.random() * 1.4));
+    scene.add(f); tracers.push({ l: f, life: 0.04, mesh: true, frames: 2 });
+  }
 }
 
 export function blood(x, y, z, dx = 0, dz = 0, amount = 8) {
@@ -176,7 +186,7 @@ const lineMat = new THREE.LineBasicMaterial({ color: 0xfff3a0 });
 export function tracer(a, b) {
   const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(a.x, a.y, a.z), new THREE.Vector3(b.x, b.y, b.z)]);
   const l = new THREE.Line(g, lineMat);
-  scene.add(l); tracers.push({ l, life: 0.06 });
+  scene.add(l); tracers.push({ l, life: 0.06, frames: 2 });
 }
 
 export function explosion(x, y, z) {
@@ -250,6 +260,7 @@ export function updateFx(dt) {
   }
   for (let i = tracers.length - 1; i >= 0; i--) {
     tracers[i].life -= dt;
+    if (tracers[i].frames > 0) { tracers[i].frames--; continue; } // (updated before the frame it was made in is drawn)
     if (tracers[i].life <= 0) { scene.remove(tracers[i].l); if (!tracers[i].mesh) tracers[i].l.geometry.dispose(); tracers.splice(i, 1); }
   }
   for (let i = booms.length - 1; i >= 0; i--) {
@@ -371,6 +382,10 @@ export function soundBoom(dist = 0) {
   if (sample('boom', v, { rate: 0.6, cut })) { sample('gunfar_shotgun', v, { rate: 0.4, cut, send: 0.5 }); sample('crash', 0.55 * v, { rate: 0.75, cut, t0: 0.05 }); burst(2.4, 200, 0.9 * v); return; }
   burst(1.4, 500, 1.2 * v);
 }
+// the hit marker's tick (a bullet landed), louder and lower for a kill
+export function soundHitMark(kill = false) { tone('square', kill ? 1180 : 1900, 0.035, kill ? 0.09 : 0.06); tone('triangle', kill ? 620 : 2600, 0.05, 0.05, 0.012); if (kill) tone('triangle', 420, 0.12, 0.08, 0.05); }
+// a fist or bat cutting the air
+export function soundSwish(heavy = false) { burst(heavy ? 0.16 : 0.09, heavy ? 900 : 1700, heavy ? 0.22 : 0.14); }
 export function soundHit() { if (!sample('punch', 0.6)) burst(0.06, 900, 0.4); }
 
 function tone(type, freq, dur, vol, t0 = 0) {

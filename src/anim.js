@@ -7,7 +7,12 @@ import { setProp } from './character.js';
 
 // codes are sent over the network: only ever append
 const LIST = ['', 'carOpen', 'carIn', 'carShut', 'carOut', 'shutStand', 'door', 'give', 'take', 'eat', 'pool', 'darts', 'table', 'slots', 'sit', 'stool',
-  'phone', 'call', 'getUpFront', 'getUpBack', 'fillBag'];
+  'phone', 'call', 'getUpFront', 'getUpBack', 'fillBag',
+  // combat (src/combat.js): melee moves, then hurt reactions; posed over walking, not as a held action
+  'jab', 'cross', 'hook', 'upper', 'kick', 'stomp', 'slashR', 'slashL', 'stab', 'swingR', 'swingL', 'smash',
+  'hurtHead', 'hurtGut', 'hurtSide', 'hurtBack', 'hurtLeg'];
+const COMBAT = new Set(LIST.slice(LIST.indexOf('jab')));
+export const isCombat = (n) => COMBAT.has(n);
 const CODE = new Map(LIST.map((n, i) => [n, i]));
 export const codeOf = (n) => CODE.get(n) || 0;
 // props held during an action (character.js PROP_AT)
@@ -62,7 +67,7 @@ export function remoteAct(code, k) {
 }
 // st fields for an action: phone poses stack on walking, the rest take over the body
 export function poseFields(a) {
-  if (!a) return {};
+  if (!a || COMBAT.has(a.n)) return {};
   if (a.n === 'phone') return { text: true };
   if (a.n === 'call') return { phone: true };
   return { act: a };
