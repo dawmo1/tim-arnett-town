@@ -6,6 +6,7 @@ import * as fx from './fx.js';
 import { sky } from './daynight.js';
 import { buildCarMesh, dent, crumple, unDent, GLASS } from './carmodel.js';
 import { stepPlane, planeMesh } from './planes.js';
+import { buildEbikeMesh } from './ebikemodel.js';
 
 export const TYPES = [
   { name: 'Sedan', len: 4.4, wid: 1.9, hgt: 1.45, max: 32, acc: 13, turn: 1.9, grip: 7, mass: 1.2, hp: 100 },
@@ -38,8 +39,10 @@ export const TYPES = [
   // planes (planes.js): wid is the fuselage + gear footprint for collisions, span the wings; stall in m/s
   { name: 'Prop plane', len: 8.3, wid: 2.8, hgt: 2.7, max: 60, acc: 9, turn: 1, grip: 2, mass: 1.1, hp: 160, plane: true, span: 11, stall: 24 },
   { name: 'Crop duster', len: 8.8, wid: 2.8, hgt: 2.8, max: 54, acc: 10, turn: 1.2, grip: 2, mass: 1.5, hp: 180, plane: true, duster: true, span: 13, stall: 20 },
+  // pedal-assist e-bike (ebike.js): the motor cuts out at 32 km/h (8.9 m/s); light, so a knock throws you off
+  { name: 'E-bike', len: 1.85, wid: 0.6, hgt: 1.1, max: 8.9, acc: 4.2, turn: 3.2, grip: 8, mass: 0.12, hp: 60, bike: true, ebike: true },
 ];
-export const V = { SEDAN: 0, SPORTS: 1, TRUCK: 2, VAN: 3, BIKE: 4, SCOOTER: 5, POLICE: 6, BUS: 7, BOAT: 8, HELI: 9, HATCH: 10, SUV: 11, PICKUP: 12, MINIVAN: 13, MUSCLE: 14, CONVERTIBLE: 15, LIMO: 16, MONSTER: 17, TAXI: 18, GARBAGE: 19, TOW: 20, AMBULANCE: 21, FIRE: 22, PLANE: 23, DUSTER: 24 };
+export const V = { SEDAN: 0, SPORTS: 1, TRUCK: 2, VAN: 3, BIKE: 4, SCOOTER: 5, POLICE: 6, BUS: 7, BOAT: 8, HELI: 9, HATCH: 10, SUV: 11, PICKUP: 12, MINIVAN: 13, MUSCLE: 14, CONVERTIBLE: 15, LIMO: 16, MONSTER: 17, TAXI: 18, GARBAGE: 19, TOW: 20, AMBULANCE: 21, FIRE: 22, PLANE: 23, DUSTER: 24, EBIKE: 25 };
 export const BUS = 7, BOAT = 8, HELI = 9;
 export const POLICE = 6;
 // real-world car colours: lots of white, black, silver and grey, some blue and red, the odd bright one
@@ -64,7 +67,7 @@ function bx(g, c, sx, sy, sz, x, y, z, material) {
 export function makeVehicleMesh(T, color, dirt = 0, tiHint = -1) {
   const ti = tiHint >= 0 ? tiHint : TYPES.findIndex((t) => t === T || t.name === T.name);
   if (T.plane) return planeMesh(T, color);
-  const model = buildCarMesh(ti, color, { dirt });
+  const model = T.ebike ? buildEbikeMesh(color, dirt) : buildCarMesh(ti, color, { dirt });
   if (model) return model;
   curPaint = color;
   const g = new THREE.Group();
@@ -663,7 +666,8 @@ export function stepVehicle(v, inp, dt) {
     vr -= Math.sign(vr) * cut;
     vf -= Math.sign(vf) * cut * 0.12; // scrubbing sideways costs speed
   } else if (upset && !(v.air > 0)) { vf *= Math.exp(-1.6 * dt); vr *= Math.exp(-1.6 * dt); } // grinding along on a side or the roof
-  const cap = T.max * tn.max * (boosting ? 1.25 : 1) * (v.rough ? 0.5 : 1);
+  // (an e-bike's assist cuts out at T.max, but it still freewheels faster down a hill)
+  const cap = T.max * tn.max * (boosting ? 1.25 : 1) * (v.rough ? 0.5 : 1) * (T.ebike && !thr ? 1.6 : 1);
   if (vf > cap) vf = cap + (vf - cap) * Math.exp(-6 * dt);
   const sp = Math.abs(vf);
   let yaw = 0;
@@ -871,7 +875,7 @@ export function pushCharOut(x, z, r, v) {
 export function trafficPose(v) { return { x: v.x, z: v.z, h: v.h, vx: v.vx || 0, vz: v.vz || 0 }; }
 
 // Parked cars at the given spots: [{x, z, h}]. More get added as you explore (see main.js).
-const PARKED_TYPES = [0, 0, 0, 0, 10, 10, 10, 11, 11, 11, 11, 12, 12, 12, 13, 13, 1, 14, 15, 3, 4, 5, 18];
+const PARKED_TYPES = [0, 0, 0, 0, 10, 10, 10, 11, 11, 11, 11, 12, 12, 12, 13, 13, 1, 14, 15, 3, 4, 5, 18, 25];
 export function makeParked(id, sp, r = Math.random) {
   const ti = sp.ti ?? PARKED_TYPES[Math.floor(r() * PARKED_TYPES.length)];
   return makeVehicle(id, ti, CAR_COLORS[Math.floor(r() * CAR_COLORS.length)], sp);
