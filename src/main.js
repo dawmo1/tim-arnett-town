@@ -1136,7 +1136,7 @@ function toggleVehicle() {
 // ---------- passengers: me.veh with me.seat > 0 is riding in another player's car; only the driver's client simulates it ----------
 const driverPlayer = (v) => !!(v.driver && v.driver !== net.uid && net.players[v.driver]);
 // passenger seats (the driver's not counted)
-const passSeats = (T) => (T.ebike ? 0 : T.bus ? 7 : T.limo ? 5 : T.bike || T.duster || T.truck || T.pickup || T.monster || T.cabbed || T.muscle || T.convertible || T.name === 'Sports car' ? 1 : 3);
+const passSeats = (T) => (T.ebike ? 0 : T.bus ? 7 : T.limo ? 5 : T.bike || T.duster || T.truck || T.monster || T.cabbed || T.muscle || T.convertible || T.name === 'Sports car' ? 1 : 3);
 function freeSeat(v) {
   const taken = new Set();
   for (const [uid, p] of Object.entries(net.players)) if (uid !== net.uid && p && Array.isArray(p.s) && p.s[5] === v.id && p.s[20] > 0) taken.add(p.s[20]);
