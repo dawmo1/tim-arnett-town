@@ -123,15 +123,9 @@ function brow(cu, v, f, scared, angry, s) {
 function paintFace(i, scared) {
   const f = FACE[i];
   faceBase();
-  if (f.stub) { // stubble: tiny dots in the hair colour over the jaw and upper lip
-    for (let k = 0; k < 1300 * f.stub; k++) {
-      const u = 0.5 + (rnd() - 0.5) * 0.42, v = 0.2 + rnd() * 0.22;
-      const dx = (u - 0.5) / 0.21, dv = (v - 0.3) / 0.12;
-      if (v > 0.4 && Math.abs(u - 0.5) > 0.06) continue;
-      if (dx * dx + dv * dv > 1.3 && v < 0.4) continue;
-      rect(B, 150, u, v, u + 0.004, v + 0.004);
-    }
-    shade((c) => { c.fillStyle = 'rgba(40,30,25,0.12)'; c.beginPath(); c.ellipse(X(0.5), Y(0.3), 0.2 * S, 0.12 * S, 0, 0, 7); c.fill(); });
+  if (f.stub) { // stubble: a soft blue-grey shadow over the jaw and upper lip (PS2 style), with a fine grain
+    shade((c) => { c.fillStyle = `rgba(45,45,60,${0.3 * f.stub})`; c.beginPath(); c.ellipse(X(0.5), Y(0.3), 0.21 * S, 0.12 * S, 0, 0, 7); c.fill(); c.beginPath(); c.ellipse(X(0.5), Y(0.4), 0.07 * S, 0.025 * S, 0, 0, 7); c.fill(); });
+    shade((c) => { c.fillStyle = 'rgba(30,30,40,0.25)'; for (let k = 0; k < 2500 * f.stub; k++) { const u = 0.5 + (rnd() - 0.5) * 0.42, v = 0.2 + rnd() * 0.22, dx = (u - 0.5) / 0.21, dv = (v - 0.3) / 0.12; if (v < 0.4 && dx * dx + dv * dv > 1.2) continue; if (v > 0.4 && Math.abs(u - 0.5) > 0.07) continue; c.fillRect(X(u), Y(v), 1, 1); } });
   }
   if (f.age) {
     for (let k = 0; k < 3; k++) line(K, 196, [[0.42, 0.72 + k * 0.025], [0.5, 0.725 + k * 0.025], [0.58, 0.72 + k * 0.025]], 1.2 * f.age + 0.4);
@@ -206,7 +200,12 @@ function topBase(lvl = A, col = 225, sleeve = 1) {
   rect(lvl, col, 0, 0, 0.6, 1);
   for (const [a0, a1] of [ARM_L, ARM_R]) { rect(lvl, col, a0, 1 - sleeve, a1, 1); if (sleeve < 1) rect(K, 232, a0, 0, a1, 1 - sleeve); }
   noise(0.1);
-  folds(0.05, 0.55, 0.15, 0.9, 7, 0.1);
+  folds(0.05, 0.55, 0.15, 0.9, 7, 0.17);
+  // baked PS2-style shading: lit chest, darker sides and armpits, the back a touch darker
+  shade((c) => { const gr = c.createLinearGradient(X(0), 0, X(0.6), 0); for (const [o, a] of [[0, 0.22], [0.25, 0.3], [0.38, 0.05], [0.5, 0.0], [0.62, 0.05], [0.75, 0.3], [1, 0.22]]) gr.addColorStop(o, `rgba(0,0,0,${a})`); c.fillStyle = gr; c.fillRect(X(0), Y(1), X(0.6) - X(0), Y(0) - Y(1)); });
+  radial(0.3, 0.72, 0.16, 'rgba(255,255,255,0.16)');
+  for (const u of [0.15, 0.45]) radial(u, 0.9, 0.07, 'rgba(0,0,0,0.3)');
+  for (const [a0, a1] of [ARM_L, ARM_R]) shade((c) => { const gr = c.createLinearGradient(X(a0), 0, X(a1), 0); gr.addColorStop(0, 'rgba(0,0,0,0.25)'); gr.addColorStop(0.5, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,0.25)'); c.fillStyle = gr; c.fillRect(X(a0), Y(1), X(a1) - X(a0), Y(1 - sleeve) - Y(1)); });
   for (const s of [0.15, 0.45]) stitch([[s, 0.02], [s, 0.95]]); // side seams
   darken(0, 0, 0.6, 0.04, 0.12); // hem
   // armpit / sleeve creases
@@ -275,8 +274,9 @@ function botBase(lvl = A, col = 220, to = 0) {
   rect(lvl, col, 0, 0.8, 1, 1);
   for (const l0 of [0, 0.5]) { rect(lvl, col, l0, to, l0 + 0.5, 0.8); if (to > 0) rect(K, 232, l0, 0, l0 + 0.5, to); }
   noise(0.1);
-  for (const l0 of [0, 0.5]) { folds(l0 + 0.05, l0 + 0.45, to + 0.05, 0.78, 6, 0.1, 0.4); shade((c) => { c.fillStyle = 'rgba(0,0,0,0.12)'; for (let k = 0; k < 4; k++) c.fillRect(X(l0 + 0.15 + rnd() * 0.2), Y(KNEE + 0.02 * k), S * 0.12, 2); }); }
-  for (const l0 of [0, 0.5]) for (const s of [0.25, 0.75]) stitch([[l0 + s * 0.5, to + 0.01], [l0 + s * 0.5, 0.8]]);
+  for (const l0 of [0, 0.5]) shade((c) => { const gr = c.createLinearGradient(X(l0), 0, X(l0 + 0.5), 0); gr.addColorStop(0, 'rgba(0,0,0,0.28)'); gr.addColorStop(0.5, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,0.28)'); c.fillStyle = gr; c.fillRect(X(l0), Y(0.8), X(l0 + 0.5) - X(l0), Y(to) - Y(0.8)); });
+  for (const l0 of [0, 0.5]) { folds(l0 + 0.05, l0 + 0.45, to + 0.05, 0.78, 6, 0.17, 0.4); shade((c) => { c.fillStyle = 'rgba(0,0,0,0.12)'; for (let k = 0; k < 4; k++) c.fillRect(X(l0 + 0.15 + rnd() * 0.2), Y(KNEE + 0.02 * k), S * 0.12, 2); }); }
+  // (no painted leg seams: at a distance they read as stray lines)
 }
 function belt(col = '#2a1d14', buckle = '#c9a648') { rect(F, col, 0, 0.955, 1, 0.995); rect(F, buckle, 0.48, 0.95, 0.52, 1); for (const u of [0.15, 0.35, 0.65, 0.85]) rect(F, col, u - 0.006, 0.93, u + 0.006, 1); }
 const BOT_PAINT = {
@@ -330,7 +330,7 @@ function paintHat(police) {
   }
   rect(A, 225, 0, 0, 1, 1); noise(0.12);
   for (let k = 1; k < 6; k++) stitch([[k / 6, 1], [k / 6, 0.3]]);
-  ell(B, 240, 0.5, 0.62, 0.07, 0.07); // logo patch on the front
+  ell(B, 215, 0.5, 0.6, 0.035, 0.03); // small logo patch on the front
   rect(A, 205, 0, 0.0, 1, 0.12);
 }
 function paintTrucker() { // mesh-back seed cap: solid front panel with a patch, mesh behind, coloured brim

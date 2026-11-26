@@ -18,6 +18,7 @@ import * as THREE from 'three';
 import { loadAssets } from './src/assets.js';
 import { initCharacters, makeCharacter, animateCharacter, setProp } from './src/character.js';
 import { randomLook, roleLook } from './src/people/looks.js';
+import { GANGS, gangLook } from './src/gangs.js';
 
 const Q = new URLSearchParams(location.search);
 const view = Q.get('view') || 'line', n = +(Q.get('n') || 8);
@@ -41,7 +42,9 @@ const roles = (Q.get('roles') || '').split(',').filter(Boolean);
 const people = [];
 const lookParam = Q.get('looks') ? JSON.parse(Q.get('looks')) : null;
 for (let i = 0; i < n; i++) {
-  const look = lookParam ? lookParam[i % lookParam.length] : roles.length ? roleLook(roles[i % roles.length], rnd) : randomLook(rnd);
+  const role = roles[i % roles.length];
+  const look = lookParam ? lookParam[i % lookParam.length] : role === 'flynn' ? [2, 1, 10, 1, 1, 6, 29, 0, 0, 4, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    : role === 'gang' ? gangLook(GANGS[Math.floor(rnd() * GANGS.length)], roleLook, rnd) : roles.length ? roleLook(role, rnd) : randomLook(rnd);
   const ch = makeCharacter(look);
   const sp = view === 'face' ? 0.42 : 0.95;
   if (view === 'crowd') ch.g.position.set((i % 10 - 4.5) * 1.2, 0, -Math.floor(i / 10) * 1.6); else ch.g.position.set((i - (n - 1) / 2) * sp, 0, 0);

@@ -83,9 +83,10 @@ TORSO_Z = [0.80, 0.86, 0.92, 0.985, 1.06, 1.14, 1.22, 1.30, 1.37, 1.42, 1.46, 1.
 
 def torso_at(kind, z):
     w, df, db = _torso_at(kind, z)
+    w *= 1 + 0.09 * sstep(1.12, 1.36, z)  # broad, square shoulders and chest
     if z > 1.40:  # trapezius: slope from the shoulders in to the neck
         t = sstep(1.40, 1.49, z)
-        w *= 1 - 0.38 * t
+        w *= 1 - 0.3 * t
         df *= 1 - 0.12 * t
     if z < 0.86:  # crotch: taper smoothly between the legs
         t = sstep(0.86, 0.80, z)
@@ -158,8 +159,8 @@ def ruv(region, u, v):
 
 
 # ---------------- head ----------------
-HC = Vector((0, 0.012, 1.643))  # (a touch below the head bone's old centre: a shorter neck)
-HR = (0.080, 0.097, 0.113)
+HC = Vector((0, 0.012, 1.652))
+HR = (0.0865, 0.104, 0.122)  # a head a little big for the body (PS2-era proportions)
 SEGH, RINGH = 20, 13
 
 
@@ -390,7 +391,7 @@ def build(kind):
         u0 = 0.6 if s == 'L' else 0.8
         tube(rings, NA, lambda u, v, u0=u0: ruv(2, u0 + 0.2 * u, 1 - max(0, v)), closed_end=False, rfn=arm_r)
         # hand: a chunky mitten (palm + fingers as one block, curled a little) and a thumb. Palm faces the body.
-        hm = T['hand'] * 1.15
+        hm = T['hand'] * 1.3
         hax = (dtip - c)
         L = hax.length
         hd = hax.normalized()
@@ -450,7 +451,7 @@ def build(kind):
         u0 = 0.0 if s == 'L' else 0.5
         tube(rings, NL, lambda u, v, u0=u0: ruv(3, u0 + 0.5 * u, 0.8 * (1 - max(0, v))), closed_end=True, rfn=leg_r)
         # shoe: lofted heel to toe; flat sole with a lip, rounded toe box, collar round the ankle
-        sh = [(0.075, 0.042, 0.105), (0.04, 0.056, 0.115), (-0.03, 0.058, 0.085), (-0.11, 0.057, 0.066), (-0.165, 0.048, 0.052), (-0.19, 0.03, 0.036)]
+        sh = [(0.08, 0.046, 0.108), (0.045, 0.062, 0.118), (-0.03, 0.064, 0.09), (-0.115, 0.063, 0.07), (-0.175, 0.054, 0.056), (-0.205, 0.034, 0.04)]
         NS = 8
         rows = []
         for y, w, h in sh:
@@ -947,7 +948,7 @@ def build_head_things():
     out.append(join([s, b], 'hair_manbun'))
 
     # --- beards: shells over the face surface itself ---
-    def beard(name, keepf, grow, bumps=0.0, seg=26, rings=16):
+    def beard(name, keepf, grow, bumps=0.0, seg=34, rings=30):
         def keep(phi, th):
             u, v = head_u(th), 1 - phi / math.pi
             return keepf(u - 0.5, v)
@@ -959,7 +960,7 @@ def build_head_things():
     mouth = lambda du, v: abs(du) < 0.07 and 0.345 < v < 0.395  # leave the mouth clear
     out.append(beard('full', lambda du, v: abs(du) < 0.36 and 0.18 < v < (0.5 if abs(du) > 0.2 else 0.42 if abs(du) > 0.09 else 0.415) and not mouth(du, v) and not (abs(du) < 0.03 and v > 0.405), 0.007, 0.0015))
     out.append(beard('goatee', lambda du, v: abs(du) < 0.075 and 0.2 < v < 0.415 and not mouth(du, v) and not (abs(du) < 0.025 and v > 0.402), 0.006))
-    out.append(beard('mustache', lambda du, v: abs(du) < 0.075 - (0.4 - v) * 0.5 and 0.375 < v < 0.418 and not (abs(du) < 0.012 and v > 0.405), 0.005))
+    out.append(beard('mustache', lambda du, v: abs(du) < 0.085 - (0.43 - v) * 0.4 and 0.386 < v < 0.432, 0.006))
     out.append(beard('chinstrap', lambda du, v: (0.2 < v < 0.36 and abs(du) < 0.34 and (abs(du) > 0.22 or v < 0.3)) or (abs(du) > 0.25 and abs(du) < 0.33 and v < 0.52), 0.004))
     out.append(beard('boxed', lambda du, v: abs(du) < 0.3 and 0.22 < v < (0.47 if abs(du) > 0.2 else 0.415) and not mouth(du, v) and not (abs(du) < 0.03 and v > 0.405), 0.0045, 0.001))
 
@@ -971,9 +972,9 @@ def build_head_things():
     out.append(join([crown, peak, button], 'hat_cap'))
     crown = head_dome('c', 1.13, lambda th: 0.08 if math.cos(th) < 0 else -0.08, 0.01,
                       shape=lambda p, x, y, z: p * (1 + 0.03 * sstep(0.0, 0.3, z) * 0))
-    cuff = tube_obj('cf', [HC + Vector((0, 0.012, 0.0)), HC + Vector((0, 0.013, 0.035))], [(0.1, 0.117), (0.1, 0.117)], 6, seg=12, cap=False, uvx=(0.0, 1.0))
+    cuff = tube_obj('cf', [HC + Vector((0, 0.012, 0.0)), HC + Vector((0, 0.013, 0.035))], [(0.108, 0.126), (0.108, 0.126)], 6, seg=12, cap=False, uvx=(0.0, 1.0))
     out.append(join([crown, cuff], 'hat_beanie'))
-    band = tube_obj('b', [HC + Vector((0, 0.0, 0.03)), HC + Vector((0, 0.005, 0.09)), HC + Vector((0, 0.012, 0.135))], [(0.09, 0.106), (0.096, 0.112), (0.112, 0.128)], 6, seg=12)
+    band = tube_obj('b', [HC + Vector((0, 0.0, 0.03)), HC + Vector((0, 0.005, 0.09)), HC + Vector((0, 0.012, 0.135))], [(0.098, 0.115), (0.104, 0.121), (0.12, 0.138)], 6, seg=12)
     peak = brim('p', 0, -0.06, HC.z + 0.042, 0.088, 0.122, math.pi * 0.64, math.pi * 1.36, thick=0.006, droop=0.012, inner=0.6, v=0.05)
     out.append(join([band, peak], 'hat_police'))
     crown = head_dome('c', 1.22, lambda th: 0.06, 0.015, shape=lambda p, x, y, z: p + Vector((0, 0, 0.012 * g1(x, 0.25) * max(0, z))))
