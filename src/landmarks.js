@@ -14,6 +14,7 @@ import { mat } from './character.js';
 import { textTexture } from './util.js';
 import { loadLazy, dropLazy } from './assets.js';
 import { addHall, removeHall } from './interiors.js';
+import { ROOMS } from './landmark-rooms.js';
 import { onRegion } from './regions/index.js';
 
 let scene, ctx;
@@ -157,7 +158,7 @@ MODELS.push(
   // Moline / Rock Island
   { file: 'pavilion', x: 4980, z: 1778, ground: true, clear: [[4980, 1778, 20, 12]], solid: roomWalls(4980.05, 1778.1, 0.4545, 49, 32.2, 12, [['n', -3, 3]]),
     halls: [{ name: 'John Deere Pavilion', kind: 'hall', x: 4980.05, z: 1778.1, w: 49, d: 32.2, rot: 0.4545, ly: 9, light: [0xffffff, 16] }] },
-  { file: 'arena', x: 4770, z: 1725, ground: true, load: 1000, clear: [[4770, 1725, 40, 40]], solid: [...BOXES_ARENA, [4832, 1740, 7, 7, 12]] },
+  { file: 'arena', x: 4770, z: 1725, ground: true, load: 1000, clear: [[4770, 1725, 40, 40]], solid: [] }, // walls: arena_int below
   { file: 'oldmain', x: 2333, z: 2126.5, ground: true, clear: [[2333, 2126.5, 10, 6]], solid: [[2333, 2126.5, 27, 12, 20]] },
   { file: 'circa21', x: 337, z: 1545, ground: true, clear: [[337, 1545, 10, 15], [315, 1533, 6, 8]], solid: [[337, 1545, 13.5, 22.5, 18], [315.5, 1533, 8.2, 11, 9]] },
   { file: 'deerehq', x: 12637, z: 5202, ground: true, load: 900, clear: [[12637, 5202, 40, 12], [12755, 5195, 15, 20]], solid: [[12637.2, 5202.5, 51.5, 17.2, 30], ...BOXES_DEERE] },
@@ -169,6 +170,23 @@ MODELS.push(
   // Quad Cities International Airport: terminal + concourses, the tower and the Elliott hangar
   { file: 'mli', x: 5930, z: 7740, ground: true, load: 1500, clear: [[5930, 7735, 60, 60], [5945, 7855, 20, 15], [5835, 7780, 30, 25]], solid: [...BOXES_MLI] },
   { file: 'mlitower', x: 5698, z: 8971, ground: true, load: 1500, clear: [[5698, 8971, 5, 5], [5904, 8990, 30, 60]], solid: [[5698, 8971, 5.2, 5.2, 39], [5904, 8990, 35.5, 65.5, 20]] },
+);
+// Roadmap-5 interiors (assets/src/landmarks_int.py -> <file>_int.glb, src/landmark-rooms.js): built on the same
+// ground height as the exterior, they bring the building's walls (with its real doors open), the people inside and the
+// counters. halls: [{name, x, z, w, d, rot, up, ly, light}] (up: the floor above the anchor's ground); each hall gets the
+// crowd and counters standing inside it.
+function RINT(file, x, z, halls, load = 280) {
+  const R = ROOMS[file] || { solid: [], crowd: [], spots: [] }, hs = halls.map((h) => ({ kind: 'hall', rot: 0, ...h, crowd: [], spots: [] }));
+  const owner = (px, pz) => hs.find((h) => { const dx = px - h.x, dz = pz - h.z, c = Math.cos(h.rot), s = Math.sin(h.rot); return Math.abs(dx * c - dz * s) < h.w / 2 && Math.abs(dx * s + dz * c) < h.d / 2; });
+  for (const p of R.crowd) owner(p[0], p[1])?.crowd.push(p);
+  for (const p of R.spots) owner(p[0], p[1])?.spots.push(p);
+  for (const h of hs) { if (!h.crowd.length) h.crowd = null; if (!h.spots.length) h.spots = null; }
+  return { file: file + '_int', x, z, ground: true, load, clear: [], solid: R.solid, halls: hs };
+}
+MODELS.push(
+  // Vibrant Arena: the rotunda lobby, the ring concourse and the bowl
+  RINT('arena', 4770, 1725, [{ name: 'Vibrant Arena', x: 4780, z: 1725, w: 100, d: 100, up: 0.5, ly: 16, light: [0xfff2dc, 30] },
+    { name: 'Vibrant Arena', x: 4832, z: 1740, w: 16, d: 16, up: 0.5, ly: 9, light: [0xfff2dc, 10] }], 320),
 );
 const LOAD = 700, DROP = 900;
 for (const L of MODELS) for (const [x, z, hw, hd] of L.clear) lots.extra.push({ x, z, fx: 0, fz: 1, hw, hd });
@@ -211,7 +229,7 @@ function placeModel(L, g) {
     else root.add(o); // moving parts
   }
   scene.add(root); L.obj = root;
-  L.rooms = L.halls?.map((h) => addHall({ ...h, y: L.y + 0.02 }));
+  L.rooms = L.halls?.map((h) => addHall({ ...h, y: L.y + (h.up ?? 0.02) }));
   L.onLoad?.(root);
 }
 let modelT = 0;

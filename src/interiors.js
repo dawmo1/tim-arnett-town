@@ -294,12 +294,15 @@ function drop(R) {
 // Landmark halls (landmarks.js): rooms modelled inside a landmark's GLB, added and removed with the model.
 // Standing inside one makes it the room you're in (flat floor at h.y, the pooled light, out of police sight).
 // A 'casino' hall also gets the casino floor (tables, slots, bar, cage) centred on h.fx/fz.
-const halls = new Set();
+// A plain hall can also carry spots ([x, z, r, act, title, menu]: E opens something there, venues.js) and a crowd
+// ([x, z, heading, pose, up, role]: townspeople venues.js puts there while you're near; up = floor height above h.y).
+export const halls = new Set();
 export function addHall(h) {
   const store = { name: h.name, kind: h.kind, x: h.x, z: h.z, cooldown: 0, progress: 0 };
   const R = h.kind === 'casino' ? buildRoom(store, h.fx ?? h.x, h.y, h.fz ?? h.z, h.rot, false, true)
-    : { kind: h.kind, store, group: null, owner: null, people: [], spots: null, seats: [] };
-  Object.assign(R, { hall: true, x: h.x, y: h.y, z: h.z, w: h.w, d: h.d, cs: Math.cos(h.rot), sn: Math.sin(h.rot), lx: h.fx ?? h.x, lz: h.fz ?? h.z, ly: h.ly ?? 3.8, light: h.light });
+    : { kind: h.kind, store, group: null, owner: null, people: [], seats: [],
+      spots: h.spots ? h.spots.map(([x, z, r, act, title, menu]) => ({ x, z, r, act, title, menu })) : null };
+  Object.assign(R, { hall: true, x: h.x, y: h.y, z: h.z, w: h.w, d: h.d, cs: Math.cos(h.rot), sn: Math.sin(h.rot), lx: h.fx ?? h.x, lz: h.fz ?? h.z, ly: h.ly ?? 3.8, light: h.light, crowd: h.crowd || null });
   halls.add(R);
   return R;
 }

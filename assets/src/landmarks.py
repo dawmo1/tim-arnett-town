@@ -3294,12 +3294,18 @@ def arena(render=True):
     char, purple, white, roofc, glass = lin('#6b6e73'), lin('#5b2c83'), lin('#e8e8e8'), lin('#2c2f36'), lin('#3a5566')
     K = Kit(611)
     H = 24.0
+    rx, ry = G(4832, 1740)
     for i, L, Ln, mid in sides(P):
-        K.quad(L, 0, Ln, -3, H, 0, char)
-        K.quad(L, 0, Ln, 4.0, 5.2, 0.03, purple)
+        # up to the rotunda's height the wall stops where it runs inside the glass drum (the lobby opens into the concourse)
+        cut = [u for u in [k * Ln / 40 for k in range(41)] if math.hypot(L(u, 0, 0)[0] - rx, L(u, 0, 0)[1] - ry) < 8.0]
+        spans = [(0, Ln)] if not cut else [s for s in ((0, min(cut)), (max(cut), Ln)) if s[1] - s[0] > 0.05]
+        for a, b in spans:
+            K.quad(L, a, b, -3, 12.0, 0, char)
+            K.quad(L, a, b, 4.0, 5.2, 0.03, purple)
+            if b - a > 6:
+                K.quad(L, a + 0.5, b - 0.5, 0.4, 3.6, 0.04, glass, LIT)
+        K.quad(L, 0, Ln, 12.0, H, 0, char)
         K.quad(L, 0, Ln, H - 3.0, H, 0.05, white)
-        if Ln > 6:
-            K.quad(L, 0.5, Ln - 0.5, 0.4, 3.6, 0.04, glass, LIT)
     K.prism(P, H - 0.1, H, roofc, sides=False)
     # the bowl's roof rises in a shallow dome over the round part
     cx, cy = G(4780, 1725)
@@ -3310,10 +3316,17 @@ def arena(render=True):
     rooftop_junk(K, *G(4725, 1725), H, K.rnd, 4, 10)
     # glass rotunda entrance (east) with a dark cone roof and the name on the rim facing it
     rx, ry = G(4832, 1740)
-    K.cyl(rx, ry, 8, -3, 12, glass, LIT, 12)
+    for k in range(12):  # the drum, with the doors to the plaza in its east bay (arena_int is behind them)
+        a0, a1 = -math.pi / 12 + k * math.pi / 6, math.pi / 12 + k * math.pi / 6
+        L, Ln = frame((rx + math.cos(a0) * 8, ry + math.sin(a0) * 8), (rx + math.cos(a1) * 8, ry + math.sin(a1) * 8))
+        K.quad(L, 0, Ln, 3.9 if k == 0 else -3, 12, 0, glass, LIT)
+        if k == 0:
+            K.quad(L, 0, Ln, -3, 0.5, 0, lin('#555555'))
+            K.obox(L, -0.2, Ln + 0.2, 3.4, 3.9, 0, 1.6, white, BODY, ())  # canopy over the doors
+    K.cyl(rx, ry, 8, 12, 12.01, roofc, BODY, 12, a0=-math.pi / 12)
     K.cyl(rx, ry, 8.4, 12, 18, roofc, BODY, 12, r1=1.0)
     for k in range(12):
-        a = k * math.pi / 6
+        a = k * math.pi / 6 + math.pi / 12
         K.box(rx + math.cos(a) * 8.05 - 0.15, rx + math.cos(a) * 8.05 + 0.15, ry + math.sin(a) * 8.05 - 0.15, ry + math.sin(a) * 8.05 + 0.15, 0, 12, white)
     for (gx, gz) in ((4806, 1677), (4813, 1764), (4776, 1779), (4790, 1665)):
         sx, sy = G(gx, gz)
@@ -3850,3 +3863,7 @@ def mlitower(render=True):
 
 
 B['mlitower'] = mlitower
+
+
+# roadmap-5 interiors (Moline, Rock Island, Arsenal, airport, NorthPark, Black Hawk): their own file
+exec(open(ROOT + 'assets/src/landmarks_int.py').read(), globals())
