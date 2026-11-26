@@ -152,7 +152,7 @@ def xf(p, c, R):
 
 def rbox(M, c, size, R, m, part, seg=(6, 4), e=0.35, front_m=None):
     """rounded box (superellipsoid): size = (sx, sy, sz) along (r, u, n). front_m paints the +n face."""
-    nu, nv = min(seg[0], 3) * 2, min(seg[1], 2) * 2
+    nu, nv = seg[0] * 2, seg[1] * 2
     sx, sy, sz = size[0] / 2, size[1] / 2, size[2] / 2
     sgn = lambda a: (1 if a >= 0 else -1)
     pw = lambda a, k: sgn(a) * abs(a) ** k
@@ -195,7 +195,6 @@ def box(M, c, size, R, m, part, mats=None):
 
 
 def cyl(M, p0, p1, r, n, m, part, caps=True, r1=None, cap_m=None):
-    n = min(n, 8)
     p0, p1 = Vector(p0), Vector(p1)
     ax = (p1 - p0)
     R = frame_from(ax)
@@ -212,7 +211,6 @@ def cyl(M, p0, p1, r, n, m, part, caps=True, r1=None, cap_m=None):
 
 def tube(M, pts, r, n, m, part, closed=False):
     """sweep a circle of radius r along pts"""
-    n = min(n, 5)
     rings = []
     N = len(pts)
     for i, p in enumerate(pts):
@@ -269,7 +267,7 @@ class Surf:
         return loc, nrm
 
 
-def patch(M, S, corners, d, nu, nv, off, m, part, wall=0.0, uvbox=None, flipu=False, graze=0.38):
+def patch(M, S, corners, d, nu, nv, off, m, part, wall=0.0, uvbox=None, flipu=False, graze=0.2):
     """A lens / panel conforming to the body: grid over the quad `corners` (c00, c10, c11, c01), ray-cast
     along d onto the surface, lifted `off` along the surface normal. `wall` adds side walls down into
     the body so the patch reads as a solid piece. Returns the centre hit (for lamp empties)."""
@@ -410,8 +408,8 @@ def half_w(S, t):
 
 
 NS = 14  # points per half section (hi)
-HI_PTS = [0, 2, 3, 4, 6, 8, 10, 11, 13]
-LO_PTS = [0, 2, 6, 10, 13]
+HI_PTS = list(range(NS))
+LO_PTS = [0, 2, 4, 6, 8, 10, 12, 13]
 
 
 def section(S, t):
@@ -421,7 +419,7 @@ def section(S, t):
     sh = zb - curve(S.get('shdrop', 0.1), t)
     tb = curve(S.get('tumble', 0.05), t)
     rr = min(S.get('rr', 0.06), (zb - sh) * 0.6)
-    cr = S.get('crown', 0.015)
+    cr = S.get('crown', 0.025)
     xs = hw - tb - rr
     pts = [['under', 0, zs + 0.03], ['under', hw - 0.12, zs], ['rocker', hw - 0.04, zs + 0.02], ['side', hw - 0.014, zs + 0.09],
            ['side', hw - 0.004, lerp(zs + 0.09, sh, 0.5)], ['side', hw, sh - 0.035], ['upper', hw - 0.002, sh],
@@ -459,16 +457,16 @@ def bulge(S, t, x, z, hw):
 
 def stations(S, lo):
     L = S['L']
-    step = 0.8 if lo else S.get('step', 0.42)
+    step = 0.6 if lo else S.get('step', 0.2)
     ts = set(round(i / max(1, round(L / step)), 5) for i in range(int(round(L / step)) + 1))
     Ra = S['r'] + S.get('arch_gap', 0.055)
-    na = 4 if lo else 6
+    na = 4 if lo else 10
     for ta in axles(S):
         for i in range(na + 1):
             ts.add(round(t_of(S, y_of(S, ta) - Ra + 2 * Ra * i / na), 5))
         ts.add(round(t_of(S, y_of(S, ta) - Ra - 0.06), 5))
         ts.add(round(t_of(S, y_of(S, ta) + Ra + 0.06), 5))
-    ne = 1 if lo else 2
+    ne = 2 if lo else 4
     for i in range(1, ne + 1):
         ts.add(round(0.16 / L * i / ne, 5))
         ts.add(round(1 - 0.16 / L * i / ne, 5))
@@ -652,7 +650,7 @@ def gstations(S, lo):
     C = S['cabin']
     a, c = C['a'], C['c']
     L = S['L']
-    step = 0.7 if lo else S.get('gstep', 0.3)
+    step = 0.5 if lo else S.get('gstep', 0.12)
     n = max(2, int(round((c - a) * L / step)))
     ts = set(round(a + (c - a) * i / n, 5) for i in range(n + 1))
     for k in ('r1', 'r2'):
@@ -666,7 +664,7 @@ def gstations(S, lo):
         sw = S.get('seam', 0.01) / L
         for d0, d1 in S['doors']:
             ts.update([d0, d0 + sw, d1, d1 + sw])
-        for k in range(1, 2):  # windshield / rear glass rounding into the roof
+        for k in range(1, 4):  # windshield / rear glass rounding into the roof
             ts.add(C['r1'] - (C['r1'] - a) * 0.12 * k)
             ts.add(C['r2'] + (c - C['r2']) * 0.12 * k)
     else:
@@ -737,7 +735,7 @@ def glass_part(S, t, j, side, lo):
 
 def build_glass(M, S, lo):
     ts = gstations(S, lo)
-    pick = [0, 2, 3, 6, 8] if lo else [0, 2, 3, 5, 6, 8]
+    pick = [0, 2, 3, 5, 6, 8] if lo else list(range(GN))
     rings = []
     for t in ts:
         pts = gsection(S, t)
@@ -755,8 +753,8 @@ def build_glass(M, S, lo):
             B = l1 if side > 0 else r1 + [l1[-1]]
             for j in range(n - 1):
                 jj = jmap[j]
-                # bands: belt..glass bottom, side glass, frame..rail, (roof edge), roof
-                jj = {0: 1, 2: 2, 3: 4, 5: 5, 6: 6}[jmap[j]]
+                if lo:  # lo bands: belt..glass bottom, side glass, frame..rail, roof edge, roof
+                    jj = {0: 1, 2: 2, 3: 4, 5: 5, 6: 6}[jmap[j]]
                 r = glass_part(S, tm, jj, side, lo)
                 if r is None:
                     continue
@@ -775,24 +773,23 @@ def build_glass(M, S, lo):
 
 # ---------------------------------------------------------------- details
 def lamps_and_trim(M, S, Sf, lo):
-    """PS2-era details: flat lamp lenses, a grille panel with a couple of bars, plates. Returns lamp empties."""
+    """headlights, tail lights, grille, plates, intakes, badges... returns lamp empties"""
     W = S['W']
     hw = W / 2
     yF, yR = y_of(S, 0) - 0.2, y_of(S, 1) + 0.2
     out = {}
-    nu, nv = (2, 1) if lo else (3, 2)
-    off = 0.006 if lo else 0.008
+    nu, nv = (3, 2) if lo else (6, 3)
     H = S['head']
     hp = H.get('part', 'body')
     for sx in (1, -1):
-        if H.get('round'):  # classic round lamps in a chrome ring
+        if H.get('round'):  # classic round lamps: chrome bezel + lens
             cs = []
             for x, z, rr in H['round']:
                 c = Vector((sx * x, yF, z))
                 dd = Vector((-sx * H.get('wrap', 0.0), 1, 0)).normalized()
                 if not lo:
-                    disc_patch(M, Sf, c, dd, rr + 0.014, 8, 1, 0.005, H.get('housing', 'chrome'), hp)
-                disc_patch(M, Sf, c, dd, rr, 8 if not lo else 6, 1, off + 0.003, 'lamp_head', hp)
+                    disc_patch(M, Sf, c, dd, rr + 0.014, 12, 1, 0.005, H.get('housing', 'chrome'), hp, wall=0.012)
+                disc_patch(M, Sf, c, dd, rr, 12 if not lo else 6, 2 if not lo else 1, 0.01 if not lo else 0.006, 'lamp_head', hp)
                 h = Sf.hit(c, dd)
                 if h:
                     cs.append(h[0] - dd * 0.03)
@@ -802,51 +799,74 @@ def lamps_and_trim(M, S, Sf, lo):
         x0, x1, z0, z1 = H['x0'], H['x1'], H['z0'], H['z1']
         sl = H.get('slant', 0.0)
         d = Vector((-sx * H.get('wrap', 0.25), 1, H.get('down', 0.0))).normalized()
-        if not lo:  # dark bezel
-            g = 0.015
+        cs = [(sx * x0, yF, z0 + sl), (sx * x1, yF, z0), (sx * x1, yF, z1), (sx * x0, yF, z1 + sl * 0.6)]
+        if not lo:  # housing (black/chrome bezel) slightly larger, lens on top
+            g = 0.012
             patch(M, Sf, [(sx * (x0 - g), yF, z0 + sl - g), (sx * (x1 + g), yF, z0 - g), (sx * (x1 + g), yF, z1 + g), (sx * (x0 - g), yF, z1 + sl * 0.6 + g)],
-                  d, nu, nv, 0.004, H.get('housing', 'chrome'), hp)
-        c = patch(M, Sf, [(sx * x0, yF, z0 + sl), (sx * x1, yF, z0), (sx * x1, yF, z1), (sx * x0, yF, z1 + sl * 0.6)], d, nu, nv, off, 'lamp_head', hp)
+                  d, nu, nv, 0.004, H.get('housing', 'trim'), hp, wall=True)
+        c = patch(M, Sf, cs, d, nu, nv, 0.009 if not lo else 0.006, 'lamp_head', hp, wall=not lo)
         if c:
             out['lamp_head_' + ('L' if sx > 0 else 'R')] = c[0] + c[1] * 0.02
-        if not lo and H.get('amber', True):  # corner indicator
-            patch(M, Sf, [(sx * (x1 + 0.02), yF, z0), (sx * (x1 + 0.09), yF, z0), (sx * (x1 + 0.09), yF, z1), (sx * (x1 + 0.02), yF, z1)],
-                  Vector((-sx * 0.9, 1, 0)).normalized(), 1, 1, off, 'lamp_amber', hp, graze=0.2)
+        if not lo:
+            if H.get('drl', True):  # LED strip
+                pz = z0 + (z1 - z0) * 0.2
+                patch(M, Sf, [(sx * x0, yF, pz + sl * 0.9), (sx * x1, yF, pz - 0.01), (sx * x1, yF, pz + 0.012), (sx * x0, yF, pz + 0.012 + sl * 0.9)], d, 6, 1, 0.012, 'lamp_rev', hp)
+            for k in range(H.get('proj', 2)):  # projectors
+                px = lerp(x0, x1, (k + 0.5) / max(1, H.get('proj', 2)) * 0.8 + 0.1)
+                pc = Vector((sx * px, yF, (z0 + z1) / 2 + 0.01))
+                pr = min(0.04, (z1 - z0) * 0.32)
+                disc_patch(M, Sf, pc, d, pr, 10, 1, 0.012, 'chrome', hp)
+                disc_patch(M, Sf, pc, d, pr * 0.6, 8, 1, 0.014, 'lamp_head', hp)
+            # side marker / indicator repeater on the front fender
+            mk = place(Sf, (sx * (hw + 0.4), y_of(S, axles(S)[0]) - S['r'] - 0.12, curve(S['belt'], 0.1) - 0.12), (-sx, 0, 0))
+            if mk:
+                rbox(M, mk[0] + mk[1][2] * 0.002, (0.07, 0.025, 0.012), mk[1], 'lamp_amber', 'body', seg=(3, 2))
     T = S.get('tail') or {}
     tp = T.get('part', 'body')
     for sx in ((1, -1) if T else ()):
         x0, x1, z0, z1 = T['x0'], T['x1'], T['z0'], T['z1']
         d = Vector((-sx * T.get('wrap', 0.35), -1, 0)).normalized()
-        c = patch(M, Sf, [(sx * x0, yR, z0), (sx * x1, yR, z0 + T.get('slant', 0)), (sx * x1, yR, z1), (sx * x0, yR, z1)], d, nu, nv, off, 'lamp_tail', tp)
+        cs = [(sx * x0, yR, z0), (sx * x1, yR, z0 + T.get('slant', 0)), (sx * x1, yR, z1), (sx * x0, yR, z1)]
+        if not lo:
+            g = 0.008
+            patch(M, Sf, [(sx * (x0 - g), yR, z0 - g), (sx * (x1 + g), yR, z0 - g + T.get('slant', 0)), (sx * (x1 + g), yR, z1 + g), (sx * (x0 - g), yR, z1 + g)], d, nu, nv, 0.004, 'trim', tp, wall=True)
+        c = patch(M, Sf, cs, d, nu, nv, 0.009 if not lo else 0.006, 'lamp_tail', tp, wall=not lo)
         if c:
             out['lamp_tail_' + ('L' if sx > 0 else 'R')] = c[0] + c[1] * 0.02
-        if not lo:  # reverse lamp, inboard
-            rz0, rz1 = lerp(z0, z1, 0.15), lerp(z0, z1, 0.55)
-            patch(M, Sf, [(sx * (x0 - 0.09), yR, rz0), (sx * (x0 - 0.01), yR, rz0), (sx * (x0 - 0.01), yR, rz1), (sx * (x0 - 0.09), yR, rz1)], d, 1, 1, off, 'lamp_rev', tp)
+        if not lo:
+            rz = lerp(z0, z1, 0.3)  # reverse lamp, inboard
+            patch(M, Sf, [(sx * (x0 + 0.01), yR, rz - 0.02), (sx * lerp(x0, x1, 0.35), yR, rz - 0.02), (sx * lerp(x0, x1, 0.35), yR, rz + 0.025), (sx * (x0 + 0.01), yR, rz + 0.025)], d, 3, 1, 0.012, 'lamp_rev', tp)
+            if T.get('bar'):  # LED bar across the inner edge
+                patch(M, Sf, [(sx * x0, yR, z1 - 0.025), (sx * x1, yR, z1 - 0.025), (sx * x1, yR, z1 - 0.012), (sx * x0, yR, z1 - 0.012)], d, 6, 1, 0.013, 'trim', tp)
     if T and T.get('centre'):  # light bar across the tail between the lamps
         x0, z0, z1 = T['x0'], T['z1'] - 0.05, T['z1'] - 0.015
-        patch(M, Sf, [(x0, yR, z0), (-x0, yR, z0), (-x0, yR, z1), (x0, yR, z1)], (0, -1, 0), 2, 1, off, 'lamp_tail', tp)
+        patch(M, Sf, [(x0, yR, z0), (-x0, yR, z0), (-x0, yR, z1), (x0, yR, z1)], (0, -1, 0), 6 if not lo else 1, 1, 0.009, 'lamp_tail', tp)
     G = S.get('grille')
     if G:
-        gz0, gz1, gw, tp_ = G['z0'], G['z1'], G['w'], G.get('taper', 0)
+        gz0, gz1, gw = G['z0'], G['z1'], G['w']
         part = G.get('part', 'body')
+        tpg = G.get('taper', 0)
         if not lo:
-            e = 0.02
-            patch(M, Sf, [(gw + e, yF, gz0 - e), (-gw - e, yF, gz0 - e), (-gw - e + tp_, yF, gz1 + e), (gw + e - tp_, yF, gz1 + e)], (0, 1, 0), 3, 1, 0.004, G.get('surround', 'chrome'), part)
-        patch(M, Sf, [(gw, yF, gz0), (-gw, yF, gz0), (-gw + tp_, yF, gz1), (gw - tp_, yF, gz1)], (0, 1, 0), 3 if not lo else 1, 1, off, 'trim', part)
+            patch(M, Sf, [(gw + 0.015, yF, gz0 - 0.015), (-gw - 0.015, yF, gz0 - 0.015), (-gw - 0.015 + tpg, yF, gz1 + 0.015), (gw + 0.015 - tpg, yF, gz1 + 0.015)],
+                  (0, 1, 0), 8, 3, 0.004, G.get('surround', 'chrome'), part, wall=True)
+        patch(M, Sf, [(gw, yF, gz0), (-gw, yF, gz0), (-gw + tpg, yF, gz1), (gw - tpg, yF, gz1)], (0, 1, 0), 8 if not lo else 2, 3 if not lo else 1, 0.007 if not lo else 0.005, 'trim', part)
         if not lo:
-            nb = min(3, G.get('bars', 2))
+            nb = G.get('bars', 3)
             for k in range(nb):
                 z = lerp(gz0, gz1, (k + 1) / (nb + 1))
-                t = tp_ * (z - gz0) / max(0.01, gz1 - gz0)
-                patch(M, Sf, [(gw - t - 0.01, yF, z - 0.012), (-gw + t + 0.01, yF, z - 0.012), (-gw + t + 0.01, yF, z + 0.012), (gw - t - 0.01, yF, z + 0.012)], (0, 1, 0), 3, 1, 0.012, G.get('bar_m', 'chrome'), part)
+                t = tpg * (z - gz0) / max(0.01, gz1 - gz0)
+                patch(M, Sf, [(gw - t - 0.01, yF, z - 0.007), (-gw + t + 0.01, yF, z - 0.007), (-gw + t + 0.01, yF, z + 0.007), (gw - t - 0.01, yF, z + 0.007)], (0, 1, 0), 8, 1, 0.012, G.get('bar_m', 'chrome'), part)
+            disc_patch(M, Sf, Vector((0, yF, (gz0 + gz1) / 2)), (0, 1, 0), 0.035, 12, 1, 0.016, 'chrome', part)  # badge
     I = S.get('intake')
     if I:
-        patch(M, Sf, [(I['w'], yF, I['z0']), (-I['w'], yF, I['z0']), (-I['w'] + 0.03, yF, I['z1']), (I['w'] - 0.03, yF, I['z1'])], (0, 1, 0), 3 if not lo else 1, 1, 0.004, 'trim', 'bumpF')
+        patch(M, Sf, [(I['w'], yF, I['z0']), (-I['w'], yF, I['z0']), (-I['w'] + 0.03, yF, I['z1']), (I['w'] - 0.03, yF, I['z1'])], (0, 1, 0), 8 if not lo else 2, 2 if not lo else 1, 0.004, 'trim', 'bumpF', wall='trim' if not lo else False)
         if not lo and I.get('fog'):
             for sx in (1, -1):
-                disc_patch(M, Sf, Vector((sx * I['fog'][0], yF, I['fog'][1])), (0, 1, 0), 0.04, 6, 1, 0.008, 'lamp_head', 'bumpF')
-    # number plates: flat, UV mapped to the decal atlas (text reads left to right)
+                disc_patch(M, Sf, Vector((sx * I['fog'][0], yF, I['fog'][1])), (0, 1, 0), 0.04, 10, 1, 0.007, 'lamp_head', 'bumpF', wall=0.01)
+    if not lo and T:  # rear diffuser / lower valance
+        bz = curve(S['sill'], 1) + 0.04
+        patch(M, Sf, [(hw * 0.7, yR, bz), (-hw * 0.7, yR, bz), (-hw * 0.7, yR, bz + 0.09), (hw * 0.7, yR, bz + 0.09)], (0, -1, 0), 8, 1, 0.003, 'trim', 'bumpR')
+    # number plates (flat, UV mapped to the decal atlas; text reads left to right) in a dark frame
     for front, P in ((True, S.get('plateF')), (False, S.get('plateR'))):
         if not P:
             continue
@@ -855,8 +875,18 @@ def lamps_and_trim(M, S, Sf, lo):
         if not h:
             continue
         n = Vector((0, -1 if front else 1, 0))
+        c = h[0] + n * 0.012
         R = frame_from(n)  # r is the viewer's right when looking at the face
-        panel(M, h[0] + n * 0.01, R, 0.305, 0.152, 'plate', part, uv=(0.0, 0.0, 0.5, 0.25))
+        pw, ph = 0.305, 0.152
+        vs = [M.vert(c + R[0] * a * pw / 2 + R[1] * b * ph / 2) for (a, b) in ((-1, -1), (1, -1), (1, 1), (-1, 1))]
+        M.face(vs, 'plate', part, [(0.5 * (0.5 + 0.5 * a), 0.25 * (0.5 + 0.5 * b)) for (a, b) in ((-1, -1), (1, -1), (1, 1), (-1, 1))])
+        if not lo:
+            bk = [M.vert(c - n * 0.014 + R[0] * a * (pw / 2 + 0.012) + R[1] * b * (ph / 2 + 0.012)) for (a, b) in ((-1, -1), (1, -1), (1, 1), (-1, 1))]
+            fr = [M.vert(c - n * 0.001 + R[0] * a * (pw / 2 + 0.012) + R[1] * b * (ph / 2 + 0.012)) for (a, b) in ((-1, -1), (1, -1), (1, 1), (-1, 1))]
+            for k in range(4):
+                k2 = (k + 1) % 4
+                M.quad(fr[k], vs[k], vs[k2], fr[k2], 'trim', part)
+                M.quad(bk[k], fr[k], fr[k2], bk[k2], 'trim', part)
     return out
 
 
@@ -864,17 +894,23 @@ def side_details(M, S, Sf, lo):
     L, W = S['L'], S['W']
     hw = W / 2
     C = S['cabin']
-    k = S.get('mirror_k', 1.0)
-    for sx in (1, -1):  # boxy mirrors on the doors at the A-pillar base
+    for sx in (1, -1):  # mirrors on the doors at the A-pillar base
         dpart = 'doorL' if sx > 0 else 'doorR'
         tm = C['a'] + (C['r1'] - C['a']) * 0.42
         zb = curve(S['belt'], tm)
         h = Sf.hit((sx * (hw + 0.5), y_of(S, tm), zb + 0.06), (-sx, 0, 0))
         base = h[0] if h else Vector((sx * (half_w(S, tm) - 0.06), y_of(S, tm), zb + 0.05))
-        mc = base + Vector((sx * 0.12 * k, 0.03, 0.04 * k))
-        box(M, mc, (0.18 * k, 0.12 * k, 0.09), RF, S.get('mirror_m', 'paint'), dpart, mats={'-n': 'chrome'} if not lo else None)
-        if not lo:
-            box(M, base + Vector((sx * 0.035, 0.03, 0.02)), (0.07, 0.05, 0.04), RF, 'trim', dpart)
+        k = S.get('mirror_k', 1.0)
+        mc = base + Vector((sx * 0.13, 0.03, 0.03)) * k
+        mw = 0.2 * k
+        R = (Vector((sx, 0, 0)), Vector((0, 0, 1)), Vector((0, -1, 0)))
+        if lo:
+            box(M, mc, (mw, 0.1, 0.08), RF, S.get('mirror_m', 'paint'), dpart)
+            continue
+        rbox(M, mc, (mw, 0.115, 0.11), RF, S.get('mirror_m', 'paint'), dpart, seg=(5, 3), e=0.45)
+        box(M, mc + Vector((0, 0.052, 0)), (mw * 0.8, 0.09, 0.004), RB, 'chrome', dpart)  # mirror glass
+        box(M, base + Vector((sx * 0.04, 0.02, 0.0)), (0.09, 0.045, 0.06), RF, 'trim', dpart)
+        box(M, mc + Vector((sx * mw * 0.32, -0.04, -0.035)), (mw * 0.3, 0.012, 0.012), RF, 'lamp_amber', dpart)
     if lo:
         return
     for sx in (1, -1):  # door handles
@@ -884,16 +920,23 @@ def side_details(M, S, Sf, lo):
             sh = curve(S['belt'], tt) - curve(S.get('shdrop', 0.1), tt) - S.get('handle_dz', 0.04)
             p = place(Sf, (sx * (hw + 0.5), y_of(S, tt), sh), (-sx, 0, 0))
             if p:
-                box(M, p[0] + p[1][2] * 0.008, (0.13, 0.03, 0.016), p[1], S.get('handle_m', 'chrome'), part)
-    if not S.get('open') and not S.get('noantenna'):  # whip antenna on the rear fender
-        t = min(0.97, C['c'] + 0.04)
-        x = -(half_w(S, t) - 0.15)
-        z = curve(S['belt'], t)
-        cyl(M, (x, y_of(S, t), z), (x, y_of(S, t) + 0.05, z + 0.75), 0.005, 3, 'trim', 'body', caps=False)
-    for x, rr in S.get('exhaust', [(-0.55, 0.035)])[:2]:  # tailpipes
-        z = curve(S['sill'], 0.99) + 0.05
-        yb = y_of(S, 1)
-        cyl(M, (x, yb - 0.25, z), (x, yb + 0.03, z), rr, 6, 'chrome', 'bumpR', cap_m='trim')
+                rbox(M, p[0] + p[1][2] * 0.008, (0.14, 0.03, 0.022), p[1], S.get('handle_m', 'paint'), part, seg=(4, 2), e=0.4)
+                rbox(M, p[0] + p[1][2] * 0.002, (0.17, 0.045, 0.01), p[1], 'trim', part, seg=(4, 2), e=0.4)
+    a = C['a']  # wipers
+    zc = curve(S['belt'], a + 0.01)
+    for x in (0.42, -0.12):
+        y = y_of(S, a) + 0.08
+        tube(M, [(x, y, zc + 0.03), (x - 0.5, y + 0.1, zc + 0.06)], 0.008, 4, 'trim', 'cabin')
+    if not S.get('open') and not S.get('noantenna'):  # shark-fin antenna
+        z = C['roof'] + C.get('crown', 0.045)
+        rbox(M, (0, y_of(S, C['r2'] - 0.03), z + 0.025), (0.06, 0.06, 0.16), RF, S.get('fin_m', 'trim'), 'cabin', seg=(3, 2), e=0.5)
+    for x, rr in S.get('exhaust', [(-0.55, 0.035)]):  # exhaust tips
+        z = curve(S['sill'], 0.99) + 0.03
+        yb = y_of(S, 1) - 0.06
+        h = Sf.hit((x, yb + 0.5, z + 0.02), (0, -1, 0))
+        y = h[0].y if h else yb
+        cyl(M, (x, y - 0.25, z + 0.02), (x, y + 0.03, z + 0.02), rr, 10, 'chrome', 'bumpR', caps=False)
+        cyl(M, (x, y - 0.2, z + 0.02), (x, y + 0.025, z + 0.02), rr * 0.8, 10, 'trim', 'bumpR', caps=True)
     if not S.get('open') and S.get('chmsl', True) and not S.get('cargo_rear'):  # third brake light
         if S.get('gate'):
             box(M, (0, y_of(S, C['r2']) + 0.03, C['roof'] - 0.005), (0.4, 0.04, 0.03), RB, 'lamp_tail', 'trunk')
@@ -904,7 +947,7 @@ def side_details(M, S, Sf, lo):
 def arches(M, S, Sf, lo):
     """dark wheel-well liners (so you can't see through the body) and optional cladding lips"""
     Ra = S['r'] + S.get('arch_gap', 0.055)
-    n = 4 if lo else 8
+    n = 6 if lo else 14
     for ta in axles(S):
         if not 0 < ta < 1:
             continue
@@ -935,11 +978,11 @@ def arches(M, S, Sf, lo):
                     if h and abs(h[0].x) > xo - 0.15:
                         pts.append((h[0].x, y, z))
                 if len(pts) > 2:
-                    tube(M, pts, lip, 4, S.get('lip_m', 'trim'), 'body')
+                    tube(M, pts, lip, 5, S.get('lip_m', 'trim'), 'body')
 
 
 def interior(M, S, lo):
-    """seat blocks, a dash, a steering wheel and a floor tub so the cabin reads as solid"""
+    """seats, dash, steering wheel, console, and a floor tub so the cabin reads as solid"""
     W = S['W']
     C = S['cabin']
     part = 'interior'
@@ -959,31 +1002,51 @@ def interior(M, S, lo):
     if yRr is not None:
         seats['RL'] = (xs, yRr, hz + 0.02)
         seats['RR'] = (-xs, yRr, hz + 0.02)
+    if lo:
+        for sx in (1, -1):
+            box(M, (sx * xs, yD + 0.12, hz + 0.25), (0.48, 0.55, 0.12), RU, 'interior', part)
+        if yRr is not None:
+            box(M, (0, yRr + 0.12, hz + 0.25), (hwi * 2 - 0.1, 0.5, 0.12), RU, 'interior', part)
+        box(M, (0, ya + 0.3, zbelt - 0.05), (hwi * 2, 0.16, 0.4), RF, 'interior', part)
+        return seats
     tilt = math.radians(S.get('recline', 16))
     Rb = (Vector((1, 0, 0)), Vector((0, math.sin(tilt), math.cos(tilt))), Vector((0, -math.cos(tilt), math.sin(tilt))))
-    bh = S.get('backh', 0.62)
+    bh = S.get('backh', 0.6)
     for sx in (1, -1):
         cx = sx * xs
-        box(M, (cx, yD, hz - 0.07), (0.5, 0.14, 0.52), RF, 'interior', part)
-        box(M, (cx, yD + 0.27 + math.sin(tilt) * bh / 2, hz - 0.02 + math.cos(tilt) * bh / 2), (0.5, bh, 0.13), Rb, 'interior', part)
+        rbox(M, (cx, yD, hz - 0.06), (0.5, 0.12, 0.52), RF, 'interior', part, seg=(3, 2), e=0.3)
+        rbox(M, (cx, yD + 0.27 + math.sin(tilt) * bh / 2, hz - 0.02 + math.cos(tilt) * bh / 2), (0.5, bh, 0.13), Rb, 'interior', part, seg=(3, 2), e=0.3)
+        rbox(M, (cx, yD + 0.29 + math.sin(tilt) * (bh + 0.1), hz + math.cos(tilt) * (bh + 0.1)), (0.26, 0.17, 0.09), Rb, 'interior', part, seg=(3, 2), e=0.5)
     if yRr is not None:
         rw = hwi * 2 - 0.08
-        box(M, (0, yRr, hz - 0.05), (rw, 0.14, 0.5), RF, 'interior', part)
-        box(M, (0, yRr + 0.27 + math.sin(tilt) * 0.3, hz + math.cos(tilt) * 0.3), (rw, 0.6, 0.12), Rb, 'interior', part)
+        rbox(M, (0, yRr, hz - 0.05), (rw, 0.12, 0.5), RF, 'interior', part, seg=(5, 2), e=0.25)
+        rbox(M, (0, yRr + 0.27 + math.sin(tilt) * 0.28, hz + math.cos(tilt) * 0.28), (rw, 0.56, 0.12), Rb, 'interior', part, seg=(5, 2), e=0.25)
+        for sx in (1, -1):
+            rbox(M, (sx * xs, yRr + 0.31 + math.sin(tilt) * 0.62, hz + math.cos(tilt) * 0.62), (0.24, 0.15, 0.08), Rb, 'interior', part, seg=(3, 2), e=0.5)
+    # dashboard with an instrument hood and centre stack
     yd = ya + S.get('dash_dy', 0.32)
-    box(M, (0, yd, zbelt - 0.08), (hwi * 2, 0.26, 0.5), RF, 'interior', part)
-    if lo:
-        return seats
-    # steering wheel and column
+    rbox(M, (0, yd, zbelt - 0.06), (hwi * 2, 0.24, 0.5), RF, 'interior', part, seg=(4, 2), e=0.25)
+    rbox(M, (xs, yd + 0.12, zbelt + 0.02), (0.36, 0.1, 0.16), RF, 'trim', part, seg=(4, 2), e=0.4)
+    rbox(M, (0, yd + 0.18, zbelt - 0.2), (0.24, 0.34, 0.16), RF, 'trim', part, seg=(3, 3), e=0.3)
+    if S.get('screen', True):
+        box(M, (0, yd + 0.16, zbelt + 0.04), (0.26, 0.15, 0.015), (Vector((1, 0, 0)), Vector((0, 0.3, 0.95)).normalized(), Vector((0, 0.95, -0.3)).normalized()), 'glass', part)
+    # centre console with a gear lever
+    rbox(M, (0, yD - 0.05, zfl + 0.15), (0.2, 0.3, 0.7), RF, 'interior', part, seg=(3, 3), e=0.3)
+    cyl(M, (0, yD - 0.3, zfl + 0.3), (0, yD - 0.33, zfl + 0.42), 0.012, 6, 'chrome', part)
+    rbox(M, (0, yD - 0.335, zfl + 0.44), (0.045, 0.06, 0.045), RF, 'trim', part, seg=(3, 2), e=0.6)
+    # steering wheel: rim, three spokes, hub, column
     sc = Vector((xs, yD - S.get('wheel_dy', 0.42), hz + S.get('wheel_dz', 0.33)))
     ang = math.radians(S.get('wheel_tilt', 24))
     Rw = frame_from(-Vector((0, -math.cos(ang), math.sin(ang))), (0, 0, 1))
-    rr = S.get('wheel_r', 0.19)
-    ring = [tuple(sc + Rw[0] * math.cos(2 * math.pi * k / 8) * rr + Rw[1] * math.sin(2 * math.pi * k / 8) * rr) for k in range(8)]
-    tube(M, ring, 0.02, 4, 'trim', part, closed=True)
-    tube(M, [tuple(sc - Rw[0] * rr), tuple(sc + Rw[0] * rr)], 0.015, 3, 'trim', part)
-    cyl(M, sc, sc + Rw[2] * 0.3, 0.035, 5, 'trim', part, caps=False)
-    # floor, firewall and inner side walls (inward facing)
+    rr = S.get('wheel_r', 0.185)
+    ring = [tuple(sc + Rw[0] * math.cos(2 * math.pi * k / 16) * rr + Rw[1] * math.sin(2 * math.pi * k / 16) * rr) for k in range(16)]
+    tube(M, ring, 0.017, 5, 'trim', part, closed=True)
+    for a in (0, math.pi, -math.pi / 2):
+        p1 = sc + Rw[0] * math.cos(a) * rr * 0.92 + Rw[1] * math.sin(a) * rr * 0.92
+        tube(M, [tuple(sc), tuple(p1)], 0.014, 4, 'trim', part)
+    cyl(M, sc - Rw[2] * 0.01, sc + Rw[2] * 0.03, 0.055, 10, 'trim', part)
+    cyl(M, sc + Rw[2] * 0.03, sc + Rw[2] * 0.3, 0.035, 8, 'trim', part, caps=False)
+    # floor, firewall, side walls and parcel shelf (inward facing)
     yb = yc - 0.05
     zb2 = zbelt - 0.02
     f0 = [M.vert((hwi, ya, zfl)), M.vert((-hwi, ya, zfl)), M.vert((-hwi, yb, zfl)), M.vert((hwi, yb, zfl))]
@@ -1000,25 +1063,62 @@ def interior(M, S, lo):
 
 
 def make_wheel():
-    """one shared wheel, radius 0.33, axle along X; outer face +X (right-side wheels are mirrored in-game).
-    PS2-era: a fat tyre and a simple dished rim with five slots."""
+    """one shared wheel, radius 0.33, axle along X; outer face +X (right-side wheels are mirrored in-game)"""
     root = bpy.data.objects.new('wheel', None)
     link(root)
     M = Mesh()
-    lathe(M, [(-0.1, 0.2), (-0.12, 0.245), (-0.118, 0.305), (-0.098, 0.33), (0.098, 0.33), (0.118, 0.305), (0.12, 0.245), (0.1, 0.2)], 14, 'tire', 'hi')
-    lathe(M, [(0.1, 0.2), (0.105, 0.19), (0.085, 0.16), (0.09, 0.1), (0.1, 0.07), (0.104, 0.0)], 14, 'rim', 'hi', mats=['rim', 'rim', 'rim', 'rim', 'chrome'])
-    lathe(M, [(-0.1, 0.0), (-0.1, 0.2)], 14, 'trim', 'hi')  # back face so you can't see through
-    for k in range(5):  # slots between the spokes
-        a = 2 * math.pi * k / 5
-        c = Vector((0.092, math.cos(a) * 0.13, math.sin(a) * 0.13))
-        R = (Vector((0, math.sin(a), -math.cos(a))), Vector((0, math.cos(a), math.sin(a))), Vector((1, 0, 0)))
-        panel(M, c, R, 0.05, 0.06, 'trim', 'hi')
-    Lm = Mesh()
-    lathe(Lm, [(-0.11, 0.2), (-0.11, 0.33), (0.11, 0.33), (0.11, 0.2)], 8, 'tire', 'lo')
-    rr = lathe(Lm, [(0.11, 0.2), (0.095, 0.19)], 8, 'rim', 'lo')
-    disk(Lm, rr[-1], (0.095, 0, 0), 'rim', 'lo')
-    for o in (M.build('wheel_hi', 'hi', sharp=40), Lm.build('wheel_lo', 'lo', sharp=40)):
+    tyre = [(-0.094, 0.214), (-0.106, 0.236), (-0.112, 0.27), (-0.108, 0.305), (-0.094, 0.323), (-0.07, 0.33),
+            (-0.03, 0.33), (-0.028, 0.321), (-0.016, 0.321), (-0.014, 0.33), (0.014, 0.33), (0.016, 0.321), (0.028, 0.321), (0.03, 0.33),
+            (0.07, 0.33), (0.094, 0.323), (0.108, 0.305), (0.112, 0.27), (0.106, 0.236), (0.094, 0.214)]
+    lathe(M, tyre, 26, 'tire', 'hi')
+    # rim barrel (seen through the spokes), outer lip, hub with centre cap
+    lathe(M, [(0.085, 0.208), (0.07, 0.2), (-0.09, 0.206), (-0.094, 0.214)], 26, 'rim', 'hi', mats=['rim', 'trim', 'rim'])
+    lathe(M, [(0.094, 0.214), (0.1, 0.212), (0.102, 0.204), (0.096, 0.196), (0.085, 0.208)], 26, 'rim', 'hi')
+    lathe(M, [(0.06, 0.068), (0.075, 0.066), (0.082, 0.052), (0.086, 0.03), (0.088, 0.0)], 14, 'rim', 'hi', mats=['rim', 'rim', 'chrome', 'chrome'])
+    # 5 split spokes (10 arms), deep at the hub and flush at the lip
+    for k in range(10):
+        a = 2 * math.pi * (k // 2) / 5 + (0.17 if k % 2 else -0.17)
+        a2 = 2 * math.pi * (k // 2) / 5 + (0.06 if k % 2 else -0.06)
+        ca, sa, ca2, sa2 = math.cos(a), math.sin(a), math.cos(a2), math.sin(a2)
+        P = lambda x, r, c, s, off: (x, c * r - s * off, s * r + c * off)
+        hw0, hw1 = 0.013, 0.017
+        f = [M.vert(p) for p in (P(0.074, 0.062, ca2, sa2, -hw0), P(0.074, 0.062, ca2, sa2, hw0), P(0.092, 0.198, ca, sa, hw1), P(0.092, 0.198, ca, sa, -hw1))]
+        b = [M.vert(p) for p in (P(0.05, 0.062, ca2, sa2, -hw0 * 0.8), P(0.05, 0.062, ca2, sa2, hw0 * 0.8), P(0.075, 0.2, ca, sa, hw1 * 0.8), P(0.075, 0.2, ca, sa, -hw1 * 0.8))]
+        for q in ([f[0], f[3], f[2], f[1]], [f[0], b[0], b[3], f[3]], [f[1], f[2], b[2], b[1]]):
+            A, B, C = Vector(M.v[q[0]]), Vector(M.v[q[1]]), Vector(M.v[q[3]])
+            mid = sum((Vector(M.v[i]) for i in q), Vector()) / 4
+            out = Vector((1, 0, 0)) if q[0] == f[0] and q[1] == f[3] else Vector((0, mid.y, mid.z)).cross(Vector((1, 0, 0))) * 0 + (mid - Vector((mid.x, ca * 0.13, sa * 0.13)))
+            if (B - A).cross(C - A).dot(out) < 0:
+                q = q[::-1]
+            M.face(q, 'rim', 'hi')
+    for k in range(5):  # lug nuts
+        a = 2 * math.pi * (k + 0.5) / 5
+        cyl(M, (0.07, math.cos(a) * 0.045, math.sin(a) * 0.045), (0.088, math.cos(a) * 0.045, math.sin(a) * 0.045), 0.009, 6, 'chrome', 'hi')
+    lathe(M, [(-0.012, 0.07), (-0.012, 0.172), (0.012, 0.172), (0.012, 0.07), (0.04, 0.07), (0.04, 0.0)], 18, 'disc', 'hi')  # brake disc
+    # caliper (does not spin): a curved block hugging the disc behind the top
+    C = Mesh()
+    rows = []
+    for i in range(6):
+        a = lerp(math.radians(25), math.radians(75), i / 5)
+        rows.append([C.vert((x, math.sin(a) * r, math.cos(a) * r)) for (x, r) in ((-0.03, 0.13), (0.034, 0.13), (0.034, 0.188), (-0.03, 0.188))])
+    for i in range(5):
+        for k in range(4):
+            k2 = (k + 1) % 4
+            C.quad(rows[i][k], rows[i + 1][k], rows[i + 1][k2], rows[i][k2], 'caliper', 'hi')
+    C.face(rows[0], 'caliper', 'hi')
+    C.face(list(reversed(rows[-1])), 'caliper', 'hi')
+    Lm = Mesh()  # lo: a 12-sided tyre and a flat rim face
+    lathe(Lm, [(-0.1, 0.215), (-0.112, 0.29), (-0.09, 0.33), (0.09, 0.33), (0.112, 0.29), (0.1, 0.215)], 12, 'tire', 'lo')
+    rr = lathe(Lm, [(0.1, 0.215), (0.085, 0.2)], 12, 'rim', 'lo')
+    disk(Lm, rr[-1], (0.085, 0, 0), 'rim', 'lo')
+    for o in (M.build('wheel_hi', 'hi', sharp=40), Lm.build('wheel_lo', 'lo', sharp=40), C.build('caliper_hi', 'hi', sharp=40)):
         o.parent = root
+    cal = bpy.data.objects['caliper_hi']
+    bm = bmesh.new()
+    bm.from_mesh(cal.data)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    bm.to_mesh(cal.data)
+    bm.free()
     return root
 
 
@@ -1298,7 +1398,7 @@ def pickup_bed(M, S, Sf, lo):
         for sx in (1, -1):
             rbox(M, (sx * (xi - 0.14), ya, zf + 0.12), (0.3, 0.26, 0.9), (Vector((1, 0, 0)), Vector((0, 0, 1)), Vector((0, -1, 0))), 'trim', 'body', seg=(2, 2), e=0.3)
         # hitch and receiver
-        box(M, (0, y_of(S, 1) + 0.12, curve(S['sill'], 1) - 0.02), (0.08, 0.08, 0.3), (Vector((1, 0, 0)), Vector((0, 1, 0)), Vector((0, 0, 1))), 'trim', 'bumpR')
+        box(M, (0, y_of(S, 1) + 0.1, curve(S['sill'], 1) + 0.02), (0.07, 0.07, 0.3), RF, 'trim', 'bumpR')
         # running boards
         for sx in (1, -1):
             box(M, (sx * (S['W'] / 2 - 0.08), y_of(S, (S['doors'][0][0] + S['doors'][-1][1]) / 2), curve(S['sill'], 0.5) - 0.06),
@@ -1471,7 +1571,7 @@ spec('sports', **base_spec(4.6, 1.93, 1.24, 2.72, 1.0, 0.34, 1.65,
     cabin=dict(a=0.3, r1=0.45, r2=0.56, c=0.88, roof=1.24, roofw=0.62, crown=0.03, rcurve=1.0, wcurve=1.3),
     doors=[(0.33, 0.58)], sideglass=[(0.31, 0.57)], cpillar='paint',
     hood=(0.02, 0.29), trunk=(0.885, 0.985), bumpers=((0.05, 0.5), (0.95, 0.6)),
-    head=dict(x0=0.45, x1=0.84, z0=0.44, z1=0.5, slant=0.02, wrap=0.5, down=-0.9, proj=3),
+    head=dict(x0=0.45, x1=0.84, z0=0.41, z1=0.47, slant=0.02, wrap=0.55, proj=3),
     tail=dict(x0=0.48, x1=0.88, z0=0.8, z1=0.86, wrap=0.5, bar=True),
     grille=dict(z0=0.32, z1=0.4, w=0.45, bars=1), intake=dict(z0=0.18, z1=0.3, w=0.7),
     plateF=None, plateR=(0.5, 'bumpR'), exhaust=[(-0.08, 0.04), (0.08, 0.04), (-0.2, 0.04), (0.2, 0.04)],
