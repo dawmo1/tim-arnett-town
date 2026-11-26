@@ -15,6 +15,8 @@ import { ragdoll, release, ragPos, standUp } from './ragdoll.js';
 import { signalState } from './traffic.js';
 import { sky } from './daynight.js';
 import { turfAt, gangLook, gangById, warnLine, GANGS } from './gangs.js';
+import { moveInfo } from './combat.js';
+import { spotFor } from './cover.js';
 
 export const walkers = [];
 export const fleeing = [];
@@ -395,7 +397,7 @@ function hideFrom(w, x, z) {
   w.coverAt = best;
 }
 function goHostile(w, kind, join = true) {
-  w.mode = 'hostile'; w.hostile = kind; w.modeT = 18; w.cd = kind === 'gun' ? 1.2 : 0.6; w.call = null; w.watch = null; w.combo = 0;
+  w.mode = 'hostile'; w.hostile = kind; w.modeT = 18; w.cd = kind === 'gun' ? 1.2 : 0.6; w.call = null; w.watch = null; w.chain = null;
   if (kind === 'melee' && w.bat === undefined) w.bat = Math.random() < (w.gang ? 0.12 : 0.07); // few people carry a bat
   if (!join) return;
   // their friends (and the odd hothead nearby) pile in
@@ -420,7 +422,7 @@ export function knock(w, vel, dead) {
   });
   return !!r;
 }
-export function flinch(w) { w.ch.flinch = 1; say(w, line('hurt'), 1.2); }
+export function flinch(w) { w.ch.flinch = 1; say(w, line('hurt'), 1.2); interrupt(w); }
 // The player hurt this person without killing them.
 export function provoke(w) {
   if (w.dead) return;
@@ -511,8 +513,7 @@ export function updateWalkers(dt, tSec, nowMs, cam) {
       } else if (w.mode === 'hostile') {
         hostileStep(w, dt, target);
         speed = w.spd || 0;
-        pose = w.hostile === 'gun' ? { aim: true, weapon: 'gun' } : w.bat ? { weapon: 'bat', swing: w.swing ? 1 - w.swing : 0, aim: true } : { punch: { i: w.combo || 0, t: 1 - (w.swing || 0) }, weapon: 'none' };
-        if (w.hostile !== 'gun' && !w.bat && !(w.swing > 0)) pose = { punch: { i: 0, t: 0 }, weapon: 'none' };
+        pose = w.fpose || { aim: true, weapon: 'gun' };
         const foe = w.enemy || target;
         if (w.modeT <= 0 || !foe || foe.dead || Math.hypot(foe.x - w.x, foe.z - w.z) > 70) { if (w.gang) { w.mode = 'gone'; w.modeT = 30; calmDown(w); } else startFlee(w, foe ? foe.x : w.x, foe ? foe.z : w.z); }
       } else if (w.mode === 'surrender') {
@@ -740,18 +741,16 @@ function updateFleeing(dt) {
     if (f.ch.rag) continue;
     let spd = 6;
     if (f.angry && f.t > 0) {
-      // an angry driver storms over and throws punches
+      // an angry driver storms over and squares up (the same fist-fight moves as anyone else)
       const t = ctx.target();
-      f.cd = (f.cd || 0) - dt; f.swing = Math.max(0, (f.swing || 0) - dt * 3);
+      let pose = { melee: { n: 'jab', k: 0 }, weapon: 'none' };
       if (t && !t.dead) {
-        const dx = t.x - f.x, dz = t.z - f.z, d = Math.hypot(dx, dz);
-        f.h = Math.atan2(dx, dz);
-        if (d > 1.3) { const p = W.pushOutCircle(f.x + (dx / d) * 4.5 * dt, f.z + (dz / d) * 4.5 * dt, 0.4); f.x = p.x; f.z = p.z; spd = 4.5; }
-        else { spd = 0; if (f.cd <= 0 && !t.inVeh) { f.cd = 1; f.swing = 1; ctx.hitPlayer(5 + Math.random() * 4, 'an angry driver', { hostile: 'melee', h: f.h }); } }
-        if (d > 40) f.angry = false;
+        const r = brawl(f, dt, t, (info, n, fx, fz) => ctx.hitPlayer(info.dmg * 0.6, 'an angry driver', { hostile: 'melee', h: f.h, x: f.x, z: f.z }, { n, down: !!info.down, fx, fz }));
+        spd = r.spd; pose = r.pose;
+        if (Math.hypot(t.x - f.x, t.z - f.z) > 40) f.angry = false;
       }
       placeCharacter(f.ch, f.x, W.groundHeight(f.x, f.z), f.z, f.h);
-      animateCharacter(f.ch, dt, { speed: spd, punch: f.swing ? { i: 1, t: 1 - f.swing } : undefined });
+      animateCharacter(f.ch, dt, { speed: spd, ...pose });
       if (f.t <= 4) { f.angry = false; f.t = 8; }
       continue;
     }
@@ -764,29 +763,137 @@ function updateFleeing(dt) {
   }
 }
 
-// A townsperson who decided to fight: close in and punch, or keep distance and shoot.
+// A townsperson who decided to fight: square up and trade punches (brawl), or keep distance and shoot from cover.
 function hostileStep(w, dt, t) {
-  w.spd = 0;
+  w.spd = 0; w.ducked = false;
   if (w.enemy) { if (w.enemy.dead || !walkers.includes(w.enemy)) w.enemy = null; else t = w.enemy; }
-  if (!t || t.dead) return;
-  const dx = t.x - w.x, dz = t.z - w.z, d = Math.hypot(dx, dz);
-  w.h += angDiff(w.h, Math.atan2(dx, dz)) * Math.min(1, dt * 8);
-  const move = w.hostile === 'melee' ? (d > 1.3 ? 5.5 : 0) : d > 16 ? 4.5 : d < 7 ? -2 : 0;
-  if (move) {
-    const p = W.pushOutCircle(w.x + (dx / d) * move * dt, w.z + (dz / d) * move * dt, 0.4);
-    if (W.isLand(p.x, p.z)) { w.x = p.x; w.z = p.z; }
-    w.spd = Math.abs(move) + 1;
+  if (!t || t.dead) { w.fpose = w.hostile === 'gun' ? { weapon: 'gun' } : guard(w); return; }
+  if (w.hostile === 'melee') {
+    const r = brawl(w, dt, t, (info, n, fx, fz) => {
+      const dmg = info.dmg * (w.bat ? 0.55 : 0.7);
+      if (t === w.enemy) ctx.hurtNpc?.(t, dmg, fx, fz, info.down ? 6.5 : info.force);
+      else ctx.hitPlayer(dmg, 'an angry local', w, { n, down: !!info.down, fx, fz });
+    });
+    w.spd = r.spd; w.fpose = r.pose;
+    return;
   }
+  gunStep(w, dt, t);
+}
+
+// ---------- fist fights ----------
+// NPCs fight with the player's moves and timing (src/combat.js MOVES): a wind-up, the blow lands on the contact frame
+// (if you're still in reach and in front of them), then recovery. Their wind-ups are stretched (TELE) so you can see a
+// punch coming and step back or sidestep, and a hit during the wind-up staggers them and cancels it. Everyone else in
+// the fight keeps a ring round you and circles, and only one of them throws at a time (swingingAt).
+const NPC_COMBOS = { fists: [['jab', 'cross'], ['jab', 'cross', 'hook'], ['hook'], ['jab', 'jab', 'cross'], ['cross', 'upper'], ['jab', 'hook']], bat: [['swingR'], ['swingR', 'swingL'], ['smash'], ['swingL']] };
+const TELE = 1.9;
+const swingingAt = new Map(); // target (a walker, or PLAYER) -> { f, at }: whose turn it is to throw at them
+const PLAYER = {}; // (ctx.target() makes a fresh object every frame)
+const guard = (f) => (f.bat ? { melee: { n: 'swingR', k: 0 }, weapon: 'bat' } : { melee: { n: 'jab', k: 0 }, weapon: 'none' });
+function hasTurn(t, f) {
+  const h = swingingAt.get(t);
+  if (!h || h.f === f) return true;
+  const o = h.f;
+  if (o.dead || o.ch?.rag || (!o.mv && performance.now() - h.at > 2500) || (o.mode !== undefined && o.mode !== 'hostile') || o.angry === false) { swingingAt.delete(t); return true; }
+  return false;
+}
+function endTurn(f) { for (const [t, h] of swingingAt) if (h.f === f) swingingAt.delete(t); }
+// hit while winding up: the swing's cancelled and they stagger; hit later in a combo: the rest of it is dropped
+function interrupt(w) {
+  if (!w.mv) { if (w.mode === 'hostile' && w.hostile === 'melee') w.stagger = Math.max(w.stagger || 0, 0.22); return; }
+  if (!w.mv.done) { w.mv = null; w.stagger = 0.5 + Math.random() * 0.25; w.cd = Math.max(w.cd || 0, 0.7); endTurn(w); }
+  w.chain = null;
+}
+function stepTo(f, ux, uz, dist) {
+  const p = W.pushOutCircle(f.x + ux * dist, f.z + uz * dist, 0.4);
+  if (W.isLand(p.x, p.z)) { f.x = p.x; f.z = p.z; }
+}
+// one frame of a fighter f going after t; hurt(info, move, fx, fz) lands a blow. Returns { spd, pose }.
+function brawl(f, dt, t, hurt) {
+  const dx = t.x - f.x, dz = t.z - f.z, d = Math.hypot(dx, dz) || 0.01, ux = dx / d, uz = dz / d;
+  const style = f.bat ? 'bat' : 'fists', pose = (m) => ({ melee: m, weapon: f.bat ? 'bat' : 'none' }), idle = style === 'bat' ? 'swingR' : 'jab';
+  f.cd = (f.cd || 0) - dt;
+  if (f.stagger > 0) { f.stagger -= dt; f.h += angDiff(f.h, Math.atan2(dx, dz)) * Math.min(1, dt * 3); return { spd: 0, pose: pose({ n: idle, k: 0 }) }; }
+  const mv = f.mv;
+  if (mv) {
+    const info = moveInfo(mv.n), wind = info.dur * info.hit * TELE, rest = info.dur * (1 - info.hit);
+    mv.t += dt;
+    const k = mv.t < wind ? (mv.t / wind) * info.hit : Math.min(1, info.hit + ((mv.t - wind) / rest) * (1 - info.hit));
+    if (!mv.done) {
+      // square up, then commit (they stop tracking you late in the wind-up, so a sidestep makes them miss); step in
+      f.h += angDiff(f.h, Math.atan2(dx, dz)) * Math.min(1, dt * (mv.t < wind * 0.55 ? 12 : 1.5));
+      if (d > 1.0) stepTo(f, ux, uz, ((info.lunge * 1.3) / wind) * dt);
+      if (mv.t >= wind) {
+        mv.done = true;
+        const fx = Math.sin(f.h), fz = Math.cos(f.h), facing = (dx * fx + dz * fz) / d;
+        if (d <= info.range + 0.15 && facing > 0.6 && !t.inVeh && !t.dead) hurt(info, mv.n, fx, fz);
+        else ctx.swish?.(f.x, f.z, style === 'bat');
+      }
+    }
+    if (k >= 1) {
+      f.mv = null;
+      const next = f.chain && f.chain.shift();
+      if (next && d < info.range + 0.7 && !t.dead) f.mv = { n: next, t: 0, done: false };
+      else { endTurn(f); f.chain = null; f.cd = 0.8 + Math.random() * 1.3; f.backT = 0.35 + Math.random() * 0.4; f.orbit = Math.random() < 0.5 ? 1 : -1; }
+    }
+    return { spd: 0, pose: pose({ n: mv.n, k }) };
+  }
+  // between swings: keep fighting distance, circle, wait for a turn
+  f.h += angDiff(f.h, Math.atan2(dx, dz)) * Math.min(1, dt * 8);
+  const reach = style === 'bat' ? 1.8 : 1.15;
+  const mine = f.cd <= 0 && !t.inVeh && hasTurn(t.ch ? t : PLAYER, f);
+  let mx = 0, mz = 0, sp = 1.7;
+  if (f.backT > 0) { f.backT -= dt; mx = -ux; mz = -uz; sp = 2.2; } // a step back after a combo
+  else if (mine && d > reach) { mx = ux; mz = uz; sp = d > 4 ? 5.5 : 3.2; } // close in
+  else if (mine) { // throw
+    swingingAt.set(t.ch ? t : PLAYER, { f, at: performance.now() });
+    f.chain = pick(NPC_COMBOS[style]).slice();
+    f.mv = { n: f.chain.shift(), t: 0, done: false };
+    return { spd: 0, pose: pose({ n: f.mv.n, k: 0 }) };
+  } else { // hold a ring round them and drift sideways
+    if (f.orbit === undefined || f.ring === undefined) { f.orbit = Math.random() < 0.5 ? 1 : -1; f.ring = 2.1 + Math.random() * 0.8; }
+    f.orbitT = (f.orbitT || 0) - dt;
+    if (f.orbitT <= 0) { f.orbitT = 1 + Math.random() * 2; if (Math.random() < 0.4) f.orbit = -f.orbit; }
+    const off = Math.max(-1, Math.min(1, (d - (t.inVeh ? 1.8 : f.ring)) * 1.5));
+    mx = ux * off - uz * f.orbit * 0.5; mz = uz * off + ux * f.orbit * 0.5;
+    if (d > 6) sp = 5;
+  }
+  for (const o of walkers) { // keep out of each other's way
+    if (o === f || o.dead || Math.abs(o.x - f.x) > 1.2 || Math.abs(o.z - f.z) > 1.2) continue;
+    const ox = f.x - o.x, oz = f.z - o.z, ol = Math.hypot(ox, oz);
+    if (ol > 0.01 && ol < 1.15) { mx += (ox / ol) * (1.15 - ol) * 2.5; mz += (oz / ol) * (1.15 - ol) * 2.5; }
+  }
+  const ml = Math.hypot(mx, mz);
+  if (ml < 0.08) return { spd: 0, pose: pose({ n: idle, k: 0 }) };
+  const v = sp * Math.min(1, ml);
+  stepTo(f, mx / ml, mz / ml, v * dt);
+  return { spd: v + 0.5, pose: pose({ n: idle, k: 0 }) };
+}
+
+// ---------- gunmen: shoot from cover ----------
+// Find something solid between them and their target (a parked car, a low wall, a corner), get behind it, then duck
+// down and pop up to shoot in turns. No cover near: keep a distance and shoot standing.
+function gunStep(w, dt, t) {
+  const dx = t.x - w.x, dz = t.z - w.z, d = Math.hypot(dx, dz) || 0.01, wy = w.y || 0;
+  w.covT = (w.covT || 0) - dt;
+  if (w.covT <= 0) { w.covT = 3.5 + Math.random() * 2; w.cov = d < 45 ? spotFor(w.x, w.z, wy, t.x, t.z, 10) : null; }
+  let move = 0, mx = dx / d, mz = dz / d, inCov = false;
+  if (w.cov) {
+    const cx = w.cov.x - w.x, cz = w.cov.z - w.z, cd = Math.hypot(cx, cz);
+    if (cd > 0.3) { move = 5.5; mx = cx / cd; mz = cz / cd; } else inCov = true;
+    if (cd > 20) w.cov = null;
+  } else move = d > 16 ? 4.5 : d < 7 ? -2 : 0;
+  if (move) { stepTo(w, mx * Math.sign(move), mz * Math.sign(move), Math.abs(move) * dt); w.spd = Math.abs(move) + 1; }
+  w.h += angDiff(w.h, move > 0 && !inCov ? Math.atan2(mx, mz) : Math.atan2(dx, dz)) * Math.min(1, dt * 8);
+  // in cover: duck, pop up for a few shots, duck again
+  if (inCov) { w.popT = (w.popT || 0) - dt; if (w.popT <= 0) { w.up = !w.up; w.popT = w.up ? 1.3 + Math.random() * 0.7 : 1.2 + Math.random() * 1.6; } }
+  else w.up = true;
+  w.ducked = inCov && !w.up && !w.cov.high;
+  w.fpose = inCov && !w.up ? (w.cov.high ? { weapon: 'gun' } : { cover: true, weapon: 'gun' }) : move > 0 && !inCov ? { weapon: 'gun' } : { aim: true, weapon: 'gun' };
   w.cd -= dt;
-  if (w.swing) w.swing = Math.max(0, w.swing - dt * 3);
-  if (w.cd > 0) return;
-  if (w.hostile === 'melee' && d < 1.6 && !t.inVeh) {
-    w.cd = w.bat ? 1.1 : 0.55 + Math.random() * 0.3; w.swing = 1; w.combo = ((w.combo || 0) + 1) % 5;
-    const dmg = (w.bat ? 12 : 5) + Math.random() * 5;
-    if (t === w.enemy) ctx.hurtNpc?.(t, dmg, dx / d, dz / d, w.bat ? 6 : w.combo === 4 ? 5 : 2.5);
-    else ctx.hitPlayer(dmg, 'an angry local', w);
-  } else if (w.hostile === 'gun' && d < 35 && W.lineOfSight(w.x, (w.y || 0) + 1.4, w.z, t.x, (t.y || 0) + 1.2, t.z)) {
-    w.cd = 1.3 + Math.random() * 0.8;
+  if (w.cd > 0 || !w.up || (move > 0 && !inCov)) return;
+  if (d < 35 && W.lineOfSight(w.x, wy + 1.4, w.z, t.x, (t.y || 0) + 1.2, t.z)) {
+    w.cd = 1.1 + Math.random() * 0.7;
     const hit = Math.random() < (t.inVeh ? 0.12 : 0.25), ty = (t.y || 0) + 1.2;
     ctx.shot(w, hit ? { x: t.x, y: ty, z: t.z } : { x: t.x + (Math.random() - 0.5) * 4, y: ty, z: t.z + (Math.random() - 0.5) * 4 });
     if (Math.random() < 0.5) scare(w.x, w.z, 28);

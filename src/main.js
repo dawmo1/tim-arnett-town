@@ -2608,7 +2608,14 @@ setNpcContext({
   quality: () => activeQuality,
   threat: () => threatState,
   target: () => (playing && !me.dead ? { x: me.veh ? me.veh.x : me.x, y: me.veh ? me.veh.y : me.y, z: me.veh ? me.veh.z : me.z, dead: me.dead, inVeh: !!me.veh } : null),
-  hitPlayer: (dmg, by, w) => { if (w && w.hostile === 'gun' && coverSaves(w.x, (w.y || 0) + 1.4, w.z)) return; damageMe(dmg, by, '', w && w.hostile === 'melee' && Math.random() < 0.2 ? { x: Math.sin(w.h) * 6, y: 2, z: Math.cos(w.h) * 6 } : null); },
+  // blow (a punch or swing landing on its contact frame, npc.js brawl): { n, down, fx, fz }: you flinch away from it, and an
+  // uppercut or a bat smash can put you down
+  hitPlayer: (dmg, by, w, blow) => {
+    if (w && w.hostile === 'gun' && coverSaves(w.x, (w.y || 0) + 1.4, w.z)) return;
+    if (blow) { fx.soundHit(); combat.hitPause(0.03); combat.addTrauma(blow.down ? 0.3 : 0.12); }
+    damageMe(dmg, by, '', blow ? (blow.down && Math.random() < 0.6 ? { x: blow.fx * 6, y: 2, z: blow.fz * 6 } : { x: blow.fx, y: 0, z: blow.fz }) : null);
+  },
+  swish: (x, z, heavy) => { if (Math.hypot(x - me.x, z - me.z) < 20) fx.soundSwish(heavy); },
   vehicles: () => movingVehicles,
   allVehicles: () => vehicles,
   player: () => (playing ? { x: me.veh ? me.veh.x : me.x, z: me.veh ? me.veh.z : me.z, dead: me.dead, inVeh: !!me.veh, speed: me.moveSpeed || 0, vehSpeed: me.veh ? Math.abs(me.veh.speed) : 0, fancy: me.veh && (me.veh.T.limo || me.veh.T.name === 'Sports car' || me.veh.T.muscle), stars: wanted.stars, armed: WEAPONS[me.weapon].kind !== 'none' || WEAPONS[me.weapon].name === 'Knife', mask: MASKS[normLook(me.look)[18]], top: TOPS[normLook(me.look)[6]] } : null),

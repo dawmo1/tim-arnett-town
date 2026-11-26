@@ -48,6 +48,7 @@ Everyone plays in one shared online world: open the link and you're in. Your mon
 - **Living world:** a day lasts 24 real minutes and the weather changes (clear, cloudy, rain, storms, river fog, snow), the same for everyone online. At night windows and shop signs light up, there are fewer people and more cops, and the odd drunk driver.
 - **Looks:** people, cars, guns and street props are modeled in Blender (`assets/src/*.py` build them into `assets/models/*.glb`). Every person is mixed from bodies, painted faces, hair and outfits; every car has an interior, opening doors, dents, glass and a driver. Buildings have brick and stone relief, recessed windows that reflect the sky, cornices, shop awnings, fire escapes and rooftop tanks; houses get porches, fences, driveways and gardens; trees sway in the wind.
 - **Gangs:** the Westside Wolves (West End), Hilltop Hounds (Hilltop) and Kimberly Kings (Kimberly Road) hang out on their turf, shown faintly on the map. Flash a gun there and they'll warn you off; start something and the whole crew joins in.
+- **Fist fights:** people who fight you throw the same jabs, crosses, hooks, uppercuts and bat swings you do, with a wind-up you can read: back off or sidestep and they whiff, hit them first and they stagger and the punch never lands. A crowd squares up in a ring round you, circles and takes turns instead of all swinging at once.
 - **Getting wasted:** dying plays a slow-motion **WASTED**, then you wake up at the hospital minus a bill (you keep your guns).
 
 ## Online: one world for everyone
