@@ -12,7 +12,7 @@ This file is the starting point for any new session working on this repo. Read i
 - **No tutorial pop-ups** ("press E to enter" and similar). Keys go in the Controls panel only.
 - **Realism:** everything as close to 1:1 with the real Quad Cities as possible (real roads, real places, real business spots with parody names for national chains). Research references before modelling a landmark.
 - **GTA V look:** Pricedown font, GTA V-style HUD, menus and loading screen. The loading screen is hands-off unless he asks for a change.
-- **Model style (Dain, 2026-11-26):** people, players, cars and props should look like GTA San Andreas (PS2-era): low-poly, chunky, bold silhouettes, simple colour regions. Original designs only, never copied GTA assets. The HUD and menus stay GTA V style.
+- **Model style (Dain, 2026-11-26):** people and players look like GTA San Andreas (PS2-era stylised proportions, painted-texture faces, chunky hair and clothes; research notes in `docs/people-style.md`). Cars, bikes, props and interiors keep the detailed style. Original designs only, never copied GTA assets. The HUD and menus stay GTA V style.
 - **Helper agents:** as few as possible, each on Opus 5.5 at medium effort, unless he asks for more (he did once: one agent per town).
 - **This Mac has 8 GB RAM:** only one Blender at a time (background `blender -b -P script.py`, never the shared Blender UI window for agents) and light node scripts (`--max-old-space-size=1024`). Locks used by parallel agents: `mkdir /private/tmp/claude-501/tat-blender.lock` and `tat-node.lock`.
 - **Project board:** https://claude.ai/artifact/QhDWP3JvmEHRs6c7vbxot4, doc `projects/harbor-city`. Tick steps there when they're done (update `steps`, pinned with `if_version`).
