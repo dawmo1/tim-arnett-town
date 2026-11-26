@@ -26,62 +26,59 @@ Nothing is in the game yet. The plot below is a **draft for Dain to approve**; c
 - **Family:** dad Tim Arnett, mom Rebecca Arnett ("Jugs"), late grandma Lorece.
 - **Best friends:** Taefyl, Eric and Joshua. **Ex:** Neveah.
 
-## Draft plot
+## Draft plot (version 4: everything new)
 
-**Premise.** In the game, Tim Arnett is the loudest man in Henry County. His face is on billboards all over the Quad Cities: Tim Arnett Injury Law, Arnett Auto, Arnett Arms, Tim's Threads and the Arnett Belle casino. Now he's running for mayor of Geneseo as "Mayor Tim." Flynn just wants his cart back, a McDonald's run and a quiet shift washing dishes at GBC. Every time Tim needs a dirty job done, Flynn gets dragged in, and Flynn's "help" makes everything ten times worse. Running thread: Flynn wants his dad to respect him (and stop stealing his cart); Tim wants a son who makes him look good on camera.
+**Premise.** Fireworks are illegal in Illinois and sold in tents on every corner in Iowa. Tim Arnett, the loudest man in Henry County with his face on billboards from Geneseo to Davenport, decides to become the Fireworks King of the Quad Cities. He spends the family savings on a barn full of Iowa fireworks and drags Flynn into smuggling them across the Mississippi. That puts the Arnetts at war with the Hagerty family, who run every fireworks tent in Iowa and don't share. The story builds to the Fourth of July and the Red, White and Boom show on the river.
 
 ### Characters (draft)
 
 - **Flynn Arnett:** the player.
-- **Tim Arnett:** Flynn's dad. Game version: Quad Cities billboard mogul running for mayor, steals his son's cart. Waiting on Dain for what the real Tim is like.
-- **Rebecca "Jugs" Arnett:** Flynn's mom. The only one who can make Flynn and Tim shut up. Waiting on Dain for her personality.
-- **Grandma Lorece:** passed away. Only ever comes up in quips: someone mentions her and Flynn threatens them.
-- **Taefyl, Eric, Joshua:** Flynn's crew, who ride along on missions. Need one line each from Dain on what they're like.
-- **Neveah:** Flynn's ex. Shows up at the worst possible moments.
-- **Gloria Vance:** Tim's opponent for mayor (fictional).
-- **"Big Lou" Ostrowski:** Rock Island money man secretly behind Tim's businesses (fictional). Chapter 2's villain.
+- **Tim Arnett:** Flynn's dad. Big talker, worse ideas. Steals Flynn's cart. Waiting on Dain for what the real Tim is like.
+- **Rebecca "Jugs" Arnett:** Flynn's mom. Doesn't know about the fireworks. Finding out is a running threat.
+- **Grandma Lorece:** passed away. Only in quips.
+- **Taefyl, Eric, Joshua:** Flynn's crew. They ride along and each has his own mission.
+- **Neveah:** Flynn's ex. Now dating a Hagerty.
+- **"Duke" Hagerty:** the Iowa fireworks boss, a smiling Davenport car-dealer type. Chapter 2's villain.
+- **Brody Hagerty:** Duke's son and Neveah's new boyfriend. Flynn's rival.
+- **Sheriff Dale Krupp:** Henry County sheriff (fictional) who has hated Tim since high school.
 
-Every mission plays differently, GTA-style: no two missions share a main mission type (the type is in brackets). Grandma Lorece only shows up in dialogue quips.
+### Chapter 1: "Illinois Contraband" (Geneseo)
 
-### Chapter 1: "Bro" (Geneseo), 10 missions
+1. **Mower Man.** Tim took the Escape, and Flynn is late for his GBC shift. Ride Tim's riding mower across Geneseo through traffic, a car wash and a funeral procession. Tim pulls up at GBC with the trunk full of fireworks and says "Bro, we're rich."
+2. **Test Fire.** Test Tim's stock in a field at night by lighting fuses and rating each firework. A rocket lands on Sheriff Krupp's patrol car. Hide all the evidence around the farm before his flashlight finds it.
+3. **Barn Fight.** Flynn needs cash fast, so Taefyl gets him into an underground fight night in a Henry County barn. A boxing tournament against farm kids, a trucker and a guy in a full Maple Leafs mascot head.
+4. **Homecoming.** Flynn crashes the Geneseo High homecoming dance to win back Neveah. A dance-off rhythm minigame against Brody Hagerty. Flynn wins the dance and loses the girl; Brody tells Duke about the Arnett fireworks.
+5. **Crop Circle.** Tim wants advertising, so Flynn drives a combine at night and cuts a giant "ARNETT FIREWORKS" into a cornfield by following a pattern from above, while the farmer hunts him with a spotlight.
+6. **Gone Fishing.** Eric's mission. Fishing on the Hennepin Canal for a bag of cash Tim threw in during a panic. A fishing minigame, with pulling up junk, a shopping cart and finally the bag. Hagerty guys arrive by boat.
+7. **Handle With Care.** The barn's been found, so move all the fireworks across town in a rented box truck. Every pothole and hard turn adds to a bang meter, and you have to avoid the Fourth of July parade route.
+8. **Senior Prank.** Joshua's mission. A three-step prank on the rival school: steal their bus keys, sneak into their gym at night, and fill it with 10,000 bouncy balls. Then escape the janitor in a golf cart.
+9. **Impound.** Sheriff Krupp tows the Escape and the fireworks inside it. Joshua listens on a police scanner while Flynn climbs into the county impound lot, steals the keys, and drives the Escape out through the gate.
+10. **Boom Town.** The Hagertys torch the new hiding spot. The fireworks truck is on fire and going off in the middle of Geneseo. Drive it out of town, with rockets firing out of the back, and into the Hennepin Canal before it blows. Tim swears revenge on Iowa.
 
-1. **Cart Thief** [chase]. Tim's hitting Flynn's cart on the porch and bolts in the campaign SUV. Chase him on foot, then in the Escape, through yards, the City Park bandstand and a yard sale, dodging campaign signs he throws out the window. Tim tosses the cart in the Hennepin Canal.
-2. **Dish Pit** [job minigame + pickpocket]. A GBC lunch-rush dishwashing minigame. Tim's campaign team dines and dashes, so Flynn has to sneak around the dining room and lift the campaign manager's wallet to cover the bill without anyone noticing.
-3. **Two Cheeseburger Problem** [careful delivery + first wanted level]. Deliver 40 McDonald's orders to the football bus before kickoff with a spill meter: brake hard and the fries go everywhere. Clip a Vance volunteer on the way, it goes viral, and Flynn has to lose his first wanted level with a car full of food.
-4. **Jugs Has Entered the Chat** [timed checklist]. Get home before Mom sees the viral video. A timer and a list: cut the cable at home, steal the newspaper bundle, get the neighbour off Facebook, delete the video off Dad's phone. Jugs is on the porch anyway.
-5. **Friday Night Lights** [sports minigame + emergency vehicle]. Play a few football plays at Bob Reade Field. Tim's halftime campaign fireworks set the concession stand on fire, so Flynn takes the fire truck parked by the field and puts it out before the cameras arrive.
-6. **Trap Day** [precision shooting]. Trap practice with the team. Tim wants Vance's campaign drone shot down "by accident." Hit clay targets without missing to keep cover, then pick off a swarm of drones mid-air.
-7. **The Farm** [tail + photo, then shootout]. Tail Tim's campaign van out of town without being seen. Snap phone photos of Tim meeting Rock Island guys at a farm. They spot Flynn: a shootout in a cornfield maze and an escape in a stolen combine harvester.
-8. **County Fair** [getaway driver]. Taefyl, Eric and Joshua lift the Vance campaign's cash box at the Henry County Fair. Flynn waits in the Escape and has to get them out with cops on every road, escaping through back roads, gravel and a farm pond.
-9. **Pink Slip** [street race]. Neveah's new boyfriend challenges Flynn to a race, his lifted truck against the Escape, Geneseo to Cambridge and back for pink slips. Shortcuts through fields, a train crossing and a sheriff's speed trap.
-10. **Town Hall** [stealth + disaster rescue]. Sneak backstage at the mayoral debate by the Central Theatre to swap Vance's notes. A tornado hits mid-debate: drive townspeople to shelter through the storm while debris flies. Tim takes credit for the rescue and wins the debate. Flynn finds a bag of Big Lou's cash in Tim's car.
+### Chapter 2: "Across the River" (Quad Cities)
 
-### Chapter 2: "Across the River" (Quad Cities), 10 missions
+1. **Border Run.** Bring a load back over the I-74 bridge through a state police checkpoint: talk your way past the trooper by picking answers, then lose him when Tim (in the passenger seat) says the wrong thing.
+2. **Bix 7.** Duke Hagerty runs the Bix 7 road race in Davenport every year. Flynn runs it too, in sweatpants, up Brady Street hill, to plant a tracker on Duke. A running race with stamina and cutting corners through crowds.
+3. **Pawn Stars.** Tim pawned Jugs' wedding ring to buy more stock. Hold up the pawn shop to get it back before she notices. A robbery with a timer, and the owner has a shotgun.
+4. **High Roller.** Taefyl's mission. Play the casino at the Arnett Belle (blackjack, roulette, slots) to win enough to buy Duke's supplier out from under him. Lose too much and the pit boss comes for you.
+5. **Skybridge.** Duke meets his supplier under the Davenport Skybridge. From the top of a parking ramp, use a sniper rifle to blow up the delivery truck without hitting anyone.
+6. **Barge Drop.** The Hagertys' big shipment is on a barge heading down the Mississippi. Jump from a small plane, parachute onto the moving barge, and cut it loose.
+7. **Repo.** Brody shows off his new car at a Hagerty dealership party. Show up in a tow truck and steal every car on the lot, one at a time, before the party notices.
+8. **Flood Stage.** The Mississippi floods downtown Davenport (as it really does). Ride a jet ski through flooded streets to save Tim, who's stuck on top of an Arnett billboard with the last crate.
+9. **City Worker.** Dress as a city parks worker to sneak onto the Red, White and Boom fireworks barge and swap the show's fireworks with Arnett ones. Bluff past the real crew and fix the wiring.
+10. **Red, White and Boom.** The Fourth of July finale. Fight the Hagertys across the fireworks barges while the show goes off around you. Flynn fights Brody, and Tim fights Duke badly. The finale lights the sky: "ARNETT." Tim takes all the credit on the news. Jugs is watching and finds out about everything. Cliffhanger: Jugs says "Flynn. Car. Now."
 
-1. **Road Trip** [courier + carjacking]. Drive Tim's "payment" down I-74 to Big Lou at The District in Rock Island. Lou says it's short and keeps the Escape as interest. Flynn has to jack a ride home and pick a car worth keeping.
-2. **Arnett Arms** [defend the store]. A shooting-range lesson at Arnett Arms in Davenport is interrupted when a robbery crew hits the shop. Hold the store against waves of attackers until the cops show up, then slip out the back before they recognise Flynn.
-3. **John Deere Joyride** [stealth break-in + slow getaway]. Sneak into the Deere HQ campus in Moline after dark, past guards and cameras, and steal a prototype tractor. Then the slowest police chase in history at 18 mph, with cops on foot keeping up.
-4. **Crop Duster** [flying]. Lou's package is coming in by plane. Flynn learns to fly at a crop-duster strip, picks up the drop mid-air, and loses a police helicopter by flying under the I-74 bridge.
-5. **Channel Cat** [boat chase]. A meeting on the Channel Cat water taxi goes wrong when Flynn learns Vance is on Lou's payroll too. A speedboat chase down the Mississippi and a jump off the boat onto Arsenal Island as the Arsenal Bridge swings open.
-6. **Mall Rat** [remote-control vehicle]. Lou launders money through NorthPark Mall. Flynn drives an RC car through the mall's vents and ceilings to the office and steals the ledger while the crew keeps security busy on Black Friday.
-7. **River Bandits** [disguise infiltration]. Lou's lieutenant is in a luxury box at Modern Woodmen Park. Flynn sneaks in as the mascot, has to do the mascot race on the field to stay in character, then plants a tracker before the real mascot shows up.
-8. **Jugs to the Rescue** [passenger gunner]. Lou kidnaps Tim. Jugs drives, Flynn leans out the window and shoots, from Davenport to Bettendorf and up onto the I-74 bridge.
-9. **Belle of the Ball** [heist]. Election night at the Arnett Belle casino. Pick roles for Taefyl, Eric and Joshua (driver, hacker, muscle), case the place playing the casino games, then rob Lou's cut from the counting room, with or without Tim's blessing (player chooses). Neveah is working as a cocktail waitress and nearly blows it.
-10. **Lock and Dam** [multi-vehicle finale]. Lou's crew chases Flynn up the river to Lock & Dam 15: car, then boat, then on foot across the lock gates as they open, with helicopters and a barge pile-up. Flynn gets the Escape back, wrecked. Ending: Tim wins, Lou is arrested, and Tim admits he tipped off the feds and used Flynn as bait. Flynn hits Tim's cart and throws it in the river. Cliffhanger: a black SUV pulls up, and the feds want Flynn.
+### Between missions
 
-### Between missions (always going on)
-
-- **Phone:** Tim texts constantly (campaign selfies, "where's my cart"), Jugs calls with chores, the crew sends dumb videos, Neveah texts "u up?" at the worst times. Some texts start side jobs.
-- **Strangers and freaks** (GTA-style side characters with short mission chains):
-  - The GBC manager's increasingly unhinged requests.
-  - A gym bro challenging Flynn to workouts.
-  - A Vance campaign intern who keeps trying to recruit him.
-  - A McDonald's regular who swears the ice cream machine is a government conspiracy.
-- **Bridge Out:** a chaos side job for Lou, cause the biggest traffic jam in Quad Cities history for a score.
+- **Phone:** Tim texts constantly ("where's my cart," business ideas), Jugs calls with chores, the crew sends dumb videos, Neveah texts at the worst times.
+- **Strangers and freaks:**
+  - The GBC manager's dish-pit emergencies.
+  - A Geneseo gym bro with workout challenges.
+  - A guy convinced Iowa is a hoax.
+  - A McDonald's regular with ice-cream-machine conspiracy theories.
+- **Fireworks business:** sell Tim's stock out of the Escape's trunk around Illinois for cash, with Sheriff Krupp hunting you.
 - **Stunt jumps** that only count in the Escape.
-- **Election meter:** Tim's poll numbers move with what Flynn does and show on billboards and news reports.
 - **Collectibles:** Tim's stolen carts hidden around the map.
-- **Random encounters:** the Vance campaign bus blocking the road, Tim shooting a TV ad in the middle of traffic, Jugs spotting Flynn while he's wanted.
 
 ### Still to decide
 
@@ -89,6 +86,7 @@ Every mission plays differently, GTA-style: no two missions share a main mission
 - One line each on Taefyl, Eric, Joshua and Neveah.
 - Which house is the Arnett house in Geneseo (the first safehouse); a street is enough.
 - Flynn's ringtone (something stupid).
+- Whether you like the fireworks premise or want a different one.
 - Where the trap team actually shoots (Bi-State Sportsman's in Colona is the nearest real range found).
 
 ## Planning first (with Dain)
