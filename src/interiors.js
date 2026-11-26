@@ -353,9 +353,19 @@ export function updateRoom(dt, me, threat) {
   if (room?.spin) room.spin.rotation.z += dt * 1.6;
   for (const R of room?.under || room?.hall ? [room, ...built] : built) for (const p of R.people) {
     const scared = threat && Math.hypot(threat.x - p.x, threat.z - p.z) < 30;
-    const st = p === R.clerk && R.held ? { handsUp: true } : scared && p !== R.clerk ? { cower: true } : p.pose === 'chat' ? { chat: true } : p.pose === 'browse' ? { look: Math.sin(performance.now() / 900 + p.lx) * 0.6 } : {};
+    let st = p === R.clerk && R.held ? clerkHeldUp(R) : scared && p !== R.clerk ? { cower: true } : p.pose === 'chat' ? { chat: true } : p.pose === 'browse' ? { look: Math.sin(performance.now() / 900 + p.lx) * 0.6 } : {};
+    if (p === R.clerk && R.clerkAct) { const a = clerkAct(R); if (a) st = { act: a }; } // taking your cash, handing the goods (or the bag) over
     animateCharacter(p.ch, dt, st);
   }
+}
+// held up: hands go up, then the clerk scoops the till into a bag, shaking
+const clerkHeldUp = (R) => (R.store.progress > 0.12 ? { act: { n: 'fillBag', k: (performance.now() / 2400) % 1 }, scared: true } : { handsUp: true });
+// R.clerkAct = { at: ms, seq: [[action, seconds], ...] } set by main.js at a sale or the end of a robbery
+function clerkAct(R) {
+  let t = (performance.now() - R.clerkAct.at) / 1000;
+  for (const [n, d] of R.clerkAct.seq) { if (t < d) return { n, k: t / d }; t -= d; }
+  R.clerkAct = null;
+  return null;
 }
 export function nearExit(x, z) { return room && room.exit && Math.hypot(room.exit.x - x, room.exit.z - z) < 2.2; }
 export function nearCounter(x, z) { return room && room.counter && Math.hypot(room.counter.x - x, room.counter.z - z) < 2.6; }

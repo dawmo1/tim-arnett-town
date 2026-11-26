@@ -80,7 +80,7 @@ function perf(frames = 120) {
   }
   return { animMs: +(ta / frames).toFixed(2), renderMs: +(tr / frames).toFixed(2), ...renderer.info.render };
 }
-window.__pp = { THREE, scene, cam, people, renderer, draw, step, perf, setPose: (p) => { pose = p; }, frameCam, stats: () => renderer.info.render };
+window.__pp = { THREE, scene, cam, people, renderer, draw, step, perf, animate: animateCharacter, setProp, setPose: (p) => { pose = p; }, frameCam, stats: () => renderer.info.render };
 window.__ready = true;
 </script>
 </body>

@@ -85,6 +85,8 @@ export function makeCharacter(look, opts = {}) {
   const B = p.bones;
   const ch = { g, body, rig: p.rig, mesh: p.body, acc: p.acc, mat: p.mat, bones: B, look: p.look, weapons: {}, held: null, heldName: null, props: {}, seed, roll: (Math.random() - 0.5) * 2, walk: 0, deadT: 0 };
   ch.armOut = [3, 10, 0, 2, 8][p.look[1]] ?? 3; // arms clear of the hips and belly, by build
+  // walk style (people/pose.js): heavy people waddle, women sway, grey-haired people shuffle; npc.js sets 'gang'
+  ch.style = p.look[1] === 1 ? 'fat' : female ? 'woman' : p.look[5] === 7 || p.look[5] === 8 ? 'old' : null;
   return ch;
 }
 
@@ -99,6 +101,14 @@ const PROP_AT = {
   cig: ['handR', [0, -0.1, 0.02], [0, 0, 0]],
   coffee: ['handL', [0, -0.09, 0.03], [0, 0, 0]],
   sign: ['handR', [0, -0.04, 0], [Math.PI, 0, 0]],
+  // held during actions (src/anim.js)
+  cash: ['handR', [0, -0.1, 0.03], [0, 0, 0]],
+  moneybag: ['handL', [0, -0.1, 0], [0, 0, 0]],
+  cue: ['handR', [0, -0.09, 0.01], [0, Math.PI, 0]],
+  dart: ['handR', [0, -0.11, 0.02], [0, 0, 0]],
+  cards: ['handL', [0, -0.1, 0.03], [0, 0, 0]],
+  hotdog: ['handR', [0, -0.1, 0.05], [0, 0, Math.PI / 2]],
+  beer: ['handR', [0, -0.09, 0.04], [0, 0, 0]],
 };
 export function setProp(ch, name, on = true) {
   if (!ch.bones) return null;

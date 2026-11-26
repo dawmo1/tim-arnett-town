@@ -1041,6 +1041,9 @@ def build_props():
     neckt = tube_obj('n', [Vector((0, 0, -0.02)), Vector((0, 0, 0.02))], [0.025, 0.02], 6, seg=8)
     out.append(join([sack, neckt], 'acc_moneybag'))
     out.append(box_obj('acc_cards', (0.06, 0.004, 0.088), (0, 0, 0), 7, (0.25, 0.75), bevel=0.003))
+    bun = box_obj('hb', (0.045, 0.16, 0.04), (0, 0, 0), 7, (0.75, 0.25), bevel=0.015)  # (wood/cardboard cell: bread-brown)
+    dog = tube_obj('hd', [Vector((0, -0.095, 0.018)), Vector((0, 0.095, 0.018))], [0.012, 0.012], 6, seg=6, uvx=(0.1, 0.2))
+    out.append(join([bun, dog], 'acc_hotdog'))
     out.append(tube_obj('acc_beer', [Vector((0, 0, -0.07)), Vector((0, 0, 0.05)), Vector((0, 0, 0.09)), Vector((0, 0, 0.12))], [0.03, 0.03, 0.012, 0.011], 7, seg=8, uvx=(0.55, 0.95)))
     return out
 

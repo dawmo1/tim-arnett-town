@@ -87,14 +87,15 @@ function makeMaterial(L) {
         float pc = pCell[ri];
         vec2 cuv = (vec2(mod(pc, 8.0), ROWS_M1 - floor(pc / 8.0)) + PAD + lc * (1.0 - 2.0 * PAD)) / vec2(8.0, ROWS_M1 + 1.0);
         // gradients from the continuous uv, so pixels at a cell's edge don't jump to the tiniest mip (white seams)
-        vec2 gsc = (1.0 - 2.0 * PAD) / vec2(8.0, ROWS_M1 + 1.0), gdx = dFdx(vMapUv) * gsc, gdy = dFdy(vMapUv) * gsc;
-        vec4 tx = textureGrad(map, cuv, gdx, gdy);
+        vec2 gsc = (1.0 - 2.0 * PAD) / vec2(8.0, ROWS_M1 + 1.0) * vec2(textureSize(map, 0)), gdx = dFdx(vMapUv) * gsc, gdy = dFdy(vMapUv) * gsc;
+        float plod = 0.5 * log2(max(max(dot(gdx, gdx), dot(gdy, gdy)), 1e-8));
+        vec4 tx = textureLod(map, cuv, plod);
         float a = tx.a;
         vec3 tint = a > 0.9 ? pTA[ri] : a > 0.7 ? pTB[ri] : a > 0.5 ? pSkin : vec3(1.0);
         vec3 pcol = tx.rgb * tint;
         if (pTat >= 0.0 && ri == 2 && a > 0.5 && a < 0.7) {
           vec2 tu = (vec2(mod(pTat, 8.0), ROWS_M1 - floor(pTat / 8.0)) + PAD + lc * (1.0 - 2.0 * PAD)) / vec2(8.0, ROWS_M1 + 1.0);
-          vec4 tt = textureGrad(map, tu, gdx, gdy);
+          vec4 tt = textureLod(map, tu, plod);
           pcol = mix(pcol, tt.rgb, step(0.3, tt.a) * 0.85);
         }
         diffuseColor.rgb *= pcol;
