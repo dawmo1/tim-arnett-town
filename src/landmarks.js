@@ -66,7 +66,7 @@ const MODELS = [
     [469.85, 109.2, 6.25, 9.6, 10], [451.6, 109.2, 24.5, 9.6, 40, 10], ...roomWalls(451.6, 109.2, 0, 24, 18.4, 10, [['s', -2, 2]])] }, // lobby (blackhawk_int) behind the 3rd St doors
   { file: 'adler', x: 342.4, z: 91.2, y: 8.6, clear: [[342.4, 91.2, 18, 16.5]], solid: [[342.4, 104.7, 19.7, 5.2, 21, 6.8], [342.4, 86, 19.7, 13.5, 10, 18.5], [327.35, 104.7, 4.65, 5.2, 7],
     [357.45, 104.7, 4.65, 5.2, 7], ...roomWalls(342.4, 104.7, 0, 20, 9.4, 7, [['s', -3, 3], ['n', -4, 4]]), ...roomWalls(342.4, 86.05, 0, 37.8, 25.1, 19, [['s', -4, 4]]),
-    [342.4, 77.5, 18.9, 4.5, 1.1]] }, // lobby + auditorium (adler_int); the stage
+    [342.4, 77.5, 18.9, 4.5, 1.1], [333.35, 92.3, 7.85, 6.3, 1.5], [351.45, 92.3, 7.85, 6.3, 1.5]] }, // lobby + auditorium (adler_int); the stage; the raked seats either side of the centre aisle
   { file: 'figge', x: 109, z: 340, y: 3.4, clear: [[109, 340, 46, 18]], solid: [[109, 340, 46, 18, 19, 7], [66, 340, 4, 18, 7], [152, 340, 4, 18, 7],
     ...roomWalls(109, 340, 0, 78, 36, 7, [['n', -3, 3]]), [141.5, 350, 2.5, 6, 3, 0]] }, // grand lobby (figge_int) from 2nd St; the stair
   { file: 'banktower', x: 141, z: 164.7, y: 8.0, clear: [[141, 164.7, 13.5, 21]], solid: [[141, 164.7, 15.2, 22.9, 68, 14], [141, 179, 15.2, 8.6, 14],
@@ -160,7 +160,7 @@ MODELS.push(
   { file: 'deerehq', x: 12637, z: 5202, ground: true, load: 900, clear: [[12637, 5202, 40, 12], [12755, 5195, 15, 20]], solid: [[12637.2, 5202.5, 51.5, 17.2, 30]] }, // display building walls: deerehq_int
   // Arsenal Island: the Clock Tower building, Lock and Dam 15 (roller dam + locks, on the water)
   { file: 'clocktower', x: 1140, z: 778, ground: true, load: 900, clear: [[1147, 778, 12, 12], [1138, 765, 4, 4]],
-    solid: [[1140.9, 778, 28, 9.15, 22, 0, 0.624], [1133.9, 768.3, 3.8, 3.8, 36, 0, 0.624], [1161.8, 769.9, 9, 9, 13, 0, 0.624]] },
+    solid: [[1161.8, 769.9, 9, 9, 13, 0, 0.624]] }, // the main block and the tower: clocktower_int
   { file: 'lockdam', x: 728.65, z: 549.55, y: WATER_Y, load: 1200, clear: [], solid: [[728.65, 549.55, 189.2, 9, 20, 0, -0.683]] },
   { file: 'lock15', x: 1133.45, z: 583.55, y: WATER_Y, load: 1000, clear: [], solid: BOXES_LOCK },
   // Quad Cities International Airport: terminal + concourses, the tower and the Elliott hangar
@@ -193,6 +193,11 @@ MODELS.push(
   RINT('circa21', 337, 1545, null, 220),
   // Augustana's Old Main: the rotunda under the dome, the hall, a classroom and the old library
   RINT('oldmain', 2333, 2126.5, null, 220),
+  // the Arsenal's Clock Tower Building: tower vestibule, the Corps of Engineers' lobby and corridors
+  RINT('clocktower', 1140, 778, null, 220),
+  // Watch Tower Lodge (Black Hawk State Historic Site; the exterior is the countryside region's model): the great hall
+  // and the Hauberg Indian Museum
+  RINT('lodge', 400, 6560, null, 220),
 );
 const LOAD = 700, DROP = 900;
 for (const L of MODELS) for (const [x, z, hw, hd] of L.clear) lots.extra.push({ x, z, fx: 0, fz: 1, hw, hd });

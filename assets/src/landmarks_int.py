@@ -209,6 +209,40 @@ def door_gap(L, Ln, c, half):
     return None
 
 
+def cut_door(K, a, b, u0, u1, z0, z1, tol=0.7):
+    """open a doorway in faces already in K that lie on the wall line a->b (Blender points): u0..u1 metres from a,
+    z0..z1 high; flat faces on the line are split round the hole, faces across it (window reveals) inside it dropped"""
+    A = Vector((a[0], a[1], 0))
+    ux = Vector((b[0] - a[0], b[1] - a[1], 0)).normalized()
+    nx = Vector((-ux.y, ux.x, 0))
+    keep = []
+    for pts, col, m in K.faces:
+        loc = [((p - A).dot(ux), (p - A).dot(nx), p.z) for p in pts]
+        if max(abs(l[1]) for l in loc) > tol:
+            keep.append((pts, col, m))
+            continue
+        us, ds, zs = [l[0] for l in loc], [l[1] for l in loc], [l[2] for l in loc]
+        if max(us) <= u0 or min(us) >= u1 or max(zs) <= z0 or min(zs) >= z1:
+            keep.append((pts, col, m))
+            continue
+        if max(us) - min(us) < 0.01 or max(ds) - min(ds) > 0.01 or len(pts) != 4:
+            if min(us) >= u0 - 0.01 and max(us) <= u1 + 0.01 and min(zs) >= z0 - 0.01:
+                continue  # a reveal or sill inside the opening
+            keep.append((pts, col, m))
+            continue
+        d = ds[0]
+        nrm = (pts[1] - pts[0]).cross(pts[2] - pts[0])
+        P_ = lambda u, z: A + ux * u + nx * d + Vector((0, 0, z))
+        for (ua, ub, za, zb) in ((min(us), min(u0, max(us)), min(zs), max(zs)), (max(u1, min(us)), max(us), min(zs), max(zs)),
+                                 (max(u0, min(us)), min(u1, max(us)), max(z1, min(zs)), max(zs)), (max(u0, min(us)), min(u1, max(us)), min(zs), min(z0, max(zs)))):
+            if ub - ua > 0.01 and zb - za > 0.01:
+                q = [P_(ua, za), P_(ub, za), P_(ub, zb), P_(ua, zb)]
+                if (q[1] - q[0]).cross(q[2] - q[0]).dot(nrm) < 0:
+                    q = q[::-1]
+                keep.append((q, col, m))
+    K.faces = keep
+
+
 def int_done(name, K, Rm, anchor, cam, target, render, lens=18):
     """finish an interior: GLB, game data, a preview from inside"""
     o = K.obj(name + '_int')
@@ -795,8 +829,8 @@ B['northpark_int'] = northpark_int
 # ================================================================ QUAD CITIES INTERNATIONAL AIRPORT (MLI) terminal
 # The 1985/2001 terminal (renovated 2025): curbside doors on the long landside front into the ticketing hall (airline
 # counters along the back wall), baggage claim with two carousels and the rental-car counters at the east end, the TSA
-# checkpoint in the connector, then the hub with the coffee bar and the two concourses: B to the west (gates B1-B5) and
-# A to the south-east (gates A1-A3), gate seating along the apron windows. Grid: u along the landside front, v airside.
+# checkpoint in the connector, then the hub with the coffee bar and the two concourses: B to the west (gates B1-B6) and
+# A to the south-east (gates A1-A4), gate seating along the apron windows. Grid: u along the landside front, v airside.
 MLI_O = (5863.6, 7627.4)
 _ma = math.atan2(74.9, 98.3)
 MLI_E, MLI_N = (math.cos(_ma), math.sin(_ma)), (-math.sin(_ma), math.cos(_ma))
@@ -958,7 +992,7 @@ def mli_int(render=True):
     K.box(p[0] - 1.8, p[0] + 1.8, p[1] - 0.15, p[1] + 0.15, F + 2.0, F + 3.4, lin('#111111'))
     K.box(p[0] - 1.7, p[0] + 1.7, p[1] - 0.16, p[1] + 0.16, F + 2.1, F + 3.3, lin('#2b6cff'), NEON)
     # ---- the gates: podium, seat banks, the jet bridge door, the gate number
-    gates = [('B1', 30, 'B'), ('B2', 52, 'B'), ('B3', 74, 'B'), ('B4', 96, 'B'), ('B5', 118, 'B'), ('A1', 190, 'A'), ('A2', 210, 'A'), ('A3', 230, 'A')]
+    gates = [('B%d' % (k + 1), 26 + k * 18.5, 'B') for k in range(6)] + [('A%d' % (k + 1), 183 + k * 16.5, 'A') for k in range(4)]  # six jet-bridge gates on B, four on A
     for nm, u, con in gates:
         vw = 147.6 if con == 'B' else 142.8  # the apron wall
         v0 = 121 if con == 'B' else 122.2
@@ -1464,8 +1498,271 @@ def oldmain_int(render=True):
     # students in the hall and the rotunda
     for (x, z, pose) in ((2315, 2126.3, 'walk'), (2350, 2126.3, 'walk'), (2333, 2124, 'chat'), (2334.5, 2124.6, 'chat'), (2331, 2131, 'phone'), (2344, 2126.3, 'walk')):
         Rm.person(G(x, z), G(x + 5, z) if pose == 'walk' else G(2333, 2126.5), pose, 0, 'student')
+    # the building's outer walls (OSM outline) round the rooms, open at the north doors
+    out = [(2307.4, 2116.8), (2315.8, 2116.8), (2315.8, 2117.5), (2325.5, 2117.6), (2325.5, 2114.8), (2340.3, 2114.9), (2340.3, 2118.1), (2350.7, 2118.2),
+           (2350.8, 2116.6), (2359.1, 2116.7), (2359.0, 2123.5), (2360.3, 2123.6), (2360.2, 2130.3), (2358.6, 2130.3), (2358.6, 2136.9), (2351.5, 2136.9),
+           (2351.5, 2135.5), (2340.1, 2135.5), (2340.1, 2138.5), (2326.7, 2138.5), (2326.7, 2135.8), (2315.1, 2135.8), (2315.1, 2137.5), (2308.3, 2137.5),
+           (2308.3, 2129.2), (2306.4, 2129.2), (2306.4, 2124.4), (2307.4, 2124.4)]
+    for i in range(len(out)):
+        a, b = out[i], out[(i + 1) % len(out)]
+        if a == (2325.5, 2114.8):
+            Rm.wall(G(*a), G(2331.2, 2114.82), 20, 0.8, 0, out=G(2333, 2100))
+            Rm.wall(G(2334.6, 2114.86), G(*b), 20, 0.8, 0, out=G(2333, 2100))
+        else:
+            Rm.wall(G(*a), G(*b), 20, 0.8, 0, out=G(2333 + (a[0] + b[0] - 4666) * 2, 2126.5 + (a[1] + b[1] - 4253) * 2))
     Rm.hall('Old Main', G(2333, 2125.15), 48, 19.7, (1, 0), F, 4.0, [0xfff0d8, 12])
     return int_done('oldmain', K, Rm, anchor, (*G(2333, 2116.5), F + 1.7), (*G(2333, 2128), F + 8), render)
 
 
 B['oldmain_int'] = oldmain_int
+
+
+# ================================================================ ROCK ISLAND ARSENAL CLOCK TOWER BUILDING
+# Storehouse A (1864-67), the Corps of Engineers' Rock Island District offices: in through the tower's arched door
+# on the lock side, the tower vestibule, then the lobby with the District's history exhibits (the 1860s Arsenal, the
+# locks and dams, the Engineers' castle) and the long central corridor of offices to both ends of the building.
+CT_ROT = 0.624
+
+
+def clocktower_int(render=True):
+    anchor = (1140.0, 778.0)
+    R = room_frame(anchor, 1140.9, 778.0, CT_ROT)
+    F = 0.5
+    K = Kit(771, ao=0)
+    Rm = Rooms(anchor)
+    rnd = random.Random(81)
+    plaster, oak, tile, tile2, ceil, lime = lin('#eee6d4'), lin('#7a5230'), lin('#b8ad98'), lin('#a89d88'), lin('#e8e2d2'), lin('#cfc4ae')
+    red = lin('#c8102e')
+    Fr = lambda u, h, v: (*R(u, v), F + h)
+
+    def rb(u0, u1, v0, v1, h0, h1, col, m=BODY, skip=('h-',)):
+        K.obox(Fr, u0, u1, h0, h1, v0, v1, col, m, skip)
+
+    def rblk(u0, u1, v0, v1, h):
+        Rm.wall(R(u0, (v0 + v1) / 2), R(u1, (v0 + v1) / 2), h + F, abs(v1 - v0))
+
+    def rfloor(u0, u1, v0, v1, ch, cols, step=1.6):
+        nu, nv = max(1, round((u1 - u0) / step)), max(1, round((v1 - v0) / step))
+        for i in range(nu):
+            for j in range(nv):
+                a0, a1 = u0 + (u1 - u0) * i / nu, u0 + (u1 - u0) * (i + 1) / nu
+                b0, b1 = v0 + (v1 - v0) * j / nv, v0 + (v1 - v0) * (j + 1) / nv
+                flat(K, [R(a0, b0), R(a1, b0), R(a1, b1), R(a0, b1)], F, cols[(i + j) % len(cols)])
+        flat(K, [R(u0, v0), R(u1, v0), R(u1, v1), R(u0, v1)], F + ch, ceil, BODY, False)
+    rfloor(-3.2, 3.2, -16.2, -8.55, 6.0, [tile, tile2], 1.0)
+    rfloor(-10, 10, -8.55, 8.55, 4.4, [tile, tile2], 1.6)
+    rfloor(-27.4, -10, -1.25, 1.25, 3.6, [lin('#8a7a62')], 2.5)
+    rfloor(10, 27.4, -1.25, 1.25, 3.6, [lin('#8a7a62')], 2.5)
+    for (u0, v0, u1, v1) in ((-10, -1.25, -10, 1.25), (10, -1.25, 10, 1.25)):  # the corridor ceilings step down from the lobby
+        vwall(K, R(u0, v0), R(u1, v1), F + 3.6, F + 4.4, ceil, R(0, 0))
+    vwall(K, R(-3.2, -8.55), R(3.2, -8.55), F + 4.4, F + 6.0, ceil, R(0, -12))
+    P = [(-3.2, -16.2), (3.2, -16.2), (3.2, -8.55), (10, -8.55), (10, -1.25), (27.4, -1.25), (27.4, 1.25), (10, 1.25), (10, 8.55), (-10, 8.55), (-10, 1.25),
+         (-27.4, 1.25), (-27.4, -1.25), (-10, -1.25), (-10, -8.55), (-3.2, -8.55)]
+    n0 = len(K.faces)
+    outline(K, Rm, [R(*p) for p in P], ['w'] * len(P), 6.0, plaster, None, {0: (1.9, 4.5), 'h': 3.2}, h=F + 8)
+    for f in K.faces[n0:]:
+        for v in f[0]:
+            v.z += F
+    # oak wainscot, office doors with transoms down both corridors, the District's sign over the lobby
+    for (u0, u1, v, s) in ((-27.4, -10, -1.23, 1), (-27.4, -10, 1.23, -1), (10, 27.4, -1.23, 1), (10, 27.4, 1.23, -1)):
+        vwall(K, R(u0, v), R(u1, v), F, F + 1.0, oak, R((u0 + u1) / 2, v + s))
+        for k in range(4):
+            u = u0 + 2 + k * 4.2
+            vwall(K, R(u, v), R(u + 1.0, v), F, F + 2.3, scale(oak, 0.8), R(u, v + s))
+            vwall(K, R(u, v), R(u + 1.0, v), F + 2.45, F + 2.95, lin('#f4e6c0'), R(u, v + s), LIT)
+        for k in range(4):
+            p = R(u0 + 2.5 + k * 4.2, 0)
+            disc(K, p[0], p[1], 0.35, F + 3.57, lin('#fff6dc'), LIT, 8, False)
+    for (u0, u1, v, s) in ((-10, 10, 8.53, -1), (-10, 10, -8.53, 1)):
+        vwall(K, R(u0, v), R(u1, v), F, F + 1.0, oak, R(0, 0))
+    vwall(K, R(-5, 8.5), R(5, 8.5), F + 2.4, F + 3.9, red, R(0, 0))  # the Corps of Engineers' castle on red
+    rb(-3.4, 3.4, 8.3, 8.5, 2.6, 3.0, lin('#f2f2f2'), BODY, ())
+    for k in range(3):
+        u = -2.5 + k * 2.5
+        rb(u - 0.6, u + 0.6, 8.3, 8.5, 3.0, 3.6 + (0.3 if k == 1 else 0), lin('#f2f2f2'), BODY, ())
+    wtext(K, R(-8, 8.5), R(8, 8.5), R(0, 0), 'U.S. ARMY CORPS OF ENGINEERS - ROCK ISLAND DISTRICT', 8, 1.7, 0.34, lin('#1d1d1d'), BODY, 0.04, F)
+    # history panels on the side walls, a scale model of Lock and Dam 15 on a table, the reception desk and the guard
+    for (u, s) in ((-9.97, 1), (9.97, -1)):
+        for k in range(3):
+            v = -6 + k * 4.5
+            vwall(K, R(u, v), R(u, v + 2.6), F + 1.3, F + 3.0, [lin('#8a7050'), lin('#3e5a7a'), lin('#5a7a4a')][k], R(u + s, v))
+    rb(-2.5, 2.5, -2.0, 0.5, 0, 0.9, lin('#4a2e1f'))
+    rb(-2.3, 2.3, -1.8, 0.3, 0.9, 1.0, lin('#3a6a8a'))  # the river
+    for k in range(6):
+        rb(-2.0 + k * 0.75, -1.7 + k * 0.75, -1.7, 0.2, 1.0, 1.25, lin('#d8d2c2'))  # piers and rollers
+    rblk(-2.6, 2.6, -2.1, 0.6, 1.3)
+    rb(5.0, 8.4, -6.8, -5.8, 0, 1.1, oak)
+    rblk(5.0, 8.4, -6.8, -5.8, 1.2)
+    Rm.person(R(6.7, -5.0), R(0, -12), 'stand', 0, 'office')
+    Rm.person(R(-6.5, -6.5), R(0, 0), 'stand', 0, 'office')
+    # the clock's weights and cables hang in the tower vestibule
+    for u in (-1.5, 1.5):
+        rb(u - 0.25, u + 0.25, -11.8, -11.3, 3.4, 5.9, lin('#3a3a3a'))
+        rb(u - 0.03, u + 0.03, -11.58, -11.52, 5.9, 6.0, lin('#777777'))
+    # people: engineers in the corridors, a visitor reading the panels, someone at the model
+    for (u, v, pose, face) in ((-20, 0, 'walk', (-10, 0)), (18, 0, 'walk', (27, 0)), (-8, -3, 'stand', (-10, -3)), (0, 2.0, 'chat', (0, -1)), (1.2, 1.4, 'chat', (0, -1))):
+        Rm.person(R(u, v), R(*face), pose, 0, 'office')
+    # the building's outer walls round the offices (the tower door is the way in)
+    for (a, b, o) in (((-28, -9.15), (-3.8, -9.15), (0, -20)), ((3.8, -9.15), (28, -9.15), (0, -20)), ((28, -9.15), (28, 9.15), (40, 0)), ((28, 9.15), (-28, 9.15), (0, 20)),
+                      ((-28, 9.15), (-28, -9.15), (-40, 0)), ((-3.8, -9.15), (-3.8, -16.75), (-10, -13)), ((3.8, -9.15), (3.8, -16.75), (10, -13)),
+                      ((-3.8, -16.75), (-1.3, -16.75), (0, -30)), ((1.3, -16.75), (3.8, -16.75), (0, -30))):
+        Rm.wall(R(*a), R(*b), 14, 0.8, 0, out=R(*o))
+    ax = (R(1, 0)[0] - R(0, 0)[0], R(1, 0)[1] - R(0, 0)[1])
+    Rm.hall('Clock Tower Building', R(0, -3.8), 20.6, 25.0, ax, F, 3.8, [0xfff0d8, 12])
+    Rm.hall('Clock Tower Building', R(-18.7, 0), 17.4, 2.6, ax, F, 3.0, [0xfff0d8, 6])
+    Rm.hall('Clock Tower Building', R(18.7, 0), 17.4, 2.6, ax, F, 3.0, [0xfff0d8, 6])
+    return int_done('clocktower', K, Rm, anchor, (*R(0, -15), F + 1.7), (*R(0, 6), F + 2.5), render)
+
+
+B['clocktower_int'] = clocktower_int
+
+
+# ================================================================ WATCH TOWER LODGE (Black Hawk State Historic Site)
+# The CCC's lodge on the bluff over the Rock River (1934-42): in at the north doors, the great hall under its timber
+# trusses with the two floor-to-ceiling stone fireplaces, long tables and benches, the terrace doors to the bluff;
+# through the west wall to the Hauberg Indian Museum: dioramas of a Sauk winter lodge and summer house, cases of
+# Sauk and Meskwaki objects, Black Hawk's portrait and a dugout canoe.
+def lodge_int(render=True):
+    anchor = (400.0, 6560.0)
+    G = lambda x, z: (x - anchor[0], -(z - anchor[1]))
+    F, F2 = 1.0, 1.8  # the hall's floor, the museum's (the bluff rises to the north-west)
+    K = Kit(781, ao=0)
+    Rm = Rooms(anchor)
+    rnd = random.Random(91)
+    stone, stone_d, timber, plank, plank2, plaster = lin('#b5a688'), lin('#94876d'), lin('#4e3624'), lin('#8a6a48'), lin('#7a5c3e'), lin('#e6dcc6')
+
+    def gb(x0, x1, z0, z1, h0, h1, col, m=BODY, skip=('h-',)):
+        a, b = G(x0, z0), G(x1, z1)
+        K.box(min(a[0], b[0]), max(a[0], b[0]), min(a[1], b[1]), max(a[1], b[1]), h0, h1, col, m, skip)
+
+    def blk(x0, x1, z0, z1, h, base=F):
+        a, b = G(x0, z0), G(x1, z1)
+        Rm.block(min(a[0], b[0]), max(a[0], b[0]), min(a[1], b[1]), max(a[1], b[1]), h + base)
+    # ---- the great hall: plank floor, stone walls, the vaulted timber roof
+    hx0, hx1, hz0, hz1 = 378.6, 411.4, 6548.1, 6564.9
+    for i in range(16):
+        x0 = hx0 + (hx1 - hx0) * i / 16
+        gb(x0, x0 + (hx1 - hx0) / 16, hz0, hz1, F - 0.02, F, plank if i % 2 else plank2, BODY, ('h-', 'u-', 'u+', 'd-', 'd+'))
+    Ph = [G(hx0, hz0), G(hx1, hz0), G(hx1, hz1), G(hx0, hz1)]
+    n0 = len(K.faces)
+    outline(K, Rm, Ph, ['h'] * 4, 6.0 - F, stone, None, {0: (20.4, 22.8), 3: (7.7, 9.7)}, h=8)
+    for f in K.faces[n0:]:
+        for v in f[0]:
+            v.z += F
+    # the gable roof inside: two sloping ceilings, the gable ends, the trusses
+    yN, yS = G(0, hz0)[1], G(0, hz1)[1]
+    ym = (yN + yS) / 2
+    xa, xb = G(hx0, 0)[0], G(hx1, 0)[0]
+    ctr = ((xa + xb) / 2, ym, 3.0)
+    for (y0, y1) in ((yN, ym), (yS, ym)):
+        iface(K, [(xa, y0, 6.0), (xb, y0, 6.0), (xb, y1, 11.4), (xa, y1, 11.4)], ctr, lin('#6a4a30'))
+    for x in (xa, xb):
+        iface(K, [(x, yN, 6.0), (x, yS, 6.0), (x, ym, 11.4)], ctr, stone)
+    for k in range(11):
+        x = xa + 1.5 + k * (xb - xa - 3) / 10
+        K.box(x - 0.2, x + 0.2, yS, yN, 5.8, 6.2, timber, BODY, ())  # tie beam
+        K.rod((x, yN, 6.0), (x, ym, 11.2), 0.18, timber, BODY, 4)
+        K.rod((x, yS, 6.0), (x, ym, 11.2), 0.18, timber, BODY, 4)
+        K.box(x - 0.12, x + 0.12, ym - 0.12, ym + 0.12, 6.2, 11.2, timber)  # king post
+    K.box(xa, xb, ym - 0.2, ym + 0.2, 11.0, 11.4, timber, BODY, ())  # ridge beam
+    for x in (xa + 8, (xa + xb) / 2, xb - 8):  # wagon-wheel chandeliers
+        K.cyl(x, ym, 1.4, 4.6, 4.75, timber, BODY, 10)
+        for k in range(6):
+            a = k * math.pi / 3
+            K.box(x + math.cos(a) * 1.3 - 0.08, x + math.cos(a) * 1.3 + 0.08, ym + math.sin(a) * 1.3 - 0.08, ym + math.sin(a) * 1.3 + 0.08, 4.75, 5.0, lin('#ffd98a'), LIT)
+        K.box(x - 0.03, x + 0.03, ym - 0.03, ym + 0.03, 4.75, 11.0, lin('#2a2a2a'))
+    # the two fireplaces: one in the east gable, one in the north wall, stone from the floor to the ceiling
+    for (x0, x1, z0, z1, face) in ((410.2, 411.4, 6553.8, 6559.2, (-1, 0)), (392.6, 397.4, 6548.1, 6549.3, (0, 1))):
+        gb(x0, x1, z0, z1, F, 10.4 if face[0] else 6.0, stone_d)
+        blk(x0, x1, z0, z1, 6)
+        if face[0]:
+            gb(x0 - 0.05, x0, 6555.6, 6557.4, F, F + 1.6, lin('#1a1410'))
+            gb(x0 - 0.06, x0, 6555.9, 6557.1, F + 0.1, F + 0.7, lin('#ff8a2a'), NEON)
+            gb(x0 - 1.4, x0, 6554.6, 6558.4, F, F + 0.3, stone)  # hearth
+        else:
+            gb(393.8, 396.2, z1, z1 + 0.05, F, F + 1.6, lin('#1a1410'))
+            gb(394.1, 395.9, z1, z1 + 0.06, F + 0.1, F + 0.7, lin('#ff8a2a'), NEON)
+            gb(393.0, 397.0, z1, z1 + 1.4, F, F + 0.3, stone)
+            gb(392.4, 397.6, z1, z1 + 0.5, F + 2.2, F + 2.4, timber)  # mantel
+    # long tables and benches, rocking chairs by the fire
+    for (x, z) in ((384, 6554), (384, 6560), (402, 6560)):
+        gb(x - 3, x + 3, z - 0.5, z + 0.5, F + 0.72, F + 0.8, timber)
+        for dx in (-2.4, 2.4):
+            gb(x + dx - 0.12, x + dx + 0.12, z - 0.4, z + 0.4, F, F + 0.72, timber)
+        for dz in (-0.95, 0.95):
+            gb(x - 3, x + 3, z + dz - 0.2, z + dz + 0.2, F + 0.4, F + 0.46, plank2)
+        blk(x - 3, x + 3, z - 1.2, z + 1.2, 0.9)
+        for k in range(3):
+            if rnd.random() < 0.5:
+                Rm.person(G(x - 2 + k * 2, z + 0.95), G(x - 2 + k * 2, z), 'sit', 0, 'visitor')
+    for (x, z) in ((407.5, 6554.2), (407.5, 6558.8)):
+        gb(x - 0.4, x + 0.4, z - 0.4, z + 0.4, F, F + 0.45, lin('#6a4a30'))
+        gb(x + 0.3, x + 0.4, z - 0.4, z + 0.4, F + 0.45, F + 1.1, lin('#6a4a30'))
+        Rm.person(G(x, z), G(410, 6556.5), 'sit', 0, 'visitor')
+    wtext(K, G(386, 6548.15), G(392, 6548.15), G(389, 6555), 'WATCH TOWER LODGE', 3, 3.6, 0.42, lin('#e8dcc0'), BODY, 0.03)
+    # the terrace doors to the bluff (south wall): glazed, lit by the sky
+    for k in range(4):
+        x = 386 + k * 6
+        a, b = G(x, 6564.88), G(x + 2.2, 6564.88)
+        vwall(K, a, b, F, F + 2.8, lin('#d8e8f0'), G(x, 6555), LIT)
+    Rm.person(G(398, 6551), G(398, 6560), 'stand', 0, 'office')  # the site's ranger
+    Rm.person(G(395, 6558), G(390, 6558), 'walk', 0, 'visitor')
+    # ---- the Hauberg Indian Museum (west building), through the hall's west wall up two steps
+    mx0, mx1, mz0, mz1 = 355.6, 377.4, 6547.3, 6577.4
+    for j in range(10):
+        z0 = mz0 + (mz1 - mz0) * j / 10
+        gb(mx0, mx1, z0, z0 + (mz1 - mz0) / 10, F2 - 0.02, F2, plank if j % 2 else plank2, BODY, ('h-', 'u-', 'u+', 'd-', 'd+'))
+    gb(mx0, mx1, mz0, mz1, F2 + 3.4, F2 + 3.45, plaster, BODY, ('h+', 'u-', 'u+', 'd-', 'd+'))
+    Pm = [G(mx0, mz0), G(mx1, mz0), G(mx1, mz1), G(mx0, mz1)]
+    n0 = len(K.faces)
+    outline(K, Rm, Pm, ['m'] * 4, 3.4, plaster, None, {1: (7.9, 9.9)}, h=8)
+    for f in K.faces[n0:]:
+        for v in f[0]:
+            v.z += F2
+    gb(377.4, 378.6, 6555.2, 6557.2, F, F2, stone_d)
+    vwall(K, G(377.4, 6555.2), G(377.4, 6557.2), F, F2, stone_d, G(380, 6556))
+    wtext(K, G(360, 6547.35), G(373, 6547.35), G(366, 6560), 'HAUBERG INDIAN MUSEUM', 6.5, 2.5, 0.42, lin('#5a3a22'), BODY, 0.03, F2)
+    # dioramas: a Sauk winter lodge (domed, mat-covered) and a summer house (bark, gabled) on raised platforms
+    for (x, z, kind) in ((360.5, 6556, 'winter'), (360.5, 6568, 'summer')):
+        gb(x - 3, x + 3, z - 3.5, z + 3.5, F2, F2 + 0.6, lin('#5a4a32'))
+        gb(x - 2.9, x + 2.9, z - 3.4, z + 3.4, F2 + 0.6, F2 + 0.62, lin('#8a9a5a'))
+        blk(x - 3, x + 3, z - 3.5, z + 3.5, 1.2, F2)
+        c = G(x, z)
+        if kind == 'winter':
+            K.cyl(c[0], c[1], 1.4, F2 + 0.62, F2 + 1.4, lin('#a8905a'), BODY, 8)
+            K.cyl(c[0], c[1], 1.4, F2 + 1.4, F2 + 2.1, lin('#9a8250'), BODY, 8, r1=0.2)
+        else:
+            K.box(c[0] - 1.2, c[0] + 1.2, c[1] - 2.0, c[1] + 2.0, F2 + 0.62, F2 + 1.6, lin('#7a6a4a'))
+            K.oface([Vector((c[0] - 1.35, c[1] - 2.1, F2 + 1.6)), Vector((c[0] - 1.35, c[1] + 2.1, F2 + 1.6)), Vector((c[0], c[1] + 2.1, F2 + 2.4)), Vector((c[0], c[1] - 2.1, F2 + 2.4))], Vector((c[0] + 3, c[1], F2)), lin('#6a5a3a'))
+            K.oface([Vector((c[0] + 1.35, c[1] - 2.1, F2 + 1.6)), Vector((c[0] + 1.35, c[1] + 2.1, F2 + 1.6)), Vector((c[0], c[1] + 2.1, F2 + 2.4)), Vector((c[0], c[1] - 2.1, F2 + 2.4))], Vector((c[0] - 3, c[1], F2)), lin('#6a5a3a'))
+        for k in range(3):
+            K.box(c[0] + 1.6 + k * 0.3, c[0] + 1.75 + k * 0.3, c[1] - 1 + k * 0.6, c[1] - 0.85 + k * 0.6, F2 + 0.62, F2 + 1.3, lin('#7a4a2a'))
+    # glass cases of objects along the east and west walls, Black Hawk's portrait, the dugout canoe
+    for (x0, x1) in ((373.6, 377.0), (356.0, 357.2)):
+        for k in range(4):
+            z0 = 6549 + k * 7
+            gb(x0, x1, z0, z0 + 5, F2, F2 + 0.9, lin('#4a3a2a'))
+            gb(x0, x1, z0, z0 + 5, F2 + 0.9, F2 + 1.6, lin('#cfe3ee'), LIT)
+            for j in range(5):
+                gb(x0 + 0.3, x0 + 0.6, z0 + 0.5 + j * 0.9, z0 + 0.8 + j * 0.9, F2 + 0.9, F2 + 1.1 + (j % 3) * 0.15, [lin('#c8102e'), lin('#e0b040'), lin('#2f6a8a'), lin('#d8ccb0')][(j + k) % 4])
+            blk(x0, x1, z0, z0 + 5, 1.6, F2)
+    a, b = G(364, 6577.35), G(368, 6577.35)
+    vwall(K, a, b, F2 + 0.9, F2 + 3.0, lin('#6a4a30'), G(366, 6570))
+    vwall(K, G(364.5, 6577.3), G(367.5, 6577.3), F2 + 1.1, F2 + 2.8, lin('#a87a5a'), G(366, 6570))
+    wtext(K, a, b, G(366, 6570), 'MA-KA-TAI-ME-SHE-KIA-KIAK (BLACK HAWK)', 2, 0.5, 0.18, lin('#e8dcc0'), BODY, 0.02, F2)
+    gb(364, 372, 6561.6, 6562.6, F2 + 0.6, F2 + 1.1, lin('#5a3a1e'))  # the dugout
+    for x in (365.5, 370.5):
+        gb(x - 0.2, x + 0.2, 6561.8, 6562.4, F2, F2 + 0.6, timber)
+    blk(364, 372, 6561.4, 6562.8, 1.2, F2)
+    Rm.person(G(368, 6559.5), G(368, 6562), 'stand', 0, 'visitor')
+    Rm.person(G(366, 6574), G(366, 6577.4), 'stand', 0, 'visitor')
+    Rm.person(G(365, 6552), G(360.5, 6556), 'phone', 0, 'visitor')
+    for z in range(6550, 6576, 6):
+        c = G(366.5, z)
+        disc(K, c[0], c[1], 0.4, F2 + 3.38, lin('#fff6dc'), LIT, 8, False)
+    Rm.hall('Watch Tower Lodge', G(395, 6556.5), 32.8, 16.8, (1, 0), F, 7, [0xffc890, 14])
+    Rm.hall('Watch Tower Lodge', G(366.5, 6562.35), 21.8, 30.1, (1, 0), F2, 3.2, [0xfff0d8, 10])
+    return int_done('lodge', K, Rm, anchor, (*G(380.5, 6556), F + 1.7), (*G(410, 6556), F + 3), render)
+
+
+B['lodge_int'] = lodge_int

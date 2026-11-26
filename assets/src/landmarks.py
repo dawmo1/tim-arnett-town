@@ -3339,7 +3339,18 @@ def clocktower(render=True):
     # the tower: 7.6 m square on the front centre, clock stage, pyramid roof
     tw = 3.8
     T = rpoly(R, -tw, tw, -d / 2 - 2 * tw + 1.0, -d / 2 + 1.0)
+    fr = R(0, -d / 2 - 2 * tw + 1.0)
     for i, L, Ln, mid in sides(T):
+        if math.hypot(mid[0] - fr[0], mid[1] - fr[1]) < 0.5:  # the tower's front: the arched door (clocktower_int behind it)
+            K.quad(L, 0, Ln / 2 - 1.3, -3, 27.0, 0, lime)
+            K.quad(L, Ln / 2 + 1.3, Ln, -3, 27.0, 0, lime)
+            K.quad(L, Ln / 2 - 1.3, Ln / 2 + 1.3, 3.7, 27.0, 0, lime)
+            K.quad(L, Ln / 2 - 1.3, Ln / 2 + 1.3, -3, 0.5, 0, lime2)
+            for k in range(7):  # voussoirs round the arch
+                a0, a1 = math.pi * k / 7, math.pi * (k + 1) / 7
+                K.obox(lambda u, h, dd: L(Ln / 2 + u, 3.2 + h, dd), math.cos(a1) * 1.6, math.cos(a0) * 1.6, math.sin(a0) * 0.5, math.sin(a0) * 0.5 + 0.5, 0, 0.12, lime2, BODY, ('d-',))
+            windows(K, L, 1.6, Ln - 1.6, 7.0, 5.0, 3, 1, lime, wf=0.5, hf=0.6, rec=0.4, edge=0, lit=0.3)
+            continue
         K.quad(L, 0, Ln, -3, 27.0, 0, lime)
         windows(K, L, 1.6, Ln - 1.6, 2.0, 5.0, 4, 1, lime, wf=0.5, hf=0.6, rec=0.4, edge=0, lit=0.3)
         belt(K, L, 0, Ln, 22.0, lime2, 0.3, 0.6)
@@ -3365,6 +3376,9 @@ def clocktower(render=True):
     for i, L, Ln, mid in sides(Wg):
         windows(K, L, 0.6, Ln - 0.6, 0, 4.2, 3, max(1, round(Ln / 3.4)), lime, wf=0.45, hf=0.6, rec=0.3, lit=0.3)
     roof(K, Wg, 12.6, slate)
+    # the way in: through the main front behind the tower, and the tower's back wall (clocktower_int)
+    cut_door(K, R(-w / 2, -d / 2), R(w / 2, -d / 2), w / 2 - 3.4, w / 2 + 3.4, 0.4, 6.4)
+    cut_door(K, R(-tw, -d / 2 + 1.0), R(tw, -d / 2 + 1.0), 0.2, 2 * tw - 0.2, 0.4, 6.4)
     lod0 = K.obj('clocktower_lod0')
     K1 = Kit(622)
     K1.prism(P, -3, eave, lime, top=False)

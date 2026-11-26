@@ -52,7 +52,8 @@ export default {
   models: [
     // Watch Tower Lodge (1934-42, CCC): over the OSM building (way 628712511); inside the rock-island box
     { file: 'lodge', x: 400, z: 6560, ground: true, load: 800, clear: [[398, 6562, 44, 17]],
-      solid: [[366.5, 6562.35, 11.5, 15.65, 9.8], [395, 6556.5, 17, 9, 11.6], [435.5, 6557.85, 5.5, 6.15, 8.2], [421, 6556.05, 9, 0.25, 3.4], [421, 6561, 9, 5, 3, 3.0]] },
+      solid: [[435.5, 6557.85, 5.5, 6.15, 8.2], // the hall and the museum's walls: lodge_int (src/landmarks.js)
+        [421, 6556.05, 9, 0.25, 3.4], [421, 6561, 9, 5, 3, 3.0]] },
     // Express Lane truck stop, I-88 exit 10 Hillsdale: store, car canopy, diesel canopy and the high-rise pylon
     { file: 'truckstop', x: 32590, z: -9860, ground: true, load: 1200, clear: [[32596, -9864, 25, 25]],
       solid: [[32571.7, -9875.2, 2.7, 0.8, 2, 0, -0.775], [32565.8, -9869.2, 2.7, 0.8, 2, 0, -0.775], [32559.9, -9863.2, 2.7, 0.8, 2, 0, -0.775], [32554, -9857.2, 2.7, 0.8, 2, 0, -0.775],

@@ -111,4 +111,52 @@ Nearest trap range: Bi-State Sportsman's Club, Colona (41.4896, -90.3418).
 - **RiverCenter**: glass atrium concourse, Great River Hall (32,400 sq ft) with exposed trusses, concrete floor.
 - **Ambrose Hall**: central stair hall behind the tower door, double-loaded corridors, oak trim, cream plaster.
 - **Vander Veer conservatory** (1955): glass house with a raised centre, beds of seasonal flowers, paths, pool.
-- **NorthPark**: single-level branching mall, ~40 ft concourses, skylights, beige tile, centre court.
+- **NorthPark**: single-level branching mall, ~40 ft concourses, skylights, beige tile, centre court (built: see roadmap 5 below).
+
+## Quad Cities interiors (roadmap 5)
+
+Built by `assets/src/landmarks_int.py` (`<name>_int.glb` at the exterior's anchor). Each builder also writes the walls,
+the people and the counters to `src/landmark-rooms.js`. Game floors are flat, so raked seating and tiers are platforms
+with aisles between them. [G] = guess where no source shows the room.
+
+- **Vibrant Arena at The MARK**: 12,000 seats, lower bowl, club/suites and upper level (American Arenas; Wikipedia
+  "Vibrant Arena at The MARK"). Modelled as: the glass rotunda (east), the ring concourse with four concession stands
+  and the bowl (12 lower rows, upper bowl over the concourse, suite band, centre-hung board), the Quad City Storm rink.
+  The real concourse is a level above the event floor; here the tunnels run straight down to the boards. Seat colour [G].
+  https://en.wikipedia.org/wiki/Vibrant_Arena_at_The_MARK · https://americanarenas.com/venue/vibrant-arena-at-the-mark/best-seats/
+- **NorthPark Mall**: single level (JCPenney has two), 1,074,000 sq ft, opened 1973, 1981 expansion added Sears and
+  Von Maur; anchors Dillard's, JCPenney, Von Maur; Sears and Younkers empty (Wikipedia). The concourse layout follows
+  the OSM outline (way 343809418): a grid turned 15 deg, the main concourse from Dillard's (west) to JCPenney (east),
+  the skylit centre court, the food court, the south entrance corridor from Kimberly Rd, the wing NE to Von Maur and the
+  empty Sears. Tenant mix and food-court line-up [G] (parody names for national chains).
+  https://en.wikipedia.org/wiki/NorthPark_Mall_(Iowa)
+- **Quad Cities International (MLI)**: Concourses A and B either side of a central security checkpoint, ticketing and
+  baggage claim landside; two baggage carousels; Concourse B six jet-bridge gates, A gates for regional jets; the
+  2025 landside renovation (new ticketing area, widened checkpoint). Rental-car counters and the bar [G].
+  https://www.qcairport.com/at-the-airport/terminal-map/ · https://www.airport-technology.com/projects/quad-city-international-airport-illinois/ ·
+  https://www.qcairport.com/project-gateway/
+- **Deere & Company World HQ**: the display building holds a two-level auditorium and the display area with Alexander
+  Girard's 180-ft "Reflections of an Era" collage mural (Wikipedia; Deere; Hyperallergic). Modelled: the lobby at the
+  east end, the double-height display floor with machines (Model D, 4010, 8R, a combine, the 1837 plow), the mural on
+  the long west wall, the auditorium doors. The display building now stands on its hill (~14 m above the HQ anchor,
+  the OSM terrain); before, it was buried in the slope. Machines on show [G].
+  https://en.wikipedia.org/wiki/John_Deere_World_Headquarters · https://www.deere.com/en/stories/featured/hq-investments/ ·
+  https://hyperallergic.com/548956/how-john-deere-and-eero-saarinen-inspired-georgia-okeeffes-largest-painting/
+- **Circa '21 Dinner Playhouse** (Fort Armstrong Theatre): small entrance lobby; the main floor terraced with tables in
+  the late 1970s (Dennis Hitchcock), Western / "Indian" decor with teepee chandeliers, the old mezzanine above
+  (Cinema Treasures). The singing waitstaff are the Bootleggers. Stage set [G].
+  https://cinematreasures.org/theaters/1250
+- **Augustana Old Main**: the dome (added later) over a central space; the floor beneath the dome once held the
+  library and a science lab; restored 2010-13 (Augustana; WVIK; Augustana Observer). Modelled: vestibule from the north
+  doors, the rotunda well with gallery rails rising to the drum, dome and oculus, the E-W hall, a classroom and the old
+  library as a reading room. Room plan [G].
+  https://www.augustana.edu/about-us/sesquicentennial/old-main-story · https://www.wvik.org/2013-05-20/old-main-restored
+- **Clock Tower Building**: the Corps of Engineers' Rock Island District offices. Modelled: the tower door (lock side),
+  the vestibule with the clock weights, a lobby with the District's exhibits and a Lock & Dam 15 model, the central
+  office corridor. Interior layout [G].
+- **Watch Tower Lodge (Black Hawk SHS)**: CCC 1934-42, limestone and hewn timber; the main room has vaulted ceilings on
+  cedar timbers and two floor-to-ceiling stone fireplaces; the Hauberg Indian Museum (west end) has dioramas of Sauk
+  life through the seasons, winter and summer houses, a dugout canoe, artifacts.
+  https://greatriverroad-illinois.org/Black-Hawk-State-Historic-Site-and-Hauberg-Indian-Museum · https://wpamurals.org/rockisld.html
+- **Riverdale High School** (Port Byron): not built. It is outside the map's region bounds (game ~25720, -10370; see
+  docs/regions/port-byron.md) and has no exterior model yet.
