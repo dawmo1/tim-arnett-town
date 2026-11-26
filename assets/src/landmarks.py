@@ -130,7 +130,7 @@ class Kit:
         for p in me.polygons:
             self.face([M4 @ me.vertices[i].co for i in p.vertices], col, m)
 
-    def text(self, s, L, u, h, d, size, col, m=NEON, depth=0.15, align='CENTER', res=2, bold=0.0):
+    def text(self, s, L, u, h, d, size, col, m=NEON, depth=0.15, align='CENTER', res=2, bold=0.0, front=False):
         """letters standing in frame L: baseline centre at (u, h), front at d (facing +d)"""
         cu = bpy.data.curves.new('t', 'FONT')
         cu.body = s
@@ -148,6 +148,8 @@ class Kit:
         M4.translation = o
         cnt = 0
         for p in me.polygons:
+            if front and p.normal.z < 0.9:
+                continue  # front=True: only the letters' faces (painted-on signs: a fraction of the triangles)
             self.face([M4 @ (me.vertices[i].co + Vector((0, 0, depth / 2))) for i in p.vertices], col, m)
             cnt += 1
         ob.evaluated_get(dg).to_mesh_clear()
@@ -1799,56 +1801,7 @@ def conservatory(render=True):
 B['conservatory'] = conservatory
 
 
-# ================================================================ NORTHPARK MALL entrance
-# The mall itself stays the OSM building; this is its south entrance off the Kimberly Road lot: a tall
-# glazed gable between brick towers, the lit NORTHPARK name, and a drive-up canopy. Back face at y = 0.
-def northpark(render=True):
-    K = Kit(161)
-    brick, cream, glass, steel = lin('#a8634a'), lin('#e6dccb'), lin('#3a5566'), lin('#d0d0d0')
-    w, d = 15.0, 10.0
-    for x in (-w, w - 5):  # brick towers
-        K.box(x, x + 5, -d, 0, -3, 14, brick)
-        K.box(x - 0.2, x + 5.2, -d - 0.2, 0.2, 14, 14.8, cream)
-        F = lambda u, h, dd, x=x: (x + u, -d - dd, h)
-        for h in (2, 6.5, 10):
-            K.quad(F, 1.5, 3.5, h, h + 2.5, 0.02, glass, GLASS)
-    # glazed gable between them
-    gx0, gx1 = -w + 5, w - 5
-    F = lambda u, h, dd: (gx0 + u, -d + 1 - dd, h)
-    Wd = gx1 - gx0
-    K.face([F(0, 0, 0), F(Wd, 0, 0), F(Wd, 12, 0), F(Wd / 2, 17, 0), F(0, 12, 0)], glass, LIT)
-    for k in range(9):
-        u = k * Wd / 8
-        top = 12 + 5 * (1 - abs(u - Wd / 2) / (Wd / 2))
-        K.obox(F, u - 0.1, u + 0.1, 0, top, 0, 0.15, steel, BODY, ('d-',))
-    for h in (3.5, 7, 10.5):
-        K.obox(F, 0, Wd, h - 0.08, h + 0.08, 0, 0.15, steel, BODY, ('d-',))
-    for sgn in (-1, 1):  # roof slopes
-        K.oface([Vector((gx0 if sgn < 0 else gx1, -d + 1, 12)), Vector((0, -d + 1, 17)), Vector((0, 0, 17)), Vector((gx0 if sgn < 0 else gx1, 0, 12))], Vector((0, -d / 2, 0)), lin('#5b5f63'))
-    # name over the entrance
-    K.box(-11, 11, -d - 0.6, -d + 1, 14.8, 17.0, cream, BODY, ())
-    K.text('NORTHPARK', lambda u, h, dd: (u, -d - 0.6 - dd, h), 0, 15.2, 0.0, 1.9, lin('#c8102e'), NEON, 0.12, bold=0.02)
-    # entrance doors and drive-up canopy on columns
-    K.quad(F, 3, Wd - 3, 0, 3.2, 0.05, lin('#ffe6b8'), LIT)
-    K.box(-9, 9, -d - 8, -d + 1, 4.6, 5.2, cream, BODY, ())
-    K.face([(-8.8, -d - 7.8, 4.59), (-8.8, -d + 0.8, 4.59), (8.8, -d + 0.8, 4.59), (8.8, -d - 7.8, 4.59)], lin('#fff1c4'), LIT)
-    for x in (-8.4, 8.4):
-        K.cyl(x, -d - 7.4, 0.35, -1, 4.6, cream, BODY, 8)
-    lod0 = K.obj('northpark_lod0')
-    K1 = Kit(162)
-    K1.box(-w, w, -d, 0, -3, 14.8, brick)
-    K1.quad(F, 0, Wd, 0, 12, 0.3, glass, LIT)
-    K1.box(-11, 11, -d - 0.6, -d + 1, 14.8, 17.0, cream, BODY, ())
-    K1.text('NORTHPARK', lambda u, h, dd: (u, -d - 0.6 - dd, h), 0, 15.2, 0.0, 1.9, lin('#c8102e'), NEON, 0.12, res=1)
-    K1.box(-9, 9, -d - 8, -d + 1, 4.6, 5.2, cream, BODY, ())
-    lod1 = K1.obj('northpark_lod1')
-    res = finish('northpark', [lod0, lod1], None)
-    if render:
-        res['png'] = shots('northpark', (0, -8, 7), 55, lod1, views=((20, 10),))
-    return res
-
-
-B['northpark'] = northpark
+# (NORTHPARK MALL: the whole mall shell and its interior are in landmarks_int.py)
 
 
 # ================================================================ QUAD CITIES (roadmap 2): shared bits
@@ -3782,11 +3735,35 @@ def mli(render=True):
     for poly, H, rc in ((T, 11.0, roofc), (A_, 7.0, lin('#c9ccd0')), (B_, 7.0, lin('#c9ccd0'))):
         P = ccw([G(*p) for p in poly])
         for i, L, Ln, mid in sides(P):
-            K.quad(L, 0, Ln, -3, H, 0, wall)
             n = outward(L)
+            land = poly is T and n.y > 0.3
+            gaps = []
+            if land and Ln > 8:  # the doors to the curb (MLI_DOORS, landmarks_int.py): open below 3.4 m
+                o, ux_ = Vector(L(0, 0, 0)), (Vector(L(1, 0, 0)) - Vector(L(0, 0, 0)))
+                for gx, gz in MLI_DOORS:
+                    c = Vector((*G(gx, gz), 0))
+                    t = (c - o).dot(ux_)
+                    if 1 < t < Ln - 1 and ((c - o) - ux_ * t).length < 1.5:
+                        gaps.append(t)
+            if gaps:
+                K.quad(L, 0, Ln, 3.4, H, 0, wall)
+                ed = [0] + [x for t in sorted(gaps) for x in (t - 2.2, t + 2.2)] + [Ln]
+                for k in range(0, len(ed), 2):
+                    K.quad(L, ed[k], ed[k + 1], -3, 3.4, 0, wall)
+            else:
+                K.quad(L, 0, Ln, -3, H, 0, wall)
             if Ln > 8:
-                land = poly is T and n.y > 0.3
-                K.quad(L, 0.5, Ln - 0.5, 0.4 if land else 3.0, H - 1.2 if land else 5.6, 0.03, glass, LIT)
+                if gaps:
+                    cuts = sorted(gaps)
+                    K.quad(L, 0.5, Ln - 0.5, 3.4, H - 1.2, 0.03, glass, LIT)
+                    edges = [0.5] + [x for t in cuts for x in (t - 2.2, t + 2.2)] + [Ln - 0.5]
+                    for k in range(0, len(edges), 2):
+                        K.quad(L, edges[k], edges[k + 1], 0.4, 3.4, 0.03, glass, LIT)
+                    for t in cuts:
+                        K.quad(L, t - 2.2, t + 2.2, -3, 0.4, 0.03, lin('#666666'))
+                        K.obox(L, t - 2.6, t + 2.6, 3.4, 3.7, 0, 1.2, lin('#2b2b2b'), BODY, ())
+                else:
+                    K.quad(L, 0.5, Ln - 0.5, 0.4 if land else 3.0, H - 1.2 if land else 5.6, 0.03, glass, LIT)
                 if land:
                     for k in range(int(Ln // 3) + 1):
                         u = min(Ln - 0.5, 0.5 + k * 3)

@@ -133,8 +133,8 @@ const CROWD_LINES = {
 const LINE_FOR = { fan: 'fan', shopper: 'shopper', traveller: 'traveller', diner: 'diner', student: 'student', office: 'office', visitor: 'visitor', vendor: 'visitor' };
 const ROLE_OF = { fan: 'walk', traveller: 'walk', diner: 'walk', visitor: 'walk' };
 function fillCrowd(R) {
-  const out = [];
-  for (const [x, z, h, pose, up = 0, role = 'walk'] of R.crowd) {
+  const out = [], list = R.crowd.length > 32 ? R.crowd.slice().sort(() => Math.random() - 0.5).slice(0, 32) : R.crowd; // a busy day, not a riot
+  for (const [x, z, h, pose, up = 0, role = 'walk'] of list) {
     const w = addScripted(ROLE_OF[role] || role, x, z, h);
     const lines = CROWD_LINES[LINE_FOR[role]] || null;
     w.mode = 'fixed'; w.fixed = { x, z, h, pose: pose === 'walk' ? 'stand' : pose, lines: lines && Math.random() < 0.5 ? lines : null };
