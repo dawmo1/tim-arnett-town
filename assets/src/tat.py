@@ -5,7 +5,7 @@
 import bpy, bmesh, math, os
 from mathutils import Vector, Matrix, Euler
 
-ROOT = __import__('os').environ.get('TAT_ROOT', '/Users/dainmoens/Documents/Tim Arnett Town/') + ''
+ROOT = os.environ.get('TAT_ROOT', '/Users/dainmoens/Documents/Tim Arnett Town/')
 OUT = ROOT + 'assets/models/'
 
 

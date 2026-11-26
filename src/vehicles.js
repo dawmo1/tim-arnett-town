@@ -8,34 +8,35 @@ import { buildCarMesh, dent, crumple, unDent, GLASS } from './carmodel.js';
 import { stepPlane, planeMesh } from './planes.js';
 import { buildEbikeMesh } from './ebikemodel.js';
 
+// len / wid / hgt match the Blender models (assets/src/cars.py), which use real-world sizes for each class
 export const TYPES = [
-  { name: 'Sedan', len: 4.4, wid: 1.9, hgt: 1.45, max: 32, acc: 13, turn: 1.9, grip: 7, mass: 1.2, hp: 100 },
-  { name: 'Sports car', len: 4.3, wid: 1.95, hgt: 1.15, max: 46, acc: 22, turn: 2.2, grip: 8.5, mass: 1.1, hp: 80 },
-  { name: 'Truck', len: 5.8, wid: 2.3, hgt: 2.6, max: 25, acc: 8, turn: 1.4, grip: 6, mass: 2.6, hp: 180, truck: true },
-  { name: 'Van', len: 5.0, wid: 2.1, hgt: 2.2, max: 28, acc: 10, turn: 1.6, grip: 6.5, mass: 2, hp: 140, van: true },
+  { name: 'Sedan', len: 4.86, wid: 1.85, hgt: 1.45, max: 32, acc: 13, turn: 1.9, grip: 7, mass: 1.2, hp: 100 },
+  { name: 'Sports car', len: 4.6, wid: 1.93, hgt: 1.24, max: 46, acc: 22, turn: 2.2, grip: 8.5, mass: 1.1, hp: 80 },
+  { name: 'Truck', len: 7.3, wid: 2.44, hgt: 3.36, max: 25, acc: 8, turn: 1.4, grip: 6, mass: 2.6, hp: 180, truck: true },
+  { name: 'Van', len: 5.69, wid: 2.01, hgt: 2.08, max: 28, acc: 10, turn: 1.6, grip: 6.5, mass: 2, hp: 140, van: true },
   { name: 'Motorbike', len: 2.1, wid: 0.8, hgt: 1.1, max: 44, acc: 20, turn: 2.6, grip: 9, mass: 0.45, hp: 50, bike: true },
   { name: 'Scooter', len: 1.8, wid: 0.7, hgt: 1.05, max: 22, acc: 12, turn: 2.8, grip: 9, mass: 0.3, hp: 40, bike: true },
-  { name: 'Police car', len: 4.6, wid: 2.0, hgt: 1.5, max: 33, acc: 14, turn: 2.0, grip: 8, mass: 1.4, hp: 160, police: true },
-  { name: 'City bus', len: 10, wid: 2.6, hgt: 3.1, max: 22, acc: 6, turn: 1.1, grip: 6, mass: 4, hp: 260, bus: true },
+  { name: 'Police car', len: 5.05, wid: 1.9, hgt: 1.5, max: 33, acc: 14, turn: 2.0, grip: 8, mass: 1.4, hp: 160, police: true },
+  { name: 'City bus', len: 10.7, wid: 2.59, hgt: 3.2, max: 22, acc: 6, turn: 1.1, grip: 6, mass: 4, hp: 260, bus: true },
   { name: 'Speedboat', len: 6, wid: 2.3, hgt: 1.4, max: 30, acc: 11, turn: 1.3, grip: 2, mass: 1.6, hp: 150, boat: true },
   { name: 'Helicopter', len: 9, wid: 2.4, hgt: 2.6, max: 38, acc: 10, turn: 1.6, grip: 2, mass: 2.2, hp: 200, heli: true },
   // everyday
-  { name: 'Hatchback', len: 3.9, wid: 1.8, hgt: 1.45, max: 30, acc: 13, turn: 2.1, grip: 7.2, mass: 1.0, hp: 90, hatch: true },
-  { name: 'SUV', len: 4.8, wid: 2.0, hgt: 1.85, max: 31, acc: 12, turn: 1.8, grip: 7, mass: 1.7, hp: 130, suv: true },
-  { name: 'Pickup', len: 5.4, wid: 2.05, hgt: 1.85, max: 31, acc: 12, turn: 1.7, grip: 6.8, mass: 1.9, hp: 140, pickup: true },
-  { name: 'Minivan', len: 5.0, wid: 2.0, hgt: 1.8, max: 29, acc: 11, turn: 1.8, grip: 6.8, mass: 1.7, hp: 120, minivan: true },
+  { name: 'Hatchback', len: 4.28, wid: 1.79, hgt: 1.46, max: 30, acc: 13, turn: 2.1, grip: 7.2, mass: 1.0, hp: 90, hatch: true },
+  { name: 'SUV', len: 5.05, wid: 2.0, hgt: 1.8, max: 31, acc: 12, turn: 1.8, grip: 7, mass: 1.7, hp: 130, suv: true },
+  { name: 'Pickup', len: 5.89, wid: 2.03, hgt: 1.96, max: 31, acc: 12, turn: 1.7, grip: 6.8, mass: 1.9, hp: 140, pickup: true },
+  { name: 'Minivan', len: 5.21, wid: 1.99, hgt: 1.77, max: 29, acc: 11, turn: 1.8, grip: 6.8, mass: 1.7, hp: 120, minivan: true },
   // fun
-  { name: 'Muscle car', len: 4.7, wid: 2.0, hgt: 1.25, max: 44, acc: 20, turn: 1.9, grip: 7.5, mass: 1.4, hp: 110, muscle: true },
-  { name: 'Convertible', len: 4.4, wid: 1.9, hgt: 1.2, max: 40, acc: 18, turn: 2.2, grip: 8, mass: 1.1, hp: 85, convertible: true },
-  { name: 'Limo', len: 7.4, wid: 2.0, hgt: 1.45, max: 30, acc: 10, turn: 1.3, grip: 6.5, mass: 2.4, hp: 160, limo: true },
-  { name: 'Monster truck', len: 5.2, wid: 2.8, hgt: 3.0, max: 34, acc: 16, turn: 1.6, grip: 7, mass: 3, hp: 260, monster: true },
+  { name: 'Muscle car', len: 5.0, wid: 1.93, hgt: 1.42, max: 44, acc: 20, turn: 1.9, grip: 7.5, mass: 1.4, hp: 110, muscle: true },
+  { name: 'Convertible', len: 4.32, wid: 1.86, hgt: 1.3, max: 40, acc: 18, turn: 2.2, grip: 8, mass: 1.1, hp: 85, convertible: true },
+  { name: 'Limo', len: 8.0, wid: 1.99, hgt: 1.48, max: 30, acc: 10, turn: 1.3, grip: 6.5, mass: 2.4, hp: 160, limo: true },
+  { name: 'Monster truck', len: 5.9, wid: 2.8, hgt: 3.0, max: 34, acc: 16, turn: 1.6, grip: 7, mass: 3, hp: 260, monster: true },
   // work
-  { name: 'Taxi', len: 4.5, wid: 1.9, hgt: 1.45, max: 32, acc: 13, turn: 1.9, grip: 7, mass: 1.2, hp: 100, taxi: true },
-  { name: 'Garbage truck', len: 8, wid: 2.5, hgt: 3.4, max: 22, acc: 6, turn: 1.1, grip: 6, mass: 4.5, hp: 300, cabbed: 'garbage' },
-  { name: 'Tow truck', len: 6.6, wid: 2.3, hgt: 2.6, max: 27, acc: 8, turn: 1.3, grip: 6, mass: 3, hp: 220, cabbed: 'tow' },
+  { name: 'Taxi', len: 4.86, wid: 1.85, hgt: 1.45, max: 32, acc: 13, turn: 1.9, grip: 7, mass: 1.2, hp: 100, taxi: true },
+  { name: 'Garbage truck', len: 9.0, wid: 2.5, hgt: 3.45, max: 22, acc: 6, turn: 1.1, grip: 6, mass: 4.5, hp: 300, cabbed: 'garbage' },
+  { name: 'Tow truck', len: 6.9, wid: 2.4, hgt: 2.6, max: 27, acc: 8, turn: 1.3, grip: 6, mass: 3, hp: 220, cabbed: 'tow' },
   // emergency
-  { name: 'Ambulance', len: 6.2, wid: 2.3, hgt: 2.7, max: 32, acc: 11, turn: 1.5, grip: 6.5, mass: 2.6, hp: 200, cabbed: 'ambulance', siren: true },
-  { name: 'Fire truck', len: 9.5, wid: 2.5, hgt: 3.2, max: 26, acc: 7, turn: 1.05, grip: 6, mass: 5, hp: 350, cabbed: 'fire', siren: true },
+  { name: 'Ambulance', len: 6.9, wid: 2.4, hgt: 2.9, max: 32, acc: 11, turn: 1.5, grip: 6.5, mass: 2.6, hp: 200, cabbed: 'ambulance', siren: true },
+  { name: 'Fire truck', len: 10.0, wid: 2.5, hgt: 3.1, max: 26, acc: 7, turn: 1.05, grip: 6, mass: 5, hp: 350, cabbed: 'fire', siren: true },
   // planes (planes.js): wid is the fuselage + gear footprint for collisions, span the wings; stall in m/s
   { name: 'Prop plane', len: 8.3, wid: 2.8, hgt: 2.7, max: 60, acc: 9, turn: 1, grip: 2, mass: 1.1, hp: 160, plane: true, span: 11, stall: 24 },
   { name: 'Crop duster', len: 8.8, wid: 2.8, hgt: 2.8, max: 54, acc: 10, turn: 1.2, grip: 2, mass: 1.5, hp: 180, plane: true, duster: true, span: 13, stall: 20 },

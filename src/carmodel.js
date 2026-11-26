@@ -1,8 +1,10 @@
 // Vehicles built from the Blender models (assets/src/cars.py -> assets/models/cars.glb).
 // Each type is a node "car_<key>" whose children are named "<key>__<part>": body, cabin, doors,
-// hood, trunk, bumpers, details, interior, cargo, rotor... plus empties for wheels (w_FL...), seats
-// (seat_D...) and lamps (lamp_head_L...). Paint, glass and lamps get game materials; everything
-// else keeps the shared materials from the file.
+// hood, trunk, bumpers, details, interior, cargo, rotor... plus empties for wheels (w_FL...; trucks
+// add w_RL2... for duals and tandems), seats (seat_D...) and lamps (lamp_head_L...). Paint, glass and
+// lamps get game materials; everything else keeps the shared materials from the file.
+// Every part holds a high and a low detail mesh (<part>_hi / <part>_lo); a per-car switch shows one
+// or the other by camera distance (see LodSwitch). Models without _lo meshes just stay as they are.
 import * as THREE from 'three';
 import { gltf } from './assets.js';
 
@@ -63,8 +65,8 @@ function decals() {
   g.fillStyle = '#fff'; g.fillRect(0, 0, 512, 512);
   // Blender uvbox (u0,v0,u1,v1) -> canvas x = u*512, y = (1 - v)*512
   const R = (u0, v0, u1, v1) => [u0 * 512, (1 - v1) * 512, (u1 - u0) * 512, (v1 - v0) * 512];
-  // cars.py box_d maps u backwards on both +y and -y faces, so text on front/back faces is drawn mirrored here to read right
-  const mirrorText = (t, cx, ty) => { g.save(); g.translate(cx, 0); g.scale(-1, 1); g.fillText(t, 0, ty); g.restore(); };
+  // cars.py lays its UVs out to read left to right from outside, so text is drawn the normal way round
+  const mirrorText = (t, cx, ty) => g.fillText(t, cx, ty);
   let [x, y, w, h] = R(0, 0, 0.5, 0.25); // Iowa-style plate
   g.fillStyle = '#f4f1e6'; g.fillRect(x, y, w, h); g.fillStyle = '#2a4e8a'; g.fillRect(x, y, w, h * 0.22);
   g.fillStyle = '#fff'; g.font = `bold ${h * 0.16}px Arial`; g.textAlign = 'center'; mirrorText('IOWA', x + w / 2, y + h * 0.17);
@@ -85,6 +87,38 @@ function decals() {
   return decalTex;
 }
 const DECAL = new THREE.MeshStandardMaterial({ roughness: 0.4, metalness: 0.1 });
+
+// ---------- level of detail ----------
+// High detail within lodDist metres of the camera, low beyond (with a little hysteresis so a car on the
+// edge doesn't flicker). The renderer calls update(camera) on anything flagged isLOD while drawing, so no
+// per-frame bookkeeping is needed elsewhere. Far cars are drawn as instanced boxes by vehicles.js anyway.
+let lodDist = 30;
+export const setCarLodDistance = (d) => { lodDist = d; };
+const LOD_RE = /_(hi|lo)(?:_\d+)?$/, lodTmp = new THREE.Vector3(), camTmp = new THREE.Vector3();
+class LodSwitch extends THREE.Object3D {
+  constructor(hi, lo) { super(); this.isLOD = true; this.autoUpdate = true; this.hi = hi; this.lo = lo; this.near = null; }
+  update(camera) {
+    const g = this.parent; if (!g) return;
+    lodTmp.setFromMatrixPosition(g.matrixWorld); camTmp.setFromMatrixPosition(camera.matrixWorld);
+    const d = lodTmp.distanceTo(camTmp) * (camera.zoom ? 1 / camera.zoom : 1);
+    const near = d < lodDist * (this.near === false ? 0.9 : 1.1);
+    if (near === this.near) return;
+    this.near = near;
+    for (const o of this.hi) o.visible = near;
+    for (const o of this.lo) o.visible = !near;
+  }
+}
+// pair up <part>_hi / <part>_lo siblings (and the brake calipers, which only exist in high detail)
+function lodSwitch(g) {
+  const hi = [], lo = [];
+  g.traverse((o) => {
+    const m = LOD_RE.exec(o.name); if (!m || !o.parent) return;
+    const other = m[1] === 'hi' ? 'lo' : 'hi', sib = o.parent.children.some((c) => { const n = LOD_RE.exec(c.name); return n && n[1] === other; });
+    if (sib) (m[1] === 'hi' ? hi : lo).push(o);
+    else if (o.userData.caliper) hi.push(o);
+  });
+  return lo.length ? new LodSwitch(hi, lo) : null;
+}
 
 // ---------- build one vehicle mesh ----------
 const WHEEL_R = 0.33;
@@ -130,6 +164,7 @@ export function buildCarMesh(ti, color, opts = {}) {
     });
   }
   for (const w of parts.wheels) body.add(w);
+  const sw = lodSwitch(g); if (sw) { g.add(sw); parts.lod = sw; }
   const P = parts.parts;
   parts.hood = P.hood; parts.trunk = P.trunk; parts.bumpF = P.bumpF; parts.bumpR = P.bumpR;
   parts.doorL = P.doorL; parts.doorR = P.doorR; parts.doorL2 = P.doorL2; parts.doorR2 = P.doorR2;
@@ -158,8 +193,12 @@ function makeWheel(src, p, part, key) {
   let sx = r / WHEEL_R, sw = sx;
   if (key === 'bike' || key === 'scooter') sw = 0.4;
   else if (['truck', 'bus', 'garbage', 'tow', 'ambulance', 'fire'].includes(key)) sw = sx * 0.95;
-  spin.scale.set(sw, sx, sx);
+  // the rim's face is modelled on +x (the car's left); right-side wheels are mirrored so it faces out
+  spin.scale.set(p.x < -0.01 ? -sw : sw, sx, sx);
   w.position.copy(p);
+  // brake caliper: steers with the wheel but doesn't spin
+  const cal = spin.children.find((c) => /^caliper/.test(c.name));
+  if (cal) { spin.remove(cal); cal.scale.multiply(spin.scale); cal.userData.caliper = true; w.add(cal); }
   w.userData.front = part.includes('F');
   w.userData.r = r;
   spin.traverse((m) => { if (m.isMesh) m.castShadow = true; });
