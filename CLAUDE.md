@@ -45,7 +45,7 @@ python3 tools/serve.py 8765
 - Feature modules, all fed by `main.js` through small context objects:
   - **Vehicles:** `vehicles.js` (physics), `carmodel.js`, `carlights.js`, `carmods.js`, `garage.js`
   - **NPCs and traffic:** `npc.js` (pedestrians), `traffic.js`
-  - **Police and crime:** `police.js`, `wanted.js`, `gangs.js`
+  - **Police and crime:** `police.js`, `wanted.js`, `gangs.js`, `carjack.js` (locked cars, window smash, hotwire, alarms, jacked drivers' reactions, gunpoint holdups of drivers, shot tyres / windows / fuel tank; its state rides in the vehicle record's `l` bits from 256 up)
   - **World:** `daynight.js`, `planes.js`, `breakables.js`, `interiors.js`, `venues.js` (bars and casino), `landmarks.js` (lazy-loaded GLB landmarks)
   - **Player features:** `phone.js`, `radio.js`, `drunk.js`, `economy.js`
   - **Effects and sound:** `fx.js` holds both the visual effects and all sound (see below)
