@@ -12,14 +12,14 @@ Everyone plays in one shared online world: open the link and you're in. Your mon
 |---|---|
 | WASD | Move / drive |
 | Mouse | Look and aim (click the game first) |
-| Click | Attack / shoot |
+| Click | Attack / shoot. Melee: keep clicking for a combo (fists: jab, cross, hook, uppercut; knife and bat have their own); at someone on the ground: stomp |
 | Hold Tab or Q | Weapon wheel: move the mouse, release to equip. It is the only way to switch weapons |
-| Right click | Aim (zooms in and locks onto nearby targets; the sniper zooms further) |
+| Right click | Aim (zooms in and locks onto nearby targets, a sharp pull of the mouse lets go; the sniper zooms further) |
 | R | Reload |
 | Shift | Sprint. Driving: nitro. Helicopter: descend (Space climbs) |
 | Space | Jump / handbrake. In front of a wall, fence or car: climb up or vault over |
 | C (on foot) | Crouch. Crouch next to a wall or car to take cover |
-| E | Get in or out of a vehicle (yanks the driver out) · go into shops, take stairs, use counters |
+| E | Get in or out of a vehicle (yanks the driver out) · go into shops, take stairs, use counters · sit on a street bench |
 | C (driving) | Look behind |
 | W + S (stopped) | Burnout. Flipped on a side or the roof: hold A or D to rock it back over. In the air: A / D roll, W / S tip the nose |
 | ↑ (up arrow) | Phone: contacts (mechanic, taxi to your waypoint, 911, Arnett Auto, locals), messages, internet. Arrows move, Enter picks, Backspace / Esc go back, ↓ on the bottom row puts it away |

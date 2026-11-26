@@ -31,7 +31,7 @@ import { initNav, updateNav } from './nav.js';
 import { knock, flinch } from './npc.js';
 import * as police from './police.js';
 import { planeSpots, planeVisual } from './planes.js';
-import { initBreakables, updateBreakables, setBreakQuality, hitByCar, blast as blastProps, shot as shootProps } from './breakables.js';
+import { initBreakables, updateBreakables, setBreakQuality, hitByCar, blast as blastProps, shot as shootProps, benchNear } from './breakables.js';
 import * as fx from './fx.js';
 import * as ui from './ui.js';
 import { net, connect, joinWorld, startPlaying, sendState, setVehicle, removeVehicle, setCops, sendEvent, sendChat, hostUid, setLook as netSetLook, setName as netSetName, setArea, loadProfile, saveProfile } from './net.js';
@@ -1857,7 +1857,7 @@ function footUpdate(dt, fwd, side) {
   const sprint = keys.has('ShiftLeft') || keys.has('ShiftRight');
   if (anim.busy() && !me.move) { // an action holds you: doors, the counter, a seat, a minigame
     const sitting = anim.playing('sit') || anim.playing('stool');
-    if (sitting && (fwd || side)) standUp_();
+    if (sitting && (fwd || side || me.sitAt?.bench?.broken)) standUp_(); // (a car took the bench out)
     else {
       if (me.sitAt) { me.x = me.sitAt.x; me.z = me.sitAt.z; me.h = me.sitAt.h; }
       me.moveSpeed = 0; me.vy = 0; me.netPose = 0; me.netK = 0;
@@ -2226,6 +2226,9 @@ function useStore() {
     if (interior.nearCounter(me.x, me.z) && interior.room.kind === 'clothes') { openShop(interior.room.store.name, clothingItems()); return true; }
     return true;
   }
+  // a street bench (unless a car is right there: E is for the car then)
+  const bench = !me.veh && !me.seat && benchNear(me.x, me.z);
+  if (bench && !nearestVehicle(1.0)) { me.sitAt = { x: bench.x - Math.sin(bench.h) * 0.12, z: bench.z - Math.cos(bench.h) * 0.12, h: bench.h, bench: bench.ref }; me.y = bench.y; me.vy = 0; anim.play('sit', 6, { loop: true }); return true; }
   const st = storeAt(me.veh ? me.veh.x : me.x, me.veh ? me.veh.z : me.z, me.veh ? 7 : 3.2);
   if (!st) return false;
   if (st.kind === 'body' && me.veh && !me.seat && !me.veh.T.boat && !me.veh.T.heli) { bodyShop(me.veh); return true; }
