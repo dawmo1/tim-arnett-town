@@ -39,6 +39,7 @@ import { eco, initEconomy, addCash, spend, goalDone, checkCountGoals, GOALS, sto
 import { updateRadio, nextStation, currentStation } from './radio.js';
 import { drunk, drunkPass, drinkItems, resetDrunk, updateDrunk, wobble, drunkSteer, swayCamera, blackedOut } from './drunk.js';
 import * as garage from './garage.js';
+import * as ebikes from './ebike.js';
 import { applyMods, modsOf, horn as modHorn, armorMul } from './carmods.js';
 import * as phone from './phone.js';
 import * as minigames from './minigames/index.js';
@@ -331,7 +332,7 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyN' && me.veh && !me.veh.T.bike) { const st = nextStation(); ui.flashPrompt(st.sub ? `📻 ${st.name} · ${st.sub}` : st.name); }
   if (e.code === 'KeyP') callMechanic();
   if (e.code === 'KeyJ' && !toggleJob()) ui.flashPrompt('No side job for this ride'); // taxi, ambulance, fire truck, police car, scooter
-  if (e.code === 'KeyH' && me.veh && !me.seat && !me.dead) modHorn(me.veh); // horn (carmods.js: the car's own horn mod)
+  if (e.code === 'KeyH' && me.veh && !me.seat && !me.dead) { if (me.veh.T.ebike) ebikes.bell(); else modHorn(me.veh); } // horn (carmods.js: the car's own horn mod)
   else if (e.code === 'KeyG' || e.code === 'KeyH') talk(e.code === 'KeyG');
   if (e.code === 'KeyC' && playing && !me.veh && !me.dead && !typing) { me.crouch = !me.crouch; ui.flashPrompt(me.crouch ? 'Crouching (C to stand)' : 'Standing'); }
 });
@@ -480,6 +481,7 @@ function mapBlips() {
   b.push(...storeList(true));
   for (const e of eventBlips()) b.push({ type: 'event', ...e });
   b.push(...garage.blips());
+  b.push(...ebikes.blips(me.x, me.z));
   for (const r of remotes.values()) if (!r.dead) b.push({ x: r.x, z: r.z, type: 'player', name: r.name });
   return b;
 }
@@ -778,7 +780,7 @@ net.handlers.vehicle = (id, rec) => {
       applyMods(v);
     }
   }
-  if (typeof rec.l === 'number') { const l = rec.l; v.sirenOn = !!(l & 1); v.netBrake = !!(l & 2); v.netRev = !!(l & 4); v.doorOpen = l & 8 ? 1 : 0; v.flat = !!(l & 16); v.brokenHead = !!(l & 32); v.brokenTail = !!(l & 64); }
+  if (typeof rec.l === 'number') { const l = rec.l; v.sirenOn = !!(l & 1); v.netBrake = !!(l & 2); v.netRev = !!(l & 4); v.doorOpen = l & 8 ? 1 : 0; v.flat = !!(l & 16); v.brokenHead = !!(l & 32); v.brokenTail = !!(l & 64); v.netPedal = !!(l & 128); }
   if (Array.isArray(rec.dz)) { const [f, b, l, r] = rec.dz; if (f !== Math.round(v.dz.f) || b !== Math.round(v.dz.b) || l !== Math.round(v.dz.l) || r !== Math.round(v.dz.r)) { if (f + b + l + r === 0) { repair(v); applyMods(v); } else { v.dz = { f, b, l, r }; applyDamageVisual(v); } } } // all zero = repaired at Arnett Auto
 };
 net.handlers.vehicleGone = (id) => { const v = vehById.get(id); if (!v) return; if (me.veh === v && me.seat) ejectMe(); resetVehicle(v); };
@@ -840,7 +842,7 @@ function updateCrowd(dt) {
 function vehBits(v) {
   const mine = v === me.veh, fwd = keys.has('KeyS') || keys.has('ArrowDown');
   const braking = mine ? (fwd && v.speed > 0.5) || keys.has('Space') : false, reversing = mine && v.speed < -0.4;
-  return (v.sirenOn ? 1 : 0) | (braking ? 2 : 0) | (reversing ? 4 : 0) | (v.doorOpen ? 8 : 0) | (v.flat ? 16 : 0) | (v.brokenHead ? 32 : 0) | (v.brokenTail ? 64 : 0);
+  return (v.sirenOn ? 1 : 0) | (braking ? 2 : 0) | (reversing ? 4 : 0) | (v.doorOpen ? 8 : 0) | (v.flat ? 16 : 0) | (v.brokenHead ? 32 : 0) | (v.brokenTail ? 64 : 0) | (mine && v.T.ebike && (keys.has('KeyW') || keys.has('ArrowUp')) ? 128 : 0); // 128: pedalling
 }
 function resetVehicle(v) {
   if (me.veh === v) return;
@@ -1126,6 +1128,7 @@ function toggleVehicle() {
   const v = nearestVehicle(1.3);
   if (!v) return;
   if (Math.hypot(v.vx || 0, v.vz || 0) > 3.5) { ui.flashPrompt("It's moving too fast to grab"); return; }
+  if (!ebikes.beforeEnter(v)) return; // a docked Arnett Bike: pay to unlock it
   const seat = driverPlayer(v) ? freeSeat(v) : 0; // another player drives: ride along (no free seat: carjack as before)
   me.enter = { v, phase: 'walk', t: 0, seat };
   v.jackHold = !seat;
@@ -1133,7 +1136,7 @@ function toggleVehicle() {
 // ---------- passengers: me.veh with me.seat > 0 is riding in another player's car; only the driver's client simulates it ----------
 const driverPlayer = (v) => !!(v.driver && v.driver !== net.uid && net.players[v.driver]);
 // passenger seats (the driver's not counted)
-const passSeats = (T) => (T.bus ? 7 : T.limo ? 5 : T.bike || T.duster || T.truck || T.pickup || T.monster || T.cabbed || T.muscle || T.convertible || T.name === 'Sports car' ? 1 : 3);
+const passSeats = (T) => (T.ebike ? 0 : T.bus ? 7 : T.limo ? 5 : T.bike || T.duster || T.truck || T.pickup || T.monster || T.cabbed || T.muscle || T.convertible || T.name === 'Sports car' ? 1 : 3);
 function freeSeat(v) {
   const taken = new Set();
   for (const [uid, p] of Object.entries(net.players)) if (uid !== net.uid && p && Array.isArray(p.s) && p.s[5] === v.id && p.s[20] > 0) taken.add(p.s[20]);
@@ -1206,6 +1209,7 @@ function enterUpdate(dt) {
 // your engine: rpm climbs through five gears; muscle and sports cars pop on lift-off
 let lastGear = 0, offT = 0;
 function engineSound(v, fwd, dt) {
+  if (v.T.ebike) { ebikes.ebikeSound(v, fwd, dt); return; }
   const T = v.T, kind = T.bike ? (T.name === 'Scooter' ? 'scooter' : 'bike') : T.heli ? 'heli' : T.plane ? 'plane' : T.boat ? 'boat' : T.muscle || T.monster ? 'muscle' : T.name === 'Sports car' || T.convertible ? 'sports' : T.truck || T.bus || T.cabbed ? 'truck' : 'car';
   if (v.hp <= 0) { fx.setEngine(null); return; }
   const s = Math.min(1, Math.abs(v.speed || 0) / T.max), g = Math.min(4, Math.floor(s * 5)), frac = s * 5 - g;
@@ -1665,7 +1669,7 @@ function updateVehicles(dt, tSec, nowMs) {
     if (isFar) continue;
     const body = v.mesh.userData.body;
     animateWheels(v, dt);
-    body.rotation.z = v.T.bike ? (v.driver ? v.tilt : 0.3) : 0;
+    body.rotation.z = v.T.bike ? (v.driver ? v.tilt : v.dock ? 0 : 0.3) : 0;
     body.rotation.x = v.T.boat || v.T.heli ? v.pitch || 0 : v.air > 0.05 ? clamp(-(v.vy || 0) * 0.025, -0.35, 0.35) + (v.gp || 0) : v.gp || 0;
     // cars: ground slope + weight transfer / suspension (sr, sp, sy) + tipping over (fr, fp), lifted onto the lowest corner
     if (v.T.plane) planeVisual(v, body, dt);
@@ -1910,7 +1914,7 @@ function driveUpdate(dt, fwd, side) {
   if (mainHit && !me.dead) {
     const dv = Math.hypot(v.vx - pre.vx, v.vz - pre.vz);
     const frontal = mainHit.nx * Math.sin(v.h) + mainHit.nz * Math.cos(v.h) < -0.55;
-    if (frontal && !v.T.boat && !v.T.heli && !v.T.plane && (v.T.bike ? pre.speed > 14 && dv > 8 : pre.speed > 25 && dv > 18)) {
+    if (frontal && !v.T.boat && !v.T.heli && !v.T.plane && (v.T.ebike ? pre.speed > 5 && dv > 4 : v.T.bike ? pre.speed > 14 && dv > 8 : pre.speed > 25 && dv > 18)) {
       damageVehicle(v, (total - 7) * 3, mainHit);
       launchMe(v, pre.vx * 0.7, 4 + pre.speed * 0.08, pre.vz * 0.7);
       return;
@@ -1931,7 +1935,7 @@ function driveUpdate(dt, fwd, side) {
     damageVehicle(v, (total - 5) * 2 * (1 + (total - 5) / 60) * (1.3 / v.T.mass) ** 0.5);
     if (total > 14) damageMe((total - 14) * (v.T.bike ? 4 : 2), 'a crash', '');
     if (me.dead) return;
-    if (v.T.bike && total > 13) { ejectMe(); syncPhysics(me.x, me.z); if (!knockMe({ x: pre.vx * 0.6, y: 4, z: pre.vz * 0.6 }, 2.2)) me.vy = 4; return; }
+    if (v.T.bike && total > (v.T.ebike ? 6 : 13)) { ejectMe(); syncPhysics(me.x, me.z); if (!knockMe({ x: pre.vx * 0.6, y: 4, z: pre.vz * 0.6 }, 2.2)) me.vy = 4; return; }
   }
   // run people over
   if (Math.abs(v.speed) > 5) {
@@ -1955,7 +1959,8 @@ function driveUpdate(dt, fwd, side) {
   me.x = v.x; me.z = v.z; me.y = Math.max(W.SWIM_Y, v.y); me.h = v.h; me.vx = v.vx; me.vz = v.vz; me.moveSpeed = 0;
   writeVeh(v);
   me.ch.g.visible = !!v.T.bike;
-  if (v.T.bike) {
+  if (v.T.ebike) { animateCharacter(me.ch, dt, { ...ebikes.rideEbike(me.ch, v, dt, fwd > 0), weapon: WEAPONS[me.weapon].kind === 'gun' ? 'gun' : 'none' }); ebikes.afterRide(me.ch); }
+  else if (v.T.bike) {
     me.ch.g.position.set(v.x - Math.sin(v.h) * 0.25, v.y + 0.2, v.z - Math.cos(v.h) * 0.25);
     me.ch.g.rotation.set(0, v.h, 0);
     me.ch.g.rotateZ(v.tilt);
@@ -1999,6 +2004,7 @@ function updateRemotes(dt) {
       const seat = s[20] | 0; // > 0: riding as a passenger, sat in that seat
       r.ch.g.visible = !!vo.T.bike || seat > 0;
       if (seat > 0) { const sp = seatPos(vo, seat); r.ch.g.position.set(sp.x, sp.y, sp.z); r.ch.g.rotation.set(0, vo.h, 0); animateCharacter(r.ch, dt, { sit: true, weapon: wk }); }
+      else if (vo.T.ebike) { animateCharacter(r.ch, dt, { ...ebikes.rideEbike(r.ch, vo, dt, !!vo.netPedal), weapon: wk }); ebikes.afterRide(r.ch); }
       else if (vo.T.bike) { r.ch.g.position.set(vo.x - Math.sin(vo.h) * 0.25, vo.y + 0.2, vo.z - Math.cos(vo.h) * 0.25); r.ch.g.rotation.set(0, vo.h, 0); animateCharacter(r.ch, dt, { sit: true, weapon: wk }); }
     } else if ((r.dead || s[16]) && !r.ch.rag) {
       ragdoll(r.ch, { x: r.vx * 0.6, y: 2, z: r.vz * 0.6 }, { dead: true }); // their computer simulates the real fall
@@ -2146,6 +2152,7 @@ function bodyShop(v) { shopOpen = true; paused = true; keys.clear(); mouseDown =
 // fixed in place (same mesh: plate, rims, neon stay); repair() straightens panels, refits lost parts, glass and lamps, applyMods puts the tint back
 function repairCar(v) { v.hp = v.T.hp; v.burnAt = 0; v.burnBy = ''; fx.stopFire(v.fire); v.fire = null; v.flat = false; repair(v); applyMods(v); writeVeh(v, true); }
 garage.initGarage({ spawn: (ti, c, label) => deliverCar(ti, label, c), remove: (v) => { removeVehicle(v.id); resetVehicle(v); }, vehicles: () => vehicles, myVeh: () => (me.seat ? null : me.veh), repair: repairCar, writeVeh: (v) => writeVeh(v, true), close: closeShop, saved: () => markDirty() });
+ebikes.initEbikes({ scene, vehicles: () => vehicles, add: (v) => { scene.add(v.mesh); vehicles.push(v); vehById.set(v.id, v); }, remove: (v) => { removeVehicle(v.id); resetVehicle(v); }, make: makeVehicle, newId, myVeh: () => (me.seat ? null : me.veh), writeVeh });
 // ---- clothing store: Tim's Threads (outfits, a barber, tattoos and masks)
 const COLS = [['White', 0], ['Black', 1], ['Grey', 2], ['Navy', 4], ['Blue', 5], ['Red', 7], ['Maroon', 8], ['Green', 9], ['Olive', 10], ['Khaki', 11], ['Brown', 12], ['Gold', 14], ['Orange', 15], ['Pink', 16], ['Purple', 17], ['Teal', 18]];
 const HAIR_COLS = [['Black', 0], ['Dark brown', 1], ['Brown', 3], ['Auburn', 4], ['Blonde', 6], ['Grey', 7], ['Pink', 10], ['Blue', 11]];
@@ -2190,7 +2197,7 @@ function clothingItems() {
 function callMechanic() {
   if (!playing || me.dead || interior.room) return;
   const car = (label, ti, price) => ({ label, sub: 'Delivered to the nearest street', price, buy: () => deliverCar(ti, label) });
-  openShop('Phone: Arnett Auto mechanic', [car('Sedan', V.SEDAN, 100), car('Hatchback', V.HATCH, 90), car('SUV', V.SUV, 150), car('Pickup', V.PICKUP, 150), car('Motorbike', V.BIKE, 120), car('Sports car', V.SPORTS, 300), car('Muscle car', V.MUSCLE, 400), car('Monster truck', V.MONSTER, 900)]);
+  openShop('Phone: Arnett Auto mechanic', [car('Sedan', V.SEDAN, 100), car('Hatchback', V.HATCH, 90), car('SUV', V.SUV, 150), car('Pickup', V.PICKUP, 150), car('Motorbike', V.BIKE, 120), car('E-bike', V.EBIKE, 60), car('Sports car', V.SPORTS, 300), car('Muscle car', V.MUSCLE, 400), car('Monster truck', V.MONSTER, 900)]);
 }
 let deliverN = 0;
 // phone taxi: fade to black, stream the streets at the waypoint, step out on the sidewalk there
@@ -2529,6 +2536,7 @@ function updateHud(dt, t) {
     for (const sb of storeList(false)) blips.push(sb);
     for (const e of eventBlips()) blips.push({ type: 'event', ...e });
     blips.push(...garage.blips());
+    blips.push(...ebikes.blips(me.x, me.z, 400));
     for (const s of police.stations()) if (Math.abs(s.x - me.x) < 400 && Math.abs(s.z - me.z) < 400) blips.push({ x: s.x, z: s.z, type: 'police' });
     for (const u of police.cops.values()) if (!police.isDown(u) && !u.parked) { const P = police.posOf(u); blips.push({ x: P.x, z: P.z, color: flash, size: u.kind === 3 ? 6 : u.kind === 2 ? 2.5 : 4 }); }
     const spd = me.veh ? Math.abs(me.veh.speed) : 0;
@@ -2654,6 +2662,7 @@ function update(dt, t) {
   updateCamera(dt);
   updateWorldLife(dt, nowMs, t);
   updateEconomy(dt, me, t);
+  ebikes.updateEbikes(dt, me.veh ? me.veh.x : me.x, me.veh ? me.veh.z : me.z);
   { const talk = updateRadio(!!me.veh && !me.veh.T.bike && !me.dead, dt); if (talk) ui.flashPrompt('📻 ' + talk); }
   if (!me.veh || me.dead) fx.setEngine(null);
   fx.updateFx(dt);

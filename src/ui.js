@@ -360,6 +360,7 @@ const ICON = {
   monument: (g) => { g.beginPath(); g.moveTo(-1.8, 3.5); g.lineTo(-1.2, -4); g.lineTo(0, -6); g.lineTo(1.2, -4); g.lineTo(1.8, 3.5); g.fill(); g.fillRect(-4.5, 3.5, 9, 2.2); },
   diamond: (g) => { g.beginPath(); g.moveTo(0, -6); g.lineTo(5, 0); g.lineTo(0, 6); g.lineTo(-5, 0); g.fill(); },
   arrow: (g) => { g.beginPath(); g.moveTo(0, -7); g.lineTo(5.5, 6); g.lineTo(0, 3); g.lineTo(-5.5, 6); g.fill(); },
+  bike: (g) => { g.lineWidth = 1.5; g.beginPath(); g.arc(-3.8, 2.2, 2.9, 0, 7); g.moveTo(6.7, 2.2); g.arc(3.8, 2.2, 2.9, 0, 7); g.moveTo(-3.8, 2.2); g.lineTo(-1, -2.6); g.lineTo(3, -2.6); g.lineTo(3.8, 2.2); g.moveTo(0, 2.2); g.lineTo(-1, -2.6); g.moveTo(-2.4, -4.4); g.lineTo(0.2, -4.4); g.moveTo(3, -2.6); g.lineTo(2.2, -5); g.lineTo(4.2, -5); g.stroke(); },
   car: (g) => { g.beginPath(); g.moveTo(-6.5, 2.5); g.lineTo(-6.5, -0.5); g.lineTo(-4, -1.2); g.lineTo(-2.5, -4.5); g.lineTo(2.5, -4.5); g.lineTo(4, -1.2); g.lineTo(6.5, -0.5); g.lineTo(6.5, 2.5); g.fill(); g.beginPath(); g.arc(-3.8, 3, 1.9, 0, 7); g.fill(); g.beginPath(); g.arc(3.8, 3, 1.9, 0, 7); g.fill(); },
 };
 // legend order; tier = how far out the pause map still shows it (0 = always, 1 = mid zoom, 2 = close in).
@@ -372,6 +373,7 @@ export const BLIP_TYPES = {
   clothes: { name: 'Clothing', color: '#b45ad6', icon: ICON.shirt, tier: 1 },
   garage: { name: 'Mechanic / garage', color: '#3f8fe0', icon: ICON.wrench, tier: 0 },
   car: { name: 'Personal vehicle', color: '#2f80ed', icon: ICON.car, tier: 0 },
+  ebike: { name: 'Arnett Bike dock (e-bikes)', color: '#1e6fd0', icon: ICON.bike, tier: 1 },
   casino: { name: 'Casino', color: '#d4a017', icon: ICON.diamond, tier: 0 },
   hospital: { name: 'Hospital', color: '#fff', ink: '#d23c30', icon: ICON.cross, tier: 0 },
   police: { name: 'Police', color: '#2f6fdc', icon: ICON.star, tier: 0 },

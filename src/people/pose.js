@@ -88,6 +88,15 @@ function armsUp(P, side, ...a) {
   set(P, 'upper_arm' + side, x, side === 'L' ? y : -y, side === 'L' ? z : -z); set(P, 'forearm' + side, elbow);
 }
 
+// on a bicycle: pd = { legs: [thighL, shinL, footL, thighR, shinR, footR] (x angles), lean, reach: [x, outward, elbow] }
+function pedalPose(P, pd) {
+  const L = pd.legs;
+  set(P, 'thighL', L[0], 0, 3); set(P, 'shinL', L[1]); set(P, 'footL', L[2]);
+  set(P, 'thighR', L[3], 0, -3); set(P, 'shinR', L[4]); set(P, 'footR', L[5]);
+  set(P, 'spine', pd.lean || 0); set(P, 'chest', (pd.lean || 0) * 0.3); set(P, 'head', -(pd.lean || 0) * 0.9);
+  if (pd.reach) { const [x, o, el] = pd.reach; armsUp(P, 'L', x, o, el); armsUp(P, 'R', x, o, el); set(P, 'handL', 0, 0, -10); set(P, 'handR', 0, 0, 10); }
+}
+
 // ---------- the state machine ----------
 // st: { speed, aim, weapon, swim, sit, dead, lie, cower, reach, pull, phone, handsUp, look, chat, flinch, swing,
 //       crouch, cover, smoke, drink, film, wave, point, beg, playDead, lean, preach, sign, dance, drive, climb, vault,
@@ -121,6 +130,7 @@ export function animate(ch, dt, st) {
     set(P, 'spine', -4);
     if (st.drive) { armsUp(P, 'L', -55, 8, -45); armsUp(P, 'R', -55, 8, -45); set(P, 'handL', 0, 0, -20); set(P, 'handR', 0, 0, 20); if (st.steer) { add(P, 'upper_armL', st.steer * 12); add(P, 'upper_armR', -st.steer * 12); } }
     else { armsUp(P, 'L', -18, 4, -55); armsUp(P, 'R', -18, 4, -55); }
+    if (st.pedal) { pedalPose(P, st.pedal); rate = 40; } // riding a bicycle (ebike.js works out the leg angles from the crank)
   } else if (st.sitGround) {
     P.root[1] = -0.72; set(P, 'thighL', -85, 0, 18); set(P, 'thighR', -85, 0, -18); set(P, 'shinL', 100); set(P, 'shinR', 100); set(P, 'spine', 8); armsUp(P, 'L', -30, 15, -40); armsUp(P, 'R', -30, 15, -40);
   } else if (st.lie) {
