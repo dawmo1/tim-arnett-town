@@ -9,6 +9,7 @@ import * as THREE from 'three';
 import { T } from './rig.js';
 
 const DEG = Math.PI / 180;
+const STRIDE = { old: 1.25, fat: 1.18, gang: 0.92 }; // shorter steps need a quicker cadence to keep pace
 export const BONES = ['hips', 'spine', 'chest', 'neck', 'head', 'shoulderL', 'upper_armL', 'forearmL', 'handL', 'shoulderR', 'upper_armR', 'forearmR', 'handR', 'thighL', 'shinL', 'footL', 'thighR', 'shinR', 'footR'];
 export let REST = null;
 const ARMS = new Set(['upper_armL', 'forearmL', 'handL', 'upper_armR', 'forearmR', 'handR']);
@@ -56,7 +57,8 @@ const clamp01 = (t) => (t < 0 ? 0 : t > 1 ? 1 : t);
 // relaxed standing: slight elbow bend, arms a touch out, breathing
 function stand(P, t, ch) {
   const br = Math.sin(t * 1.6 + ch.seed) * 1.2;
-  set(P, 'upper_armL', 3, 0, 6); set(P, 'upper_armR', 3, 0, -6);
+  const ao = ch.armOut || 0; // heavier builds hold their arms out from the body
+  set(P, 'upper_armL', 3, 0, 6 + ao); set(P, 'upper_armR', 3, 0, -6 - ao);
   set(P, 'forearmL', -10); set(P, 'forearmR', -10);
   set(P, 'handL', 0, 0, -4); set(P, 'handR', 0, 0, 4);
   add(P, 'chest', -br * 0.6); add(P, 'spine', 1);
@@ -75,12 +77,30 @@ function locomote(P, p, s, w, ch) {
   set(P, 'shinL', knee(1)); set(P, 'shinR', knee(-1));
   set(P, 'footL', -(P.thighL[0] + P.shinL[0]) * 0.65 + 6 * amp); set(P, 'footR', -(P.thighR[0] + P.shinR[0]) * 0.65 + 6 * amp);
   const armA = (16 + 34 * w) * amp;
-  set(P, 'upper_armL', s1 * armA + 4 * w, 0, 7 + 4 * w); set(P, 'upper_armR', -s1 * armA + 4 * w, 0, -7 - 4 * w);
+  const ao = ch.armOut || 0;
+  set(P, 'upper_armL', s1 * armA + 4 * w, 0, 7 + 4 * w + ao); set(P, 'upper_armR', -s1 * armA + 4 * w, 0, -7 - 4 * w - ao);
   set(P, 'forearmL', -14 - 70 * w - Math.max(0, s1) * 12 * amp); set(P, 'forearmR', -14 - 70 * w - Math.max(0, -s1) * 12 * amp);
   set(P, 'handL', -5, 0, -5); set(P, 'handR', -5, 0, 5);
   set(P, 'hips', 0, s1 * (5 + 4 * w) * amp, 0); set(P, 'spine', 3 + 9 * w, -s1 * (6 + 5 * w) * amp, 0); set(P, 'chest', 2 + 4 * w, -s1 * 3 * amp, 0);
   set(P, 'neck', -3 * w); set(P, 'head', -3 - 6 * w + Math.abs(c1) * 2);
   P.root[1] = -(0.015 + 0.05 * w) * amp * Math.abs(c1) + 0.012 * w * amp;
+  // walk styles (San Andreas-like ped groups), strongest at a walk
+  const sty = ch.style, ws = (1 - w * 0.7) * amp;
+  if (sty === 'gang') { // rolling swagger: lean back, shoulders roll, loose arms swung wide, a bounce
+    add(P, 'spine', -7 * ws, -s1 * 6 * ws); add(P, 'chest', -3 * ws, -s1 * 9 * ws); add(P, 'head', -4 * ws, s1 * 6 * ws);
+    add(P, 'upper_armL', 0, 0, 12 * ws); add(P, 'upper_armR', 0, 0, -12 * ws); add(P, 'forearmL', 12 * ws); add(P, 'forearmR', 12 * ws);
+    add(P, 'thighL', 0, 0, 3 * ws); add(P, 'thighR', 0, 0, -3 * ws); P.root[1] -= 0.03 * ws * Math.abs(c1);
+  } else if (sty === 'fat') { // waddle: short steps, side to side, arms held out
+    for (const n of ['thighL', 'thighR', 'shinL', 'shinR', 'footL', 'footR']) P[n][0] *= 1 - 0.28 * ws;
+    add(P, 'hips', 0, 0, s1 * 8 * ws); add(P, 'spine', -5 * ws, 0, -s1 * 6 * ws); P.root[0] += s1 * 0.03 * ws;
+    add(P, 'upper_armL', 0, 0, 10 * ws); add(P, 'upper_armR', 0, 0, -10 * ws); add(P, 'thighL', 0, 0, 5 * ws); add(P, 'thighR', 0, 0, -5 * ws);
+  } else if (sty === 'old') { // stooped shuffle: small steps, bent knees, head up
+    for (const n of ['thighL', 'thighR', 'upper_armL', 'upper_armR']) P[n][0] *= 1 - 0.45 * ws;
+    add(P, 'spine', 14 * ws); add(P, 'chest', 6 * ws); add(P, 'head', -14 * ws); add(P, 'shinL', 10 * ws); add(P, 'shinR', 10 * ws); P.root[1] -= 0.03 * ws;
+  } else if (sty === 'woman') { // hips sway, steps cross a little, arms close
+    add(P, 'hips', 0, s1 * 4 * ws, -s1 * 6 * ws); add(P, 'spine', 0, 0, s1 * 4 * ws);
+    add(P, 'thighL', 0, 0, -4 * ws); add(P, 'thighR', 0, 0, 4 * ws); add(P, 'upper_armL', 0, 0, -3 * ws); add(P, 'upper_armR', 0, 0, 3 * ws);
+  }
 }
 // armsUp(P, side, x, outward, elbow) or armsUp(P, side, x, twist, outward, elbow); outward > 0 lifts the arm away from the body
 function armsUp(P, side, ...a) {
@@ -97,6 +117,169 @@ function pedalPose(P, pd) {
   if (pd.reach) { const [x, o, el] = pd.reach; armsUp(P, 'L', x, o, el); armsUp(P, 'R', x, o, el); set(P, 'handL', 0, 0, -10); set(P, 'handR', 0, 0, 10); }
 }
 
+// ---------- actions: key poses for the interactive moments (src/anim.js times them) ----------
+// st.act = { n: name, k: 0..1 progress (or a looping phase), side: 1 | -1 }. side -1 mirrors the pose left/right
+// (getting in on the passenger side, say). Poses are built from a few key poses with smooth, slightly overshooting
+// blends: San Andreas-style, readable at a distance rather than subtle.
+const PAIRS = [['shoulderL', 'shoulderR'], ['upper_armL', 'upper_armR'], ['forearmL', 'forearmR'], ['handL', 'handR'], ['thighL', 'thighR'], ['shinL', 'shinR'], ['footL', 'footR']];
+function mirror(P) {
+  for (const [a, b] of PAIRS) { const x = P[a]; P[a] = P[b]; P[b] = x; }
+  for (const n of BONES) { P[n][1] = -P[n][1]; P[n][2] = -P[n][2]; }
+  P.root[0] = -P.root[0];
+}
+const TA = blankPose(), TB = blankPose();
+function clearPose(P) { for (const n in P) { P[n][0] = 0; P[n][1] = 0; P[n][2] = 0; } }
+// key poses: [[k, fn(P)], ...] -> P at progress k (smoothstep between neighbours)
+function keys(P, k, list) {
+  let i = 0;
+  while (i < list.length - 2 && k > list[i + 1][0]) i++;
+  const [k0, f0] = list[i], [k1, f1] = list[i + 1];
+  const u = sm(clamp01((k - k0) / Math.max(1e-6, k1 - k0)));
+  clearPose(TA); f0(TA); clearPose(TB); f1(TB);
+  for (const n in P) { const a = TA[n], b = TB[n], o = P[n]; o[0] = a[0] + (b[0] - a[0]) * u; o[1] = a[1] + (b[1] - a[1]) * u; o[2] = a[2] + (b[2] - a[2]) * u; }
+}
+function seated(P, t, ch, drive) {
+  stand(P, t, ch);
+  P.root[1] = -0.42; set(P, 'thighL', -88, 0, 4); set(P, 'thighR', -88, 0, -4); set(P, 'shinL', 85); set(P, 'shinR', 85); set(P, 'footL', -5); set(P, 'footR', -5);
+  set(P, 'spine', -4);
+  if (drive) { armsUp(P, 'L', -55, 8, -45); armsUp(P, 'R', -55, 8, -45); set(P, 'handL', 0, 0, -20); set(P, 'handR', 0, 0, 20); }
+  else { armsUp(P, 'L', -18, 4, -55); armsUp(P, 'R', -18, 4, -55); }
+}
+function stool(P, t, ch) { // perched on a bar stool: higher seat, feet on the rail
+  stand(P, t, ch);
+  P.root[1] = -0.2; set(P, 'thighL', -72, 0, 8); set(P, 'thighR', -72, 0, -8); set(P, 'shinL', 95); set(P, 'shinR', 80); set(P, 'footL', -15); set(P, 'footR', -10);
+  set(P, 'spine', 8); armsUp(P, 'L', -45, 6, -70); armsUp(P, 'R', -40, 6, -80);
+}
+function kneel(P) { // down on the right knee, left foot planted, a hand on the knee
+  P.root[1] = -0.46; set(P, 'hips', 12); set(P, 'spine', 18); set(P, 'head', -10);
+  set(P, 'thighL', -100, 0, 6); set(P, 'shinL', 100); set(P, 'footL', -10);
+  set(P, 'thighR', -12, 0, -4); set(P, 'shinR', 100); set(P, 'footR', 40);
+  armsUp(P, 'L', -55, 0, 8, -50); armsUp(P, 'R', -25, 0, 12, -30);
+}
+function actPose(P, ch, a, t, st) {
+  const k = a.k || 0, n = a.n;
+  let rate = 18;
+  const S = (fn) => (Q) => fn(Q); // (readability)
+  switch (n) {
+    case 'carOpen': // facing the door: reach for the handle, pull it open and step back with it
+      keys(P, k, [
+        [0, S((Q) => stand(Q, t, ch))],
+        [0.4, S((Q) => { stand(Q, t, ch); armsUp(Q, 'R', -80, 0, 4, -25); set(Q, 'spine', 10, 8); set(Q, 'head', 8); })],
+        [1, S((Q) => { stand(Q, t, ch); armsUp(Q, 'R', -55, 0, 55, -55); set(Q, 'spine', 2, 28); set(Q, 'thighR', 14); set(Q, 'thighL', -10); Q.root[2] -= 0.12; })],
+      ]);
+      rate = 16; break;
+    case 'carIn': // duck under the roof, swing a leg in, drop into the seat (the body turns and slides in main.js)
+      keys(P, k, [
+        [0, S((Q) => stand(Q, t, ch))],
+        [0.45, S((Q) => { stand(Q, t, ch); Q.root[1] = -0.14; set(Q, 'spine', 26); set(Q, 'chest', 10); set(Q, 'head', 16); set(Q, 'thighR', -72); set(Q, 'shinR', 75); set(Q, 'thighL', -15); set(Q, 'shinL', 25); armsUp(Q, 'L', -110, 0, 18, -35); armsUp(Q, 'R', -40, 0, 20, -40); })],
+        [1, S((Q) => seated(Q, t, ch, true))],
+      ]);
+      rate = 16; break;
+    case 'carShut': // sat in the seat: reach out for the door and pull it shut
+      keys(P, k, [
+        [0, S((Q) => seated(Q, t, ch, true))],
+        [0.45, S((Q) => { seated(Q, t, ch, true); armsUp(Q, 'L', -60, 0, 62, -25); set(Q, 'chest', 0, 25); set(Q, 'head', 0, 30); })],
+        [1, S((Q) => seated(Q, t, ch, true))],
+      ]);
+      rate = 18; break;
+    case 'carOut': // push the door, swing the legs out, stand up beside the car
+      keys(P, k, [
+        [0, S((Q) => seated(Q, t, ch, true))],
+        [0.3, S((Q) => { seated(Q, t, ch, false); armsUp(Q, 'L', -55, 0, 55, -15); set(Q, 'chest', 0, 20); })],
+        [0.6, S((Q) => { stand(Q, t, ch); Q.root[1] = -0.2; set(Q, 'spine', 28); set(Q, 'head', 12); set(Q, 'thighL', -70); set(Q, 'shinL', 80); set(Q, 'thighR', -40); set(Q, 'shinR', 60); armsUp(Q, 'L', -100, 0, 25, -30); armsUp(Q, 'R', -30, 0, 15, -40); })],
+        [1, S((Q) => stand(Q, t, ch))],
+      ]);
+      rate = 16; break;
+    case 'shutStand': // standing beside the car: shove the door shut with the near hand
+      keys(P, k, [
+        [0, S((Q) => stand(Q, t, ch))],
+        [0.4, S((Q) => { stand(Q, t, ch); armsUp(Q, 'R', -20, 0, 70, -70); set(Q, 'spine', 0, -15); set(Q, 'head', 0, -25); })],
+        [0.7, S((Q) => { stand(Q, t, ch); armsUp(Q, 'R', -30, 0, 60, -5); set(Q, 'spine', 4, -25, -6); set(Q, 'head', 0, -30); })],
+        [1, S((Q) => stand(Q, t, ch))],
+      ]);
+      rate = 20; break;
+    case 'door': // shoulder a building door open and step through
+      keys(P, k, [
+        [0, S((Q) => stand(Q, t, ch))],
+        [0.45, S((Q) => { stand(Q, t, ch); armsUp(Q, 'R', -88, 0, 4, -60); set(Q, 'spine', 6, 10); set(Q, 'thighL', -25); set(Q, 'shinL', 20); })],
+        [1, S((Q) => { stand(Q, t, ch); armsUp(Q, 'R', -85, 0, 6, -8); set(Q, 'spine', 12, 4); set(Q, 'thighL', -30); set(Q, 'shinL', 10); set(Q, 'thighR', 15); Q.root[2] += 0.1; })],
+      ]);
+      rate = 18; break;
+    case 'give': case 'take': { // hand cash over a counter (give) / take a bag back (take), with a little nod
+      const s = Math.sin(clamp01(k) * Math.PI), side = n === 'give' ? 'R' : 'L';
+      stand(P, t, ch);
+      armsUp(P, side, -72 * s - 6, 0, 4, -25 - 40 * (1 - s)); set(P, 'spine', 7 * s, (n === 'give' ? 8 : -8) * s); set(P, 'head', 10 * s);
+      rate = 20; break;
+    }
+    case 'eat': { // hot dog / drink: bites, chew, look about
+      const c = Math.max(0, Math.sin(k * Math.PI * 2 * 2));
+      stand(P, t, ch);
+      armsUp(P, 'R', -35 - 25 * c, 0, -12, -90 - 45 * c); set(P, 'handR', 0, 0, 20); set(P, 'head', -6 * c); set(P, 'spine', -2);
+      rate = 16; break;
+    }
+    case 'fillBag': { // a clerk at gunpoint: scoop the till into a bag, hands shaking, glancing up
+      const w = Math.sin(k * Math.PI * 2 * 3), sh = Math.sin(t * 25) * 2;
+      stand(P, t, ch);
+      set(P, 'spine', 22); set(P, 'chest', 8); set(P, 'head', 4 + Math.max(0, Math.sin(k * Math.PI * 2)) * -14);
+      armsUp(P, 'L', -55 + 18 * w + sh, 0, 4, -50); armsUp(P, 'R', -55 - 18 * w - sh, 0, 4, -50);
+      rate = 18; break;
+    }
+    case 'pool': { // bent over the table: bridge hand down, the cue arm draws back and strokes through
+      const s = Math.sin(k * Math.PI * 2), strike = k > 0.85 ? Math.sin((k - 0.85) / 0.15 * Math.PI) : 0;
+      stand(P, t, ch);
+      P.root[1] = -0.08; set(P, 'hips', 8); set(P, 'spine', 34); set(P, 'chest', 12); set(P, 'head', -34); set(P, 'neck', -8);
+      set(P, 'thighL', -30, 0, 4); set(P, 'shinL', 25); set(P, 'thighR', 10, 0, -6); set(P, 'shinR', 6);
+      armsUp(P, 'L', -95, 0, 22, -12); set(P, 'handL', 0, 0, -30);
+      armsUp(P, 'R', 12 + 16 * s - 30 * strike, 0, 14, -100 + 30 * s + 60 * strike);
+      rate = 20; break;
+    }
+    case 'darts': { // sight, cock the wrist back, throw, follow through
+      keys(P, k, [
+        [0, S((Q) => { stand(Q, t, ch); armsUp(Q, 'R', -100, 0, 6, -95); set(Q, 'thighL', -8); set(Q, 'thighR', 8); set(Q, 'spine', 4, 15); })],
+        [0.55, S((Q) => { stand(Q, t, ch); armsUp(Q, 'R', -110, 0, 6, -125); set(Q, 'thighL', -8); set(Q, 'thighR', 8); set(Q, 'spine', 2, 18); set(Q, 'head', 4); })],
+        [0.7, S((Q) => { stand(Q, t, ch); armsUp(Q, 'R', -95, 0, 4, -8); set(Q, 'thighL', -12); set(Q, 'thighR', 10); set(Q, 'spine', 10, 6); })],
+        [1, S((Q) => { stand(Q, t, ch); armsUp(Q, 'R', -100, 0, 6, -95); set(Q, 'thighL', -8); set(Q, 'thighR', 8); set(Q, 'spine', 4, 15); })],
+      ]);
+      rate = 22; break;
+    }
+    case 'table': { // cards / roulette: lean on the table, tap and shuffle chips
+      const c = Math.sin(t * 2.2), d = Math.max(0, Math.sin(t * 1.3));
+      stand(P, t, ch);
+      set(P, 'spine', 16); set(P, 'head', 10 + 4 * c);
+      armsUp(P, 'L', -48, 0, -4, -62); armsUp(P, 'R', -52 - 8 * d, 0, -2, -58 + 10 * c);
+      rate = 12; break;
+    }
+    case 'slots': // one hand on the machine, the other hauls the lever down
+      keys(P, k, [
+        [0, S((Q) => { stand(Q, t, ch); set(Q, 'spine', 8); armsUp(Q, 'L', -55, 0, -2, -60); armsUp(Q, 'R', -130, 0, 14, -30); })],
+        [0.35, S((Q) => { stand(Q, t, ch); set(Q, 'spine', 12); armsUp(Q, 'L', -55, 0, -2, -60); armsUp(Q, 'R', -60, 0, 14, -25); })],
+        [1, S((Q) => { stand(Q, t, ch); set(Q, 'spine', 8); set(Q, 'head', 6); armsUp(Q, 'L', -55, 0, -2, -60); armsUp(Q, 'R', -125, 0, 14, -30); })],
+      ]);
+      rate = 18; break;
+    case 'sit': seated(P, t, ch, false); set(P, 'head', Math.sin(t * 0.4 + ch.seed) * 6, Math.sin(t * 0.23 + ch.seed) * 18); rate = 10; break;
+    case 'stool': stool(P, t, ch); set(P, 'head', 0, Math.sin(t * 0.3 + ch.seed) * 20); rate = 10; break;
+    case 'getUpFront': // face down: push up, get a knee under you, stand
+      keys(P, k, [
+        [0, S((Q) => { Q.root[1] = -0.8; set(Q, 'hips', 86); set(Q, 'head', -30); armsUp(Q, 'L', -90, 0, 30, -100); armsUp(Q, 'R', -90, 0, 30, -100); set(Q, 'shinL', 5); set(Q, 'shinR', 5); })],
+        [0.3, S((Q) => { Q.root[1] = -0.62; set(Q, 'hips', 62); set(Q, 'head', -25); armsUp(Q, 'L', -80, 0, 14, -10); armsUp(Q, 'R', -80, 0, 14, -10); set(Q, 'thighL', -40); set(Q, 'shinL', 90); set(Q, 'thighR', -10); set(Q, 'shinR', 40); })],
+        [0.65, S((Q) => kneel(Q))],
+        [1, S((Q) => stand(Q, t, ch))],
+      ]);
+      rate = 18; break;
+    case 'getUpBack': // face up: sit up, roll onto a knee, push off it and stand
+      keys(P, k, [
+        [0, S((Q) => { Q.root[1] = -0.8; set(Q, 'hips', -86); set(Q, 'head', 10); armsUp(Q, 'L', -15, 0, 40, -20); armsUp(Q, 'R', -15, 0, 40, -20); set(Q, 'shinL', 8); set(Q, 'shinR', 4); })],
+        [0.3, S((Q) => { Q.root[1] = -0.74; set(Q, 'hips', -6); set(Q, 'spine', 22); set(Q, 'head', 8); set(Q, 'thighL', -86); set(Q, 'thighR', -80); set(Q, 'shinL', 30); set(Q, 'shinR', 10); armsUp(Q, 'L', 35, 0, 25, -5); armsUp(Q, 'R', 35, 0, 25, -5); })],
+        [0.62, S((Q) => kneel(Q))],
+        [1, S((Q) => stand(Q, t, ch))],
+      ]);
+      rate = 18; break;
+    default: stand(P, t, ch);
+  }
+  if (a.side < 0) mirror(P);
+  return rate;
+}
+
 // ---------- the state machine ----------
 // st: { speed, aim, weapon, swim, sit, dead, lie, cower, reach, pull, phone, handsUp, look, chat, flinch, swing,
 //       crouch, cover, smoke, drink, film, wave, point, beg, playDead, lean, preach, sign, dance, drive, climb, vault,
@@ -110,20 +293,20 @@ export function animate(ch, dt, st) {
   const sp = st.speed || 0;
   const dead = st.dead || st.playDead;
 
-  if (dead) { // limp on the ground (used when there's no ragdoll)
+  if (st.act && !dead) {
+    rate = actPose(P, ch, st.act, t, st);
+  } else if (dead) { // limp on the ground (used when there's no ragdoll)
     ch.deadT = Math.min(1, (ch.deadT || 0) + dt * 2.5);
     P.root[1] = -0.78 * sm(ch.deadT);
     set(P, 'hips', -88 * sm(ch.deadT), 0, ch.roll * 10);
     armsUp(P, 'L', -20, 60, -20); armsUp(P, 'R', -10, 75, -30);
     set(P, 'thighL', -6, 0, 10); set(P, 'thighR', 4, 0, -6); set(P, 'shinL', 14); set(P, 'shinR', 6);
     set(P, 'head', -10, 30 * ch.roll); rate = 8;
-  } else if (ch.getUp > 0) {
+  } else if (ch.getUp > 0) { // after a ragdoll: get up from lying face down or face up (ragdoll.js sets getUp / getUpFace)
     ch.getUp = Math.max(0, ch.getUp - dt);
-    const k = ch.getUp / 0.7;
-    P.root[1] = -0.45 * k; set(P, 'hips', 25 * k); set(P, 'spine', 20 * k);
-    set(P, 'thighL', -85 * k); set(P, 'thighR', -60 * k); set(P, 'shinL', 110 * k); set(P, 'shinR', 90 * k); set(P, 'footL', -20 * k); set(P, 'footR', -25 * k);
-    armsUp(P, 'L', -50 * k, 10, -30 * k); armsUp(P, 'R', -50 * k, 10, -30 * k);
-    rate = 20;
+    const dur = ch.getUpDur || 1.2;
+    rate = actPose(P, ch, { n: ch.getUpFace ? 'getUpFront' : 'getUpBack', k: 1 - ch.getUp / dur }, t, st);
+    if (ch.getUp <= 0) ch.getUpDur = 0;
   } else if (st.drive || st.sit) {
     stand(P, t, ch);
     P.root[1] = -0.42; set(P, 'thighL', -88, 0, 4); set(P, 'thighR', -88, 0, -4); set(P, 'shinL', 85); set(P, 'shinR', 85); set(P, 'footL', -5); set(P, 'footR', -5);
@@ -151,10 +334,15 @@ export function animate(ch, dt, st) {
     set(P, 'thighL', Math.sin(p * 2) * 25); set(P, 'thighR', -Math.sin(p * 2) * 25); set(P, 'shinL', 10); set(P, 'shinR', 10);
     if (sp < 0.3) { set(P, 'hips', -10); set(P, 'head', -5); armsUp(P, 'L', -30 + Math.sin(p) * 20, 40, -40); armsUp(P, 'R', -30 - Math.sin(p) * 20, 40, -40); P.root[1] = -1.25; }
   } else if (st.climb !== undefined) {
-    const k = st.climb; // 0..1 up a wall
-    armsUp(P, 'L', -170 + 60 * k, 10, -10 - 60 * k); armsUp(P, 'R', -170 + 60 * k, 10, -10 - 60 * k);
-    set(P, 'thighL', -80 + 70 * k); set(P, 'thighR', -30 - 40 * Math.sin(k * 3)); set(P, 'shinL', 90 - 80 * k); set(P, 'shinR', 60);
-    set(P, 'spine', 15); rate = 22;
+    // 0..1 up a wall: jump and reach, hang on the ledge, haul the chest over, knee up, stand
+    keys(P, st.climb, [
+      [0, (Q) => { stand(Q, t, ch); Q.root[1] = -0.12; set(Q, 'thighL', -30); set(Q, 'shinL', 40); set(Q, 'thighR', -20); set(Q, 'shinR', 35); armsUp(Q, 'L', -120, 0, 10, -40); armsUp(Q, 'R', -120, 0, 10, -40); }],
+      [0.25, (Q) => { armsUp(Q, 'L', -172, 0, 12, -12); armsUp(Q, 'R', -172, 0, 12, -12); set(Q, 'spine', 4); set(Q, 'head', -18); set(Q, 'thighL', -25); set(Q, 'shinL', 50); set(Q, 'thighR', 5); set(Q, 'shinR', 30); }],
+      [0.55, (Q) => { armsUp(Q, 'L', -150, 0, 22, -95); armsUp(Q, 'R', -150, 0, 22, -95); set(Q, 'spine', 25); set(Q, 'head', -10); set(Q, 'thighL', -70); set(Q, 'shinL', 95); set(Q, 'thighR', -15); set(Q, 'shinR', 40); }],
+      [0.8, (Q) => { Q.root[1] = -0.3; armsUp(Q, 'L', -70, 0, 25, -60); armsUp(Q, 'R', -70, 0, 25, -60); set(Q, 'spine', 35); set(Q, 'thighL', -100); set(Q, 'shinL', 110); set(Q, 'thighR', -30); set(Q, 'shinR', 60); }],
+      [1, (Q) => stand(Q, t, ch)],
+    ]);
+    rate = 24;
   } else if (st.vault !== undefined) {
     const k = st.vault;
     set(P, 'hips', 10, 0, 20 * Math.sin(k * Math.PI)); armsUp(P, 'L', -60, 30, -10); set(P, 'thighL', -70 * Math.sin(k * Math.PI)); set(P, 'thighR', -50 * Math.sin(k * Math.PI)); set(P, 'shinL', 60); set(P, 'shinR', 40);
@@ -162,7 +350,7 @@ export function animate(ch, dt, st) {
   } else {
     // ---- on your feet: idle / walk / run, then upper-body overlays ----
     const run = clamp01((sp - 2.6) / 2.4);
-    if (sp > 0.25) { ch.walk = (ch.walk || 0) + dt * (sp < 2.6 ? sp * 2.9 : 7.5 + sp * 0.75); locomote(P, ch.walk, sp, run, ch); }
+    if (sp > 0.25) { ch.walk = (ch.walk || 0) + dt * (sp < 2.6 ? sp * 2.9 * (STRIDE[ch.style] || 1) : 7.5 + sp * 0.75); locomote(P, ch.walk, sp, run, ch); }
     else stand(P, t, ch);
     if (st.crouch) { P.root[1] -= 0.35; add(P, 'thighL', -60); add(P, 'thighR', -60); add(P, 'shinL', 85); add(P, 'shinR', 85); add(P, 'footL', -25); add(P, 'footR', -25); add(P, 'spine', 22); add(P, 'head', -12); }
     if (st.limp) { add(P, 'hips', 0, 0, Math.sin(ch.walk || 0) * 6); P.root[1] -= Math.max(0, Math.sin(ch.walk || 0)) * 0.04; add(P, 'thighR', 10); }
@@ -199,7 +387,16 @@ export function animate(ch, dt, st) {
       if (st.recoil > 0) { add(P, 'upper_armR', -st.recoil * 12); add(P, 'upper_armL', -st.recoil * 10); add(P, 'forearmR', -st.recoil * 8); }
       rate = 26;
     } else if (st.reload > 0) {
-      const k = st.reload; armsUp(P, 'R', -45, 0, -20, -80); armsUp(P, 'L', -30 - 30 * Math.sin(k * Math.PI * 2), 0, -30, -70); set(P, 'head', 18);
+      // tip the gun, drop the mag (left hand to the belt), slap a fresh one in, rack it
+      const k = st.reload, base = (Q) => { armsUp(Q, 'R', -50, 0, -18, -85); set(Q, 'handR', 0, 0, 25); set(Q, 'head', 18); set(Q, 'spine', 6); };
+      const C = (fn) => (Q) => { copyPose(Q, P); base(Q); fn(Q); };
+      keys(P, k, [
+        [0, C((Q) => armsUp(Q, 'L', -60, 0, -28, -70))],
+        [0.3, C((Q) => armsUp(Q, 'L', 5, 0, 18, -25))],
+        [0.6, C((Q) => armsUp(Q, 'L', -55, 0, -26, -80))],
+        [0.78, C((Q) => { armsUp(Q, 'L', -40, 0, -10, -55); set(Q, 'chest', 0, -8); })],
+        [1, C((Q) => armsUp(Q, 'L', -60, 0, -28, -70))],
+      ]);
     } else if (st.handsUp) {
       armsUp(P, 'L', -170, 0, 22, -15); armsUp(P, 'R', -170, 0, 22, -15); set(P, 'handL', 0, 0, 20); set(P, 'handR', 0, 0, -20);
       add(P, 'upper_armL', Math.sin(t * 9) * 2); add(P, 'upper_armR', Math.sin(t * 9.4) * 2);

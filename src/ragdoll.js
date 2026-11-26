@@ -166,9 +166,31 @@ function finishUp(rag) {
   // which way is the torso facing on the ground? stand up facing that way
   tv2.set(0, 0, 1).applyQuaternion(ch.g.quaternion);
   const h = Math.atan2(tv2.x, tv2.z);
+  // lying face down (the chest faces the ground) or face up? people/pose.js plays the matching get-up
+  let faceDown = tv2.y < 0;
+  const B = ch.bones;
+  if (B?.upper_armL && B.neck && B.hips) { // front = (left shoulder - right shoulder) x (neck - hips)
+    const l = B.upper_armL.getWorldPosition(new THREE.Vector3()), r = B.upper_armR.getWorldPosition(new THREE.Vector3());
+    const up = B.neck.getWorldPosition(new THREE.Vector3()).sub(B.hips.getWorldPosition(new THREE.Vector3()));
+    faceDown = l.sub(r).cross(up).y < 0;
+  }
   release(ch);
-  ch.getUp = 0.7; // crouch, then stand (see people/pose.js)
+  ch.getUp = ch.getUpDur = 1.25; ch.getUpFace = faceDown; // push up / sit up, onto a knee, stand (people/pose.js)
   if (rag.onUp) rag.onUp(pos, h);
+}
+// Let go of a ragdoll and play the get-up (face down or face up) from where it lies: for bodies another computer
+// simulates (remote players) or that are released early.
+export function standUp(ch) {
+  if (!ch.rag) return;
+  const B = ch.bones;
+  let faceDown = false;
+  if (B?.upper_armL && B.neck && B.hips) {
+    const l = B.upper_armL.getWorldPosition(new THREE.Vector3()), r = B.upper_armR.getWorldPosition(new THREE.Vector3());
+    const up = B.neck.getWorldPosition(new THREE.Vector3()).sub(B.hips.getWorldPosition(new THREE.Vector3()));
+    faceDown = l.sub(r).cross(up).y < 0;
+  }
+  release(ch);
+  ch.getUp = ch.getUpDur = 1.25; ch.getUpFace = faceDown;
 }
 // The pose a dead ragdoll ended in stays on screen; this lets the caller know where the body is.
 export function isRagdolled(ch) { return !!ch.rag; }

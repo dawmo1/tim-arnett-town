@@ -72,6 +72,20 @@ export function useVenue(me) {
   return true;
 }
 
+// a free seat (booth seat or bar stool) within reach of the player in the room they're in, or null
+export function seatNear(me) {
+  const R = interior.room;
+  if (!R?.seats) return null;
+  const regs = regulars.get(R.store) || [];
+  let best = null, bd = 1.3;
+  for (const s of R.seats) {
+    if (s.pose !== 'sit' && s.pose !== 'coffee') continue; // ('chat' spots are for standing about)
+    const d = Math.hypot(s.x - me.x, s.z - me.z);
+    if (d < bd && !regs.some((w) => !w.dead && Math.hypot(w.x - s.x, w.z - s.z) < 0.6)) { bd = d; best = s; }
+  }
+  return best;
+}
+
 // ---------- regulars ----------
 // 3-6 townspeople per bar, from npc.js (so bumping, insulting (H) or hitting them starts a fight like on the street).
 // Friends share a group, and npc.js pulls a whole group into a fight; brawlers nearby may join too.

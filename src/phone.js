@@ -493,6 +493,7 @@ export function key(e) {
   return false;
 }
 export const isOpen = () => open;
+export const inCall = () => open && !!call; // (the player holds the phone to their ear: src/anim.js)
 // main.js pointerlockchange: true = the phone took this unlock, don't open the pause menu
 export function unlocked() {
   if (sameEsc()) return true;

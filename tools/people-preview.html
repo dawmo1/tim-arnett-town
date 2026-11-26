@@ -1,0 +1,87 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <base href="../">
+  <title>People preview</title>
+  <style>html, body { margin: 0; background: #8a9aa8; overflow: hidden; } canvas { display: block; }</style>
+  <script type="importmap">
+    { "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/addons/" } }
+  </script>
+</head>
+<body>
+<!-- Dev tool: a lineup of people for checking models, outfits and poses.
+     tools/people-preview.html?view=line|face|back&pose=<state json>&seed=1&n=8&t=1.2
+     window.__pp.setPose({...}) / __pp.step(seconds) drive it from a script. -->
+<script type="module">
+import * as THREE from 'three';
+import { loadAssets } from './src/assets.js';
+import { initCharacters, makeCharacter, animateCharacter, setProp } from './src/character.js';
+import { randomLook, roleLook } from './src/people/looks.js';
+import { GANGS, gangLook } from './src/gangs.js';
+
+const Q = new URLSearchParams(location.search);
+const view = Q.get('view') || 'line', n = +(Q.get('n') || 8);
+let seed = +(Q.get('seed') || 1);
+const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(1); renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true; renderer.outputColorSpace = THREE.SRGBColorSpace; renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.15;
+document.body.append(renderer.domElement);
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0x9fb3c4);
+const cam = new THREE.PerspectiveCamera(view === 'face' ? 22 : 35, innerWidth / innerHeight, 0.05, 100);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x99bb99, 1.2));
+const sun = new THREE.DirectionalLight(0xfff1dc, 2.4); sun.position.set(3, 6, 5); sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048); Object.assign(sun.shadow.camera, { left: -8, right: 8, top: 8, bottom: -8 }); scene.add(sun);
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.MeshStandardMaterial({ color: 0x6f6a62, roughness: 1 }));
+ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
+
+await loadAssets();
+initCharacters(Q.get('q') || 'medium');
+const roles = (Q.get('roles') || '').split(',').filter(Boolean);
+const people = [];
+const lookParam = Q.get('looks') ? JSON.parse(Q.get('looks')) : null;
+for (let i = 0; i < n; i++) {
+  const role = roles[i % roles.length];
+  const look = lookParam ? lookParam[i % lookParam.length] : role === 'flynn' ? [2, 1, 10, 1, 1, 6, 29, 0, 0, 4, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    : role === 'gang' ? gangLook(GANGS[Math.floor(rnd() * GANGS.length)], roleLook, rnd) : roles.length ? roleLook(role, rnd) : randomLook(rnd);
+  const ch = makeCharacter(look);
+  const sp = view === 'face' ? 0.42 : 0.95;
+  if (view === 'crowd') ch.g.position.set((i % 10 - 4.5) * 1.2, 0, -Math.floor(i / 10) * 1.6); else ch.g.position.set((i - (n - 1) / 2) * sp, 0, 0);
+  ch.g.rotation.y = view === 'back' ? Math.PI : view === 'side' ? Math.PI / 2 : 0;
+  scene.add(ch.g); people.push(ch);
+}
+let pose = Q.get('pose') ? JSON.parse(Q.get('pose')) : { speed: 0 };
+const props = (Q.get('props') || '').split(',').filter(Boolean);
+for (const ch of people) for (const p of props) setProp(ch, p);
+function frameCam() {
+  const w = (n - 1) * (view === 'face' ? 0.42 : 0.95);
+  if (view === 'face') { cam.position.set(0, 1.66, Math.max(1.4, w * 2.6)); cam.lookAt(0, 1.64, 0); }
+  else if (view === 'crowd') { cam.position.set(0, 4, 9); cam.lookAt(0, 0.8, -3); }
+  else if (view === 'close') { cam.position.set(1.6, 1.3, 2.6); cam.lookAt(0, 0.9, 0); }
+  else { cam.position.set(0, 1.05, Math.max(3.2, w * 1.05 + 1.6)); cam.lookAt(0, 0.92, 0); }
+  cam.aspect = innerWidth / innerHeight; cam.updateProjectionMatrix();
+}
+frameCam();
+function step(t, dt = 1 / 60) { for (let k = 0; k < Math.round(t / dt); k++) for (const ch of people) animateCharacter(ch, dt, typeof pose === 'function' ? pose(k * dt) : pose); }
+step(+(Q.get('t') || 1));
+function draw() { renderer.render(scene, cam); }
+draw();
+// frame cost: animate everyone one step and render, waiting for the GPU each frame
+function perf(frames = 120) {
+  const gl = renderer.getContext(), px = new Uint8Array(4);
+  let ta = 0, tr = 0;
+  for (let k = 0; k < frames; k++) {
+    const t0 = performance.now();
+    for (const ch of people) animateCharacter(ch, 1 / 60, typeof pose === 'function' ? pose(k / 60) : pose);
+    const t1 = performance.now();
+    renderer.render(scene, cam); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    tr += performance.now() - t1; ta += t1 - t0;
+  }
+  return { animMs: +(ta / frames).toFixed(2), renderMs: +(tr / frames).toFixed(2), ...renderer.info.render };
+}
+window.__pp = { THREE, scene, cam, people, renderer, draw, step, perf, animate: animateCharacter, setProp, setPose: (p) => { pose = p; }, frameCam, stats: () => renderer.info.render };
+window.__ready = true;
+</script>
+</body>
+</html>

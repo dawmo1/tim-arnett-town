@@ -11,7 +11,7 @@ import { G, pointOnEdge, district } from './city/data.js';
 import { nodeRadius } from './city/tile.js';
 import { angDiff } from './util.js';
 import { makeCharacter, randomLook, roleLook, animateCharacter, placeCharacter, mat, disposeCharacter, setProp } from './character.js';
-import { ragdoll, release, ragPos } from './ragdoll.js';
+import { ragdoll, release, ragPos, standUp } from './ragdoll.js';
 import { signalState } from './traffic.js';
 import { sky } from './daynight.js';
 import { turfAt, gangLook, gangById, warnLine, GANGS } from './gangs.js';
@@ -144,6 +144,7 @@ function hidden(x, z, cam) {
 let groups = []; // {props: [Object3D], members: [walker], x, z}
 function newWalker(role, x, z, h, grp) {
   const ch = makeCharacter(lookFor(role));
+  if (role.startsWith('gang:') || role === 'crook') ch.style = 'gang'; else if (role === 'elderly') ch.style = 'old'; // walk styles (people/pose.js)
   scene.add(ch.g);
   const w = { ch, role, x, z, y: W.groundHeight(x, z), h, hp: 40, dead: null, panic: 0, mode: 'walk', grp,
     temper: Math.random() < 0.18 ? 'brawler' : Math.random() < 0.027 ? 'gunman' : 'normal', speed: 1.15 + Math.random() * 0.5, lat: (Math.random() - 0.5) * 0.9, shirt: ch.shirtColor,
@@ -808,7 +809,7 @@ export function cartNear(x, z, r) { for (const g of groups) if (g.cart && Math.h
 export function revive(w) {
   if (!walkers.includes(w)) return false;
   w.dead = null; w.hp = 40;
-  release(w.ch); w.ch.getUp = 0.9;
+  if (w.ch.rag) standUp(w.ch); else { w.ch.getUp = w.ch.getUpDur = 1.25; w.ch.getUpFace = false; } // get up off the ground
   if (w.grp) { w.mode = 'gone'; w.modeT = 25; } else calmDown(w);
   return true;
 }

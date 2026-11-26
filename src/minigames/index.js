@@ -20,6 +20,7 @@ const GAMES = {
 let cur = null; // { kind, leave }
 // main.js checks this so the pointer unlock a minigame causes doesn't open the pause menu
 export const isOpen = () => !!cur;
+export const current = () => cur?.kind || null; // which game is open (main.js poses the player for it)
 // Force-close whatever is open (player died, got arrested...): bets still on the table or mid-round are refunded.
 export function close() { cur?.leave(true); }
 
