@@ -85,6 +85,7 @@ python3 tools/serve.py 8765
 - **Police:** each group of players within about 1.2 km has one host running its cops.
 - **Passengers:** they sit in player-state slot 20 (`s[20]`). Only the driver's client simulates the car.
 - **Chat** keeps the last 100 messages.
+- **Shared world state:** `rooms/WORLD/world` holds admin time offset, frozen clock, weather and game speed (admins only); `admin.js` applies it on every client.
 - **Trust model:** it trusts clients, which is fine for friends but not cheat-proof.
 
 ## Sound
@@ -123,11 +124,9 @@ python3 tools/serve.py 8765
 
 ### Known limits and loose ends
 
-- Two players can claim the same passenger seat at the same instant.
 - Admin moderation (kick, freeze) only works on unmodified clients.
-- Time, weather and slowmo from the admin console only change your own screen.
 - Shadow-pass shaders and the tracer material aren't prewarmed.
-- The licence plate and bus-sign text mirroring was flipped by maths, not checked in-game.
+- Licence plate and taxi-sign text use the same fix as the bus sign, which reads correctly in-game ("12 ARNETT AVE"); the plates and taxi sign weren't checked in-game themselves.
 
 ## Session status (2026-11-26, paused for the night)
 
@@ -139,7 +138,7 @@ python3 tools/serve.py 8765
   - Not done: punching, sitting on outdoor benches, testing the animation sync between players (`s[21]`, `s[22]`).
   - First thing to check: render the people to confirm the texture-seam fix still holds after the last texture-lookup change. After merging, re-check the e-bike pedalling pose (the hip and knee joints moved down 1.5-2 cm).
 - To do before pushing to `main`:
-  - online fixes: passenger-seat race, admin time and weather for everyone, stale event cleanup.
+  - Online fixes are done (2026-11-27). Dain must publish the new `database.rules.json`, which adds the `world` node and old-event deletion.
   - Dain must run `cd tools && npm run checks` on the Mac (check-roads needs `tools/cache`).
-  - Find the dark-blue box in the top-left that shows in headless in-game screenshots.
+  - The dark-blue box in the top-left of headless screenshots is not in the page or the 3D scene: the box is the page background showing through the 3D canvas, exactly where the minimap would be if flipped top to bottom. Likely a quirk of headless software rendering; ask Dain whether he sees it in a real browser.
 - Blender 5.2.5 was installed in the cloud container at `/opt/blender-dl`; scripts read the repo root from `TAT_ROOT` (`TAT_ROOT=$PWD/ blender -b -P assets/src/<script>.py`).
