@@ -40,7 +40,7 @@ export const TYPES = [
   { name: 'Prop plane', len: 8.3, wid: 2.8, hgt: 2.7, max: 60, acc: 9, turn: 1, grip: 2, mass: 1.1, hp: 160, plane: true, span: 11, stall: 24 },
   { name: 'Crop duster', len: 8.8, wid: 2.8, hgt: 2.8, max: 54, acc: 10, turn: 1.2, grip: 2, mass: 1.5, hp: 180, plane: true, duster: true, span: 13, stall: 20 },
   // pedal-assist e-bike (ebike.js): the motor cuts out at 32 km/h (8.9 m/s); light, so a knock throws you off
-  { name: 'E-bike', len: 1.85, wid: 0.6, hgt: 1.1, max: 8.9, acc: 4.2, turn: 3.2, grip: 8, mass: 0.12, hp: 30, bike: true, ebike: true },
+  { name: 'E-bike', len: 1.85, wid: 0.6, hgt: 1.1, max: 8.9, acc: 4.2, turn: 3.2, grip: 8, mass: 0.12, hp: 60, bike: true, ebike: true },
 ];
 export const V = { SEDAN: 0, SPORTS: 1, TRUCK: 2, VAN: 3, BIKE: 4, SCOOTER: 5, POLICE: 6, BUS: 7, BOAT: 8, HELI: 9, HATCH: 10, SUV: 11, PICKUP: 12, MINIVAN: 13, MUSCLE: 14, CONVERTIBLE: 15, LIMO: 16, MONSTER: 17, TAXI: 18, GARBAGE: 19, TOW: 20, AMBULANCE: 21, FIRE: 22, PLANE: 23, DUSTER: 24, EBIKE: 25 };
 export const BUS = 7, BOAT = 8, HELI = 9;

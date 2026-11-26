@@ -88,6 +88,7 @@ function returnBikes() {
   const me = ctx.myVeh();
   for (const v of ebikes()) {
     if (!v.rented || !v.ridden || v.driver || v === me || Math.hypot(v.vx || 0, v.vz || 0) > 0.5 || v.exploded) continue;
+    v.keep = DOCKS.some((d) => Math.hypot(v.x - d.x, v.z - d.z) < 60); // dumped far from a dock: it goes like any abandoned car
     for (const i of built.keys()) {
       const d = DOCKS[i]; if (Math.hypot(v.x - d.x, v.z - d.z) > 12) continue;
       const list = ebikes().filter((o) => o !== v);
