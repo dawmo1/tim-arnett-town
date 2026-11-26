@@ -198,6 +198,17 @@ def plant(K, x, y, z=0.0, r=0.5, h=1.8):
     K.cyl(x, y, r * 1.3, z + 0.6, z + h, lin('#3f7a3a'), BODY, 6, r1=0.15)
 
 
+def door_gap(L, Ln, c, half):
+    """(u0, u1) of a door centred on Blender point c if it lies on the wall frame L (else None)"""
+    o = Vector(L(0, 0, 0))
+    ux = Vector(L(1, 0, 0)) - o
+    v = Vector((c[0], c[1], o.z)) - o
+    s = v.dot(ux)
+    if half < s < Ln - half and (v - ux * s).length < 1.0:
+        return (s - half, s + half)
+    return None
+
+
 def int_done(name, K, Rm, anchor, cam, target, render, lens=18):
     """finish an interior: GLB, game data, a preview from inside"""
     o = K.obj(name + '_int')
@@ -987,3 +998,474 @@ def mli_int(render=True):
 
 
 B['mli_int'] = mli_int
+
+
+# ================================================================ JOHN DEERE WORLD HEADQUARTERS: the display building
+# Saarinen's two-storey display building (1964) on the hill east of the ravine, the part visitors walk into: the lobby
+# at the east end (reception, the leaping-deer logo), then the long double-height display floor under a Cor-Ten
+# ceiling grid, glass walls on three sides, machines old and new on the floor (a Model D, a 4010, the big 8R, a combine,
+# the 1837 steel plow) and Alexander Girard's 180-ft "Reflections of an Era" collage mural along the west wall, with
+# the auditorium doors and a mezzanine rail above.
+DEERE_DZ = 14.0
+DEERE_DOOR = (12784.85, 5171.1)
+DEERE_POLY = [(12744.7, 5157.4), (12785.7, 5160.7), (12784.0, 5181.5), (12755.2, 5179.2), (12751.3, 5227.4), (12721.4, 5240.3), (12726.6, 5175.7)]
+
+
+def inset(P, d):
+    """a CCW polygon moved d inward (mitred corners)"""
+    n = len(P)
+    out = []
+    for i in range(n):
+        a, b, c = Vector((*P[i - 1], 0)), Vector((*P[i], 0)), Vector((*P[(i + 1) % n], 0))
+        e1, e2 = (b - a).normalized(), (c - b).normalized()
+        n1, n2 = Vector((-e1.y, e1.x, 0)), Vector((-e2.y, e2.x, 0))
+        m = (n1 + n2).normalized()
+        k = d / max(0.3, m.dot(n1))
+        out.append((b.x + m.x * k, b.y + m.y * k))
+    return out
+
+
+def deerehq_int(render=True):
+    anchor = (12637.0, 5202.0)
+    G = g2l(anchor)
+    F = DEERE_DZ
+    K = Kit(741, ao=0)
+    Rm = Rooms(anchor)
+    cor, cor2, floorc, floorc2, glass = lin('#6a3b22'), lin('#7a4428'), lin('#b9ad98'), lin('#ada18c'), lin('#d9c9a6')
+    green, yellow = lin('#367c2b'), lin('#ffde00')
+    rnd = random.Random(51)
+    P0 = ccw([G(*p) for p in DEERE_POLY])
+    P = inset(P0, 0.75)
+    cx = sum(p[0] for p in P) / len(P)
+    cy = sum(p[1] for p in P) / len(P)
+    # floor (stone, in convex pieces), the Cor-Ten coffered ceiling at 10 m
+    parts = [[G(12744.7, 5157.4), G(12785.7, 5160.7), G(12784.0, 5181.5), G(12755.2, 5179.2), G(12726.6, 5175.7)],
+             [G(12726.6, 5175.7), G(12755.2, 5179.2), G(12751.3, 5227.4), G(12721.4, 5240.3)]]
+    for pp in parts:
+        pp = ccw(pp)
+        qx, qy = sum(p[0] for p in pp) / len(pp), sum(p[1] for p in pp) / len(pp)
+        for i in range(len(pp)):
+            a, b = pp[i], pp[(i + 1) % len(pp)]
+            flat(K, [(qx, qy), a, b], F, floorc if i % 2 else floorc2)
+            flat(K, [(qx, qy), a, b], F + 10.0, lin('#4a2e1f'), BODY, False)
+    xs, ys = [p[0] for p in P], [p[1] for p in P]
+    for gx in range(int(min(xs)) + 3, int(max(xs)), 6):  # the ceiling grid of Cor-Ten beams, light coffers between
+        K.box(gx - 0.2, gx + 0.2, min(ys), max(ys), F + 9.3, F + 9.98, cor2, BODY, ('h+',))
+    for gy in range(int(min(ys)) + 3, int(max(ys)), 6):
+        K.box(min(xs), max(xs), gy - 0.2, gy + 0.2, F + 9.3, F + 9.98, cor2, BODY, ('h+',))
+    for gx in range(int(min(xs)) + 6, int(max(xs)), 6):
+        for gy in range(int(min(ys)) + 6, int(max(ys)), 6):
+            if in_poly(P, gx, gy):
+                frect(K, gx - 1.2, gx + 1.2, gy - 1.2, gy + 1.2, F + 9.95, lin('#fff1d0'), LIT, False)
+
+    # walls: Cor-Ten base, bronze-tinted glass to the ceiling with mullions; the visitors' door at the east end
+    def dress(i, kind, a, b, inw):
+        Ln = math.hypot(b[0] - a[0], b[1] - a[1])
+        tw = (a[0] + inw[0] * 3, a[1] + inw[1] * 3)
+        L, _ = wframe(a, b, tw, F)
+        if kind == 'mural':
+            return
+        K.quad(L, 0.2, Ln - 0.2, 0.6, 9.2, 0.02, glass, LIT)
+        for k in range(int(Ln // 3) + 1):
+            u = min(Ln, k * 3.0)
+            K.obox(L, u - 0.1, u + 0.1, 0, 9.3, 0.0, 0.18, cor, BODY, ('d-',))
+        K.obox(L, 0, Ln, 4.5, 4.75, 0, 0.25, cor, BODY, ('d-',))
+    kinds = []
+    dpos = G(*DEERE_DOOR)
+    doors = {}
+    for i in range(len(P)):
+        a, b = P[i], P[(i + 1) % len(P)]
+        Ln = math.hypot(b[0] - a[0], b[1] - a[1])
+        L, _ = wframe(a, b, (cx, cy))
+        mid = ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
+        kinds.append('mural' if Ln > 50 and mid[0] < cx else 'glass')
+        e = ((b[0] - a[0]) / Ln, (b[1] - a[1]) / Ln)
+        s = (dpos[0] - a[0]) * e[0] + (dpos[1] - a[1]) * e[1]
+        if 2 < s < Ln - 2 and abs((dpos[0] - a[0]) * e[1] - (dpos[1] - a[1]) * e[0]) < 1.5:
+            doors[i] = (s - 2.0, s + 2.0)
+    doors['h'] = 3.2
+    Pz = [(p[0], p[1]) for p in P]
+    # outline() measures heights from 0: build at the floor height by shifting its faces afterwards
+    n0 = len(K.faces)
+    outline(K, Rm, Pz, kinds, 10.0, cor, None, doors, th=0.8, h=F + 12)
+    for f in K.faces[n0:]:
+        for v in f[0]:
+            v.z += F
+    n = len(P)
+    area = sum(P[i][0] * P[(i + 1) % n][1] - P[(i + 1) % n][0] * P[i][1] for i in range(n))
+    for i in range(n):
+        a, b = P[i], P[(i + 1) % n]
+        Ln = math.hypot(b[0] - a[0], b[1] - a[1])
+        inw = (-(b[1] - a[1]) / Ln * (1 if area > 0 else -1), (b[0] - a[0]) / Ln * (1 if area > 0 else -1))
+        dress(i, kinds[i], a, b, inw)
+    # the Girard mural: thousands of objects on the long west wall, here a dense collage of panels and shelves
+    mi = kinds.index('mural')
+    a, b = P[mi], P[(mi + 1) % n]
+    Lm, Lmn = wframe(a, b, (cx, cy), F)
+    K.quad(Lm, 0, Lmn, 0, 10.0, 0.01, lin('#3a2a1e'))
+    pal = [lin('#b8323a'), lin('#e0b040'), lin('#2f6a8a'), lin('#d8ccb0'), lin('#6a8a3a'), lin('#8a5a3a'), lin('#f0e8d8'), lin('#1d1d1d'), lin('#c86a2a')]
+    u = 1.0
+    while u < Lmn - 2:
+        w = rnd.uniform(0.6, 2.2)
+        hh = 1.6
+        while hh < 7.6:
+            ph = rnd.uniform(0.4, 1.4)
+            K.obox(Lm, u, u + w * rnd.uniform(0.7, 1.0), hh, hh + ph * 0.9, 0.02, 0.02 + rnd.uniform(0.05, 0.3), pal[rnd.randrange(len(pal))], BODY, ('d-',))
+            hh += ph
+        u += w + 0.15
+    K.obox(Lm, 0.5, Lmn - 0.5, 1.2, 1.35, 0.02, 0.5, cor, BODY, ())
+    wtext(K, a, b, (cx, cy), 'REFLECTIONS OF AN ERA  -  ALEXANDER GIRARD, 1964', Lmn / 2, 8.3, 0.55, lin('#e8dcc0'), BODY, 0.05, F)
+    for k in range(3):  # auditorium doors under the mural's south end
+        K.quad(Lm, Lmn - 9 + k * 2.6, Lmn - 7.2 + k * 2.6, 0, 2.4, 0.03, lin('#4a2e1f'))
+    # the mezzanine rail along the east side of the display floor (the upper level, not walkable)
+    e0, e1 = G(12754.0, 5182.0), G(12750.1, 5226.0)
+    Le, Len = wframe(e0, e1, (cx, cy), F)
+    K.obox(Le, 0, Len, 4.6, 4.9, 0, 4.0, lin('#7a6a58'), BODY, ())
+    K.obox(Le, 0, Len, 4.9, 5.9, 3.9, 4.0, cor, BODY, ('h-',))
+    # the machines: on the display floor and in the lobby (tractor() from the Pavilion, lifted to the floor)
+    R0 = lambda u, v: (u, v)
+    exhibits = [((12738, 5190), 0.4, 1.3), ((12742, 5206), 2.7, 1.0), ((12735, 5222), 1.3, 1.0), ((12744, 5232), 2.0, 0.8), ((12772, 5170), 3.0, 1.4)]
+    for (gx, gz), ang, sc in exhibits:
+        n1 = len(K.faces)
+        bx, by = G(gx, gz)
+        tractor(K, R0, bx, by, ang, sc)
+        for f in K.faces[n1:]:
+            for v in f[0]:
+                v.z += F
+        K.box(bx - 3.2 * sc, bx + 3.2 * sc, by - 2.2 * sc, by + 2.2 * sc, F, F + 0.12, lin('#5a5a5a'), BODY, ('h-',))  # plinth
+        Rm.block(bx - 2.6 * sc, bx + 2.6 * sc, by - 1.6 * sc, by + 1.6 * sc, 3.2)
+        Rm.person((bx + 3.6 * sc, by + rnd.uniform(-1.5, 1.5)), (bx, by), rnd.choice(('stand', 'phone', 'chat')), 0, 'visitor')
+    # the combine: long green body, yellow header, the grain tank
+    cbx, cby = G(12740, 5214)
+    K.box(cbx - 4, cbx + 4, cby - 1.6, cby + 1.6, F + 0.8, F + 3.8, green)
+    K.box(cbx - 3, cbx + 1, cby - 1.4, cby + 1.4, F + 3.8, F + 5.0, green)
+    K.box(cbx - 0.6, cbx + 1.6, cby - 1.0, cby + 1.0, F + 3.8, F + 5.6, lin('#2b3a46'), GLASS)
+    K.box(cbx + 4, cbx + 5.2, cby - 3.2, cby + 3.2, F + 0.3, F + 1.4, yellow)
+    for sx in (-2.6, 2.0):
+        for sy in (-1.7, 1.7):
+            K.rod((cbx + sx, cby + sy, F + 0.9), (cbx + sx, cby + sy * 1.15, F + 0.9), 0.9, lin('#151515'), BODY, 8)
+    Rm.block(cbx - 4.2, cbx + 5.3, cby - 3.3, cby + 3.3, 5.0)
+    # the 1837 steel plow on a pedestal
+    px, py = G(12746, 5198)
+    K.box(px - 0.8, px + 0.8, py - 0.8, py + 0.8, F, F + 0.9, lin('#e8e0d0'))
+    K.box(px - 0.6, px + 0.5, py - 0.15, py + 0.15, F + 0.9, F + 1.3, lin('#9aa0a6'))
+    K.rod((px - 0.5, py, F + 1.2), (px + 1.2, py, F + 2.0), 0.04, lin('#6a4a2a'), BODY, 4)
+    Rm.block(px - 0.8, px + 0.8, py - 0.8, py + 0.8, 1.2)
+    # the lobby: reception desk, the leaping-deer sign, benches
+    rx, ry = G(12778, 5166)
+    K.box(rx - 0.5, rx + 0.5, ry - 3, ry + 3, F, F + 1.1, cor)
+    Rm.block(rx - 0.6, rx + 0.6, ry - 3.1, ry + 3.1, 1.2)
+    Rm.person((rx - 1.4, ry), (rx + 5, ry), 'stand', 0, 'vendor')
+    sgx, sgy = G(12764, 5159.5)
+    K.box(sgx - 4, sgx + 4, sgy - 0.1, sgy + 0.1, F + 4.6, F + 8.2, green)
+    K.text('JOHN DEERE', lambda u, h, d: (sgx + u, sgy - 0.11 - d, h), 0, F + 5.0, 0.0, 1.1, yellow, BODY, 0.04, res=1, front=True)
+    for k in range(3):  # the leaping deer: a few yellow slabs
+        K.box(sgx - 1.6 + k * 0.9, sgx - 0.9 + k * 0.9, sgy - 0.12, sgy - 0.11, F + 6.6 + k * 0.3, F + 7.6 + k * 0.2, yellow)
+    for (gx, gz) in ((12768, 5176), (12758, 5176)):
+        p = G(gx, gz)
+        bench(K, Rm, p[0], p[1], True, 5, cor, F)
+    Rm.person(G(12770, 5172), G(12740, 5200), 'walk', 0, 'office')
+    Rm.person(G(12740, 5228), G(12740, 5180), 'walk', 0, 'visitor')
+    Rm.person(G(12748, 5185), G(12740, 5190), 'stand', 0, 'office')
+    Rm.hall('Deere & Company World Headquarters', G(12765, 5170), 42, 22, (1, 0), F, 6, [0xfff2dc, 12])
+    Rm.hall('Deere & Company World Headquarters', G(12738.5, 5208), 34, 64, (1, 0), F, 6, [0xfff2dc, 14])
+    return int_done('deerehq', K, Rm, anchor, (*G(12746, 5233), F + 1.8), (*G(12735, 5190), F + 3), render)
+
+
+B['deerehq_int'] = deerehq_int
+
+
+# ================================================================ CIRCA '21 DINNER PLAYHOUSE (the Fort Armstrong Theatre, Rock Island)
+# 1828 3rd Ave (1921; dinner theatre since 1977): through the 3rd Avenue doors under the marquee into the lobby (box
+# office, the bar), then into the old auditorium: the main floor terraced into tiers of dinner tables (the 1977
+# remodel), a centre aisle down to the stage with its gold proscenium and red curtain, the Bootleggers (the singing
+# waitstaff) working the aisle, the mezzanine lounge over the back and the 1921 theatre's teepee chandeliers.
+CIRCA_DOOR = (334.95, 1522.3)
+
+
+def circa21_int(render=True):
+    anchor = (337.0, 1545.0)
+    G = g2l(anchor)
+    F = 0.12
+    K = Kit(751, ao=0)
+    Rm = Rooms(anchor)
+    rnd = random.Random(61)
+
+    def gb(x0, x1, z0, z1, h0, h1, col, m=BODY, skip=('h-',)):
+        a, b = G(x0, z0), G(x1, z1)
+        K.box(min(a[0], b[0]), max(a[0], b[0]), min(a[1], b[1]), max(a[1], b[1]), F + h0, F + h1, col, m, skip)
+
+    def blk(x0, x1, z0, z1, h):
+        a, b = G(x0, z0), G(x1, z1)
+        Rm.block(min(a[0], b[0]), max(a[0], b[0]), min(a[1], b[1]), max(a[1], b[1]), h + F)
+    red, gold, cream, wood, carpet, carpet2 = lin('#8e1b2b'), lin('#c9a24a'), lin('#efe3c6'), lin('#4a2e1f'), lin('#6b1e2a'), lin('#5a1824')
+    brickin, teal = lin('#8b3a2b'), lin('#2f6f6a')
+    # the lobby (front block) and the auditorium; the doors from 3rd Ave, the lobby into the house
+    lx0, lx1, lz0, lz1 = 324.6, 349.4, 1523.0, 1533.6
+    ax0, ax1, az0, az1 = 326.4, 349.0, 1534.4, 1566.6
+    ghall(K, G, lx0, lx1, lz0, lz1, 4.6, cream, lin('#d8c9a8'), [carpet, carpet2], [('n', CIRCA_DOOR[0] - 1.8, CIRCA_DOOR[0] + 1.8, 3.6), ('s', 333.0, 341.0, 3.4)], tile=1.5, dado=(1.1, wood), trim=gold)
+    ghall(K, G, ax0, ax1, az0, az1, 15.0, lin('#7a3326'), lin('#3a2a2a'), [carpet, carpet2], [('n', 333.0, 341.0, 3.4)], tile=2.0, dado=(1.4, wood), trim=gold)
+    for f in K.faces:  # ghall() builds on 0: lift both rooms to the floor
+        for v in f[0]:
+            v.z += F
+    # walls (collision) with the openings
+    for (wx0, wx1, wz0, wz1, doors) in ((lx0, lx1, lz0, lz1, {'n': (CIRCA_DOOR[0] - 1.8, CIRCA_DOOR[0] + 1.8), 's': (333.0, 341.0)}), (ax0, ax1, az0, az1, {'n': (333.0, 341.0)})):
+        for side, (pa, pb) in (('n', ((wx0, wz0), (wx1, wz0))), ('s', ((wx0, wz1), (wx1, wz1))), ('w', ((wx0, wz0), (wx0, wz1))), ('e', ((wx1, wz0), (wx1, wz1)))):
+            out = {'n': (0, -1), 's': (0, 1), 'w': (-1, 0), 'e': (1, 0)}[side]
+            o = G(pa[0] + out[0] * 5, pa[1] + out[1] * 5)
+            if side in doors:
+                g0, g1 = doors[side]
+                Rm.wall(G(*pa), G(g0, pa[1]), 16, 0.8, 0, out=o)
+                Rm.wall(G(g1, pa[1]), G(*pb), 16, 0.8, 0, out=o)
+            else:
+                Rm.wall(G(*pa), G(*pb), 16, 0.8, 0, out=o)
+    # ---- lobby: box office, the bar, posters, the Bootleggers' host stand
+    gb(325.0, 330.5, 1524.0, 1525.2, 0, 1.15, wood)
+    blk(325.0, 330.5, 1524.0, 1525.2, 1.2)
+    gb(325.0, 330.5, 1523.1, 1523.3, 1.15, 2.6, lin('#e8dcc0'))
+    Rm.person(G(327.7, 1523.6), G(327.7, 1530), 'stand', 0, 'vendor')
+    gb(343.0, 348.8, 1529.4, 1530.4, 0, 1.1, wood)  # the bar
+    gb(342.9, 348.9, 1529.3, 1530.5, 1.1, 1.16, lin('#2a1a12'))
+    blk(343.0, 348.8, 1529.4, 1530.4, 1.2)
+    gb(343.0, 349.2, 1532.9, 1533.4, 0, 2.6, lin('#2a1a12'))
+    for k in range(10):
+        gb(343.3 + k * 0.55, 343.45 + k * 0.55, 1533.0, 1533.15, 1.2 + (k % 3) * 0.5, 1.5 + (k % 3) * 0.5, [lin('#2e7d32'), lin('#8d5524'), lin('#d7ccc8')][k % 3])
+    Rm.person(G(346, 1531.8), G(346, 1526), 'stand', 0, 'vendor')
+    Rm.spot(G(346, 1528.0), 2.4, 'menu', "Circa '21 Bar", 'dinner')
+    for k in range(4):  # show posters
+        a = G(331 + k * 4.2, 1533.55)
+        K.box(a[0], a[0] + 2.4, a[1] - 0.02, a[1] + 0.02, F + 1.4, F + 3.4, [lin('#c62828'), lin('#1d3c6e'), lin('#f9a825'), lin('#2e5a32')][k], BODY, ())
+    for p in ((329, 1528), (339, 1527)):
+        Rm.person(G(*p), G(p[0] + 3, p[1]), 'chat', 0, 'diner')
+    # ---- the house: tiers of dinner tables either side of the centre aisle, rising toward the back (north)
+    tiers = [(1535.0, 1540.0, 1.2), (1540.0, 1545.0, 0.8), (1545.0, 1550.0, 0.4)]
+    for (zz0, zz1, th) in tiers:
+        for (sx0, sx1) in ((ax0 + 0.4, 335.8), (338.6, ax1 - 0.4)):
+            gb(sx0, sx1, zz0, zz1, 0, th, carpet2, BODY, ('h-',))
+            gb(sx0, sx1, zz1 - 0.06, zz1, th + 0.82, th + 0.9, gold)  # brass rail on the front edge
+            for k in range(int((sx1 - sx0) / 1.5) + 1):
+                gb(sx0 + k * 1.5 - 0.03, sx0 + k * 1.5 + 0.03, zz1 - 0.06, zz1, th, th + 0.82, gold)
+            blk(sx0, sx1, zz0, zz1, th + 0.9)
+            for tx in [sx0 + 1.6 + k * 3.0 for k in range(int((sx1 - sx0 - 1) / 3.0))]:
+                tz = (zz0 + zz1) / 2
+                gb(tx - 0.55, tx + 0.55, tz - 0.55, tz + 0.55, th + 0.72, th + 0.78, lin('#f4efe4'))  # tablecloth
+                gb(tx - 0.08, tx + 0.08, tz - 0.08, tz + 0.08, th, th + 0.72, lin('#2a2a2a'))
+                gb(tx - 0.05, tx + 0.05, tz - 0.05, tz + 0.05, th + 0.78, th + 0.98, lin('#ffd25a'), LIT)  # the table lamp
+                for ddx in (-0.9, 0.9):
+                    gb(tx + ddx - 0.22, tx + ddx + 0.22, tz - 0.22, tz + 0.22, th, th + 0.45, red)
+                    if rnd.random() < 0.45:
+                        Rm.person(G(tx + ddx, tz), G(tx, tz), 'sit', th + 0.02, 'diner')
+    # the floor tables in front of the tiers
+    for tx in (329.0, 332.5, 341.5, 345.0):
+        for tz in (1552.0, 1554.4):
+            gb(tx - 0.6, tx + 0.6, tz - 0.6, tz + 0.6, 0.72, 0.78, lin('#f4efe4'))
+            gb(tx - 0.08, tx + 0.08, tz - 0.08, tz + 0.08, 0, 0.72, lin('#2a2a2a'))
+            for ddx in (-0.95, 0.95):
+                gb(tx + ddx - 0.22, tx + ddx + 0.22, tz - 0.22, tz + 0.22, 0, 0.45, red)
+            blk(tx - 1.2, tx + 1.2, tz - 0.6, tz + 0.6, 0.8)
+            if rnd.random() < 0.6:
+                Rm.person(G(tx - 0.95, tz), G(tx, tz), 'sit', 0, 'diner')
+    # ---- the stage: apron, proscenium, curtain, a set, the cast mid-number
+    sz0 = 1556.4
+    gb(ax0 + 0.4, ax1 - 0.4, sz0, az1 - 0.4, 0, 1.0, wood, BODY, ('h-',))
+    blk(ax0 + 0.4, ax1 - 0.4, sz0, az1 - 0.4, 1.0)
+    gb(ax0, ax0 + 3.4, sz0 + 1.6, sz0 + 2.2, 0, 11.0, gold)
+    gb(ax1 - 3.4, ax1, sz0 + 1.6, sz0 + 2.2, 0, 11.0, gold)
+    gb(ax0, ax1, sz0 + 1.6, sz0 + 2.2, 9.0, 11.0, gold)
+    gb(ax0 + 3.4, ax1 - 3.4, sz0 + 2.0, sz0 + 2.3, 7.6, 9.0, red)  # the valance
+    for k in range(int((ax1 - ax0 - 6.8) / 1.2)):  # curtains drawn back to the sides
+        if 3 < k < int((ax1 - ax0 - 6.8) / 1.2) - 4:
+            continue
+        gb(ax0 + 3.4 + k * 1.2, ax0 + 4.4 + k * 1.2, sz0 + 2.3, sz0 + 2.9, 1.0, 7.6, red if k % 2 else scale(red, 0.8))
+    gb(ax0 + 6, ax1 - 6, az1 - 1.2, az1 - 0.6, 1.0, 7.0, lin('#2f5a8a'))  # the backdrop (a night sky over a river town)
+    gb(ax0 + 6, ax1 - 6, az1 - 1.25, az1 - 1.2, 1.0, 2.8, lin('#3a3226'))
+    for k in range(6):
+        gb(ax0 + 7 + k * 1.8, ax0 + 8.2 + k * 1.8, az1 - 1.3, az1 - 1.25, 2.8, 2.8 + 0.6 + (k * 37 % 5) * 0.3, lin('#5a4a3a'))
+    for k in range(4):
+        Rm.person(G(332.5 + k * 3.0, 1560.5 + (k % 2) * 1.4), G(337.5, 1540), 'dance' if k % 2 else 'cheer', 1.0, 'walk')
+    # footlights
+    for k in range(14):
+        gb(ax0 + 4 + k * 1.1, ax0 + 4.3 + k * 1.1, sz0 - 0.1, sz0 + 0.1, 1.0, 1.15, lin('#ffe6a8'), LIT)
+    # ---- the mezzanine (the old balcony, now the lounge) over the back of the house; teepee chandeliers; wall sconces
+    gb(ax0, ax1, az0, az0 + 6.5, 5.6, 6.2, lin('#6b4a2b'), BODY, ())
+    gb(ax0, ax1, az0 + 6.4, az0 + 6.6, 6.2, 7.2, gold)
+    for (cxx, czz) in ((331, 1546), (344, 1546), (337.5, 1552), (331, 1556), (344, 1556)):
+        c = G(cxx, czz)
+        K.cyl(c[0], c[1], 1.1, F + 10.0, F + 12.0, lin('#e8b860'), LIT, 6, r1=0.15)
+        K.cyl(c[0], c[1], 0.03, F + 12.0, F + 15.0, lin('#3a3a3a'), BODY, 4, top=False)
+    for k in range(5):
+        for xw, s in ((ax0 + 0.03, 1), (ax1 - 0.03, -1)):
+            a = G(xw, 1538 + k * 5)
+            iface(K, [(a[0], a[1], F + 3.2), (a[0], a[1] - 0.8, F + 3.2), (a[0], a[1] - 0.8, F + 4.4), (a[0], a[1], F + 4.4)], (a[0] + s, a[1], F + 3.8), lin('#ffd98a'), LIT)
+            b2 = G(xw, 1536 + k * 5)
+            iface(K, [(b2[0], b2[1], F + 6.8), (b2[0], b2[1] - 2.0, F + 6.8), (b2[0], b2[1] - 2.0, F + 9.5), (b2[0], b2[1], F + 9.5)], (b2[0] + s, b2[1], F + 8), teal)
+    K.text("CIRCA '21", lambda u, h, d: (*G(337.7 + u, sz0 + 1.55 - d), h), 0, F + 9.6, 0.0, 1.0, lin('#5a1824'), BODY, 0.05, res=1, front=True)
+    # the Bootleggers working the aisle; the dinner menu from the server station at the back of the house
+    for z_ in (1538, 1546, 1553):
+        Rm.person(G(337.2, z_), G(337.2, z_ + 5), 'walk', 0, 'diner')
+    gb(326.6, 329.6, 1534.8, 1535.6, 0, 1.1, wood)
+    blk(326.6, 329.6, 1534.8, 1535.6, 1.2)
+    Rm.person(G(328.1, 1535.0 + 1.4), G(328.1, 1530), 'stand', 0, 'vendor')
+    Rm.spot(G(331.0, 1536.8), 2.4, 'menu', "Circa '21 Dinner", 'dinner')
+    Rm.hall("Circa '21 Dinner Playhouse", G(337.0, 1528.3), 24.8, 10.6, (1, 0), F, 3.6, [0xffd9a0, 10])
+    Rm.hall("Circa '21 Dinner Playhouse", G(337.7, 1550.5), 22.6, 32.2, (1, 0), F, 9, [0xffc890, 16])
+    return int_done('circa21', K, Rm, anchor, (*G(337.4, 1537), F + 1.7), (*G(337.4, 1562), F + 3.5), render)
+
+
+B['circa21_int'] = circa21_int
+
+
+# ================================================================ AUGUSTANA COLLEGE OLD MAIN (Rock Island)
+# 1884-93, LeClaire limestone: the north doors under the pediment open into a vestibule and the rotunda under the dome,
+# a well rising through the three floors (gallery rails at each level) to the drum's windows, the restored dome and its
+# oculus, the old wood floor beneath it; the long east-west hall with classroom doors either side, a classroom off it
+# and the old library (now a reading room) opposite. Students everywhere; the coffee cart in the rotunda.
+def oldmain_int(render=True):
+    anchor = (2333.0, 2126.5)
+    G = g2l(anchor)
+    F = 0.45
+    K = Kit(761, ao=0)
+    Rm = Rooms(anchor)
+    rnd = random.Random(71)
+    plaster, oak, wood, tile, tile2, ceil = lin('#ede4d0'), lin('#8a5a32'), lin('#9a6b3f'), lin('#c9bba0'), lin('#b9aa8e'), lin('#e8e0cc')
+    lime = lin('#d8c9a3')
+    top = 14.2  # the three floors (5.0 + 4.6 + 4.6)
+
+    def lift(n0):
+        for f in K.faces[n0:]:
+            for v in f[0]:
+                v.z += F
+
+    def gb(x0, x1, z0, z1, h0, h1, col, m=BODY, skip=('h-',)):
+        a, b = G(x0, z0), G(x1, z1)
+        K.box(min(a[0], b[0]), max(a[0], b[0]), min(a[1], b[1]), max(a[1], b[1]), F + h0, F + h1, col, m, skip)
+
+    def blk(x0, x1, z0, z1, h):
+        a, b = G(x0, z0), G(x1, z1)
+        Rm.block(min(a[0], b[0]), max(a[0], b[0]), min(a[1], b[1]), max(a[1], b[1]), h + F)
+    # floors and ceilings: corridor and vestibule 4.6 m, the rotunda open to the dome, the two rooms
+    for (x0, x1, z0, z1, ch, cols) in ((2329, 2337, 2115.3, 2117.6, 4.6, [tile, tile2]), (2309, 2327, 2124, 2128.6, 4.6, [tile, tile2]), (2339, 2357, 2124, 2128.6, 4.6, [tile, tile2]),
+                                       (2327, 2339, 2117.6, 2135, None, [wood, scale(wood, 0.9)]), (2312, 2326, 2116, 2124, 4.4, [lin('#7a6a5a')]), (2340, 2354, 2116, 2124, 4.4, [wood])):
+        a, b = G(x0, z0), G(x1, z1)
+        bx0, bx1, by0, by1 = min(a[0], b[0]), max(a[0], b[0]), min(a[1], b[1]), max(a[1], b[1])
+        nx, ny = max(1, round((bx1 - bx0) / 1.5)), max(1, round((by1 - by0) / 1.5))
+        for i in range(nx):
+            for j in range(ny):
+                frect(K, bx0 + (bx1 - bx0) * i / nx, bx0 + (bx1 - bx0) * (i + 1) / nx, by0 + (by1 - by0) * j / ny, by0 + (by1 - by0) * (j + 1) / ny, F, cols[(i + j) % len(cols)])
+        if ch:
+            frect(K, bx0, bx1, by0, by1, F + ch, ceil, BODY, False)
+    # the walls: one outline for vestibule + rotunda + hall, one for each room, doors between
+    main = [(2329, 2115.3), (2337, 2115.3), (2337, 2117.6), (2339, 2117.6), (2339, 2124), (2357, 2124), (2357, 2128.6), (2339, 2128.6), (2339, 2135), (2327, 2135),
+            (2327, 2128.6), (2309, 2128.6), (2309, 2124), (2327, 2124), (2327, 2117.6), (2329, 2117.6)]
+    n0 = len(K.faces)
+    outline(K, Rm, [G(*p) for p in main], ['m'] * len(main), top, plaster, None, {0: (2.3, 5.5), 4: (4.0, 6.0), 12: (12.0, 14.0), 'h': 3.0}, h=top + 4)
+    outline(K, Rm, [G(*p) for p in ((2312, 2116), (2326, 2116), (2326, 2124), (2312, 2124))], ['r'] * 4, 4.4, lin('#e6dcc6'), None, {2: (3.0, 5.0), 'h': 3.0}, h=8)
+    outline(K, Rm, [G(*p) for p in ((2340, 2116), (2354, 2116), (2354, 2124), (2340, 2124))], ['r'] * 4, 4.4, lin('#e6dcc6'), None, {2: (9.0, 11.0), 'h': 3.0}, h=8)
+    lift(n0)
+    # oak wainscot along the hall and the vestibule, classroom doors along the hall
+    for (x0, x1, zz, s) in ((2309, 2327, 2124.02, 1), (2339, 2357, 2124.02, 1), (2309, 2327, 2128.58, -1), (2339, 2357, 2128.58, -1)):
+        a, b = G(x0, zz), G(x1, zz)
+        vwall(K, a, b, F, F + 1.1, oak, G((x0 + x1) / 2, zz + s))
+        for k in range(3):
+            xd = x0 + 3 + k * 6
+            if (zz < 2125 and (2321 < xd + 1 < 2324 or 2342 < xd + 1 < 2346)):
+                continue
+            vwall(K, G(xd, zz), G(xd + 1.1, zz), F, F + 2.4, scale(oak, 0.8), G(xd, zz + s))
+    for k in range(10):  # hall lights
+        p = G(2311 + k * 5 if k < 5 else 2341 + (k - 5) * 3.6, 2126.3)
+        disc(K, p[0], p[1], 0.45, F + 4.57, lin('#fff6dc'), LIT, 8, False)
+    # ---- the rotunda: gallery rails at the 2nd and 3rd floors, the drum and the dome above the well
+    rx0, rx1, rz0, rz1 = 2327, 2339, 2117.6, 2135
+    for lev in (5.0, 9.6):  # galleries round the well (a 2 m ledge on all four sides, the well open in the middle)
+        for (x0, x1, z0, z1) in ((rx0, rx1, rz0, rz0 + 2), (rx0, rx1, rz1 - 2, rz1), (rx0, rx0 + 2, rz0 + 2, rz1 - 2), (rx1 - 2, rx1, rz0 + 2, rz1 - 2)):
+            gb(x0, x1, z0, z1, lev - 0.35, lev, lime, BODY, ())
+        for (x0, x1, z0, z1) in ((rx0 + 2, rx1 - 2, rz0 + 1.95, rz0 + 2.05), (rx0 + 2, rx1 - 2, rz1 - 2.05, rz1 - 1.95), (rx0 + 1.95, rx0 + 2.05, rz0 + 2, rz1 - 2), (rx1 - 2.05, rx1 - 1.95, rz0 + 2, rz1 - 2)):
+            gb(x0, x1, z0, z1, lev, lev + 1.0, oak)
+        for k in range(4):  # balusters (chunky)
+            for (x, z) in ((rx0 + 2 + k * 2.6, rz0 + 2), (rx0 + 2 + k * 2.6, rz1 - 2)):
+                gb(x - 0.06, x + 0.06, z - 0.06, z + 0.06, lev, lev + 1.0, oak)
+    for k in range(4):  # columns at the well's corners
+        x, z = (rx0 + 2, rx1 - 2)[k % 2], (rz0 + 2, rz1 - 2)[k // 2]
+        gb(x - 0.3, x + 0.3, z - 0.3, z + 0.3, 0, 9.6, lime)
+        blk(x - 0.35, x + 0.35, z - 0.35, z + 0.35, 4)
+    # the drum (windows) and the dome shell over the well, seen from below: a ring of inward faces, the oculus
+    c = G(2333, 2126.5)
+    zd = F + top + 3.5
+    seg = 16
+    ring = lambda r, z: [(c[0] + math.cos(2 * math.pi * k / seg) * r, c[1] + math.sin(2 * math.pi * k / seg) * r, z) for k in range(seg)]
+    lo, hi = ring(6.0, zd), ring(6.0, zd + 5.0)
+    for k in range(seg):
+        j = (k + 1) % seg
+        iface(K, [lo[k], lo[j], hi[j], hi[k]], (c[0], c[1], zd + 2), lime if k % 2 else lin('#e0d0a8'))
+        if k % 2 == 0:  # the drum's windows
+            m0 = (lo[k][0] * 0.75 + lo[j][0] * 0.25, lo[k][1] * 0.75 + lo[j][1] * 0.25)
+            m1 = (lo[k][0] * 0.25 + lo[j][0] * 0.75, lo[k][1] * 0.25 + lo[j][1] * 0.75)
+            iface(K, [(m0[0], m0[1], zd + 0.6), (m1[0], m1[1], zd + 0.6), (m1[0], m1[1], zd + 3.6), (m0[0], m0[1], zd + 3.6)], (c[0], c[1], zd + 2), lin('#fff4d6'), LIT)
+        # the square shaft's top closes in to the round drum
+        sq = lambda q: (c[0] + (q[0] - c[0]) * 6.0 / max(abs(q[0] - c[0]), abs(q[1] - c[1])), c[1] + (q[1] - c[1]) * 6.0 / max(abs(q[0] - c[0]), abs(q[1] - c[1])))
+        flat(K, [sq(lo[k]), sq(lo[j]), lo[j][:2], lo[k][:2]], zd, lime, BODY, False)
+    prev = (6.0, zd + 5.0)
+    for k in range(1, 6):
+        t_ = k / 6 * math.pi / 2
+        cur = (max(0.9, 6.0 * math.cos(t_)), zd + 5.0 + 5.5 * math.sin(t_))
+        a_, b_ = ring(prev[0], prev[1]), ring(cur[0], cur[1])
+        for i in range(seg):
+            j = (i + 1) % seg
+            iface(K, [a_[i], a_[j], b_[j], b_[i]], (c[0], c[1], zd), [lin('#d8c9a3'), lin('#a8c8c0'), lin('#e8dcc0')][k % 3])
+        prev = cur
+    disc(K, c[0], c[1], 0.9, prev[1], lin('#fff8e0'), LIT, seg, False)
+    # the square shaft from the top floor up to the drum, the rotunda's ceiling either side of it
+    for (a_, b_) in (((-6, -6), (6, -6)), ((6, -6), (6, 6)), ((6, 6), (-6, 6)), ((-6, 6), (-6, -6))):
+        vwall(K, (c[0] + a_[0], c[1] + a_[1]), (c[0] + b_[0], c[1] + b_[1]), F + top, zd, lime, c)
+    frect(K, c[0] - 6, c[0] + 6, c[1] + 6, c[1] + 8.9, F + top, ceil, BODY, False)
+    frect(K, c[0] - 6, c[0] + 6, c[1] - 8.5, c[1] - 6, F + top, ceil, BODY, False)
+    # the Augustana seal on the wood floor, the grand stair up the south side
+    disc(K, c[0], c[1], 2.4, F + 0.01, lin('#1d3c6e'), BODY, 16)
+    disc(K, c[0], c[1], 1.8, F + 0.015, lin('#f2c94c'), BODY, 16)
+    for k in range(12):
+        gb(2329.5, 2336.5, 2135 - (k + 1) * 0.35, 2135 - k * 0.35, 0, 0.4 + k * 0.4, oak)
+    blk(2329.5, 2336.5, 2130.8, 2135, 4.8)
+    # the coffee cart and benches
+    gb(2337.0, 2338.6, 2119.0, 2120.4, 0, 1.05, lin('#2e5a32'))
+    gb(2336.9, 2338.7, 2118.9, 2120.5, 2.2, 2.3, lin('#c8102e'))
+    blk(2337.0, 2338.6, 2119.0, 2120.4, 1.1)
+    Rm.person(G(2338.0, 2118.6), G(2333, 2122), 'stand', 0, 'vendor')
+    Rm.spot(G(2335.6, 2120.6), 2.2, 'menu', 'Brew by the Slough', 'cafe')
+    for (x, z) in ((2329.5, 2121), (2329.5, 2128.5)):
+        p = G(x, z)
+        bench(K, Rm, p[0], p[1], False, 4, oak, F)
+    # ---- the classroom: desks in rows, the chalkboard, the professor
+    for r in range(3):
+        for k in range(4):
+            x, z = 2315 + k * 2.6, 2120.5 + r * 1.3 - 2.2
+            gb(x - 0.5, x + 0.5, z - 0.3, z + 0.3, 0.72, 0.78, lin('#c8b088'))
+            gb(x - 0.05, x + 0.05, z - 0.05, z + 0.05, 0, 0.72, lin('#3a3a3a'))
+            gb(x - 0.25, x + 0.25, z + 0.35, z + 0.75, 0, 0.45, lin('#3a3a3a'))
+            if rnd.random() < 0.6:
+                Rm.person(G(x, z + 0.55), G(x, z - 3), 'sit', 0, 'student')
+    blk(2313.5, 2325, 2117.6, 2121.4, 0.8)
+    a, b = G(2313, 2116.05), G(2325, 2116.05)
+    vwall(K, a, b, F + 1.0, F + 2.6, lin('#2d4a35'), G(2319, 2120))
+    wtext(K, a, b, G(2319, 2120), 'HIST 101: THE QUAD CITIES', 6, 1.9, 0.32, lin('#e8e8e0'), BODY, 0.02, F)
+    Rm.person(G(2319, 2116.9), G(2319, 2122), 'preach', 0, 'office')
+    # ---- the old library: shelves round the walls, reading tables
+    for (x0, x1, z0, z1) in ((2340.3, 2353.7, 2116.2, 2116.8), (2353.2, 2353.8, 2116.8, 2123.6)):
+        gb(x0, x1, z0, z1, 0, 3.4, lin('#5a3a22'))
+        for k in range(5):
+            gb(x0 + 0.02, x1 - 0.02, z0 - 0.02, z1 + 0.02, 0.3 + k * 0.62, 0.78 + k * 0.62, [lin('#8e1b2b'), lin('#1d3c6e'), lin('#2e5a32'), lin('#7a5a3a'), lin('#b8923a')][k], BODY, ())
+        blk(x0, x1, z0, z1, 3.4)
+    for x in (2344, 2349):
+        gb(x - 1.4, x + 1.4, 2119.5, 2121.0, 0.74, 0.8, lin('#6a4a2b'))
+        gb(x - 1.3, x + 1.3, 2119.7, 2120.8, 0, 0.74, lin('#4a2e1f'))
+        blk(x - 1.4, x + 1.4, 2119.5, 2121.0, 0.8)
+        gb(x - 0.12, x + 0.12, 2120.1, 2120.4, 0.8, 1.2, lin('#2e5a32'))
+        gb(x - 0.2, x + 0.2, 2120.0, 2120.5, 1.2, 1.3, lin('#ffe6a8'), LIT)
+        Rm.person(G(x - 0.6, 2121.7), G(x, 2120), 'sit', 0, 'student')
+    # students in the hall and the rotunda
+    for (x, z, pose) in ((2315, 2126.3, 'walk'), (2350, 2126.3, 'walk'), (2333, 2124, 'chat'), (2334.5, 2124.6, 'chat'), (2331, 2131, 'phone'), (2344, 2126.3, 'walk')):
+        Rm.person(G(x, z), G(x + 5, z) if pose == 'walk' else G(2333, 2126.5), pose, 0, 'student')
+    Rm.hall('Old Main', G(2333, 2125.15), 48, 19.7, (1, 0), F, 4.0, [0xfff0d8, 12])
+    return int_done('oldmain', K, Rm, anchor, (*G(2333, 2116.5), F + 1.7), (*G(2333, 2128), F + 8), render)
+
+
+B['oldmain_int'] = oldmain_int

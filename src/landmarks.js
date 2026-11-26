@@ -126,7 +126,6 @@ MODELS.push(
   INT('conservatory_int', 196, -2394, 37.4, [['Vander Veer Conservatory', 173, -2394, 26, 22, 4], ['Vander Veer Conservatory', 200, -2394, 22, 22, 8], ['Vander Veer Conservatory', 221.5, -2394, 15, 14, 3.5]]),
 );
 // collision for the big irregular footprints (OSM outlines rasterised into 6-8 m strips by the build script)
-const BOXES_DEERE = [[12760.4,5160.4,21.0,3.0,11],[12760.4,5166.4,27.0,3.0,11],[12757.4,5172.4,30.0,3.0,11],[12754.4,5178.4,27.0,3.0,11],[12742.4,5184.4,15.0,3.0,11],[12739.4,5190.4,12.0,3.0,11],[12739.4,5196.4,12.0,3.0,11],[12739.4,5202.4,12.0,3.0,11],[12736.4,5208.4,15.0,3.0,11],[12736.4,5214.4,15.0,3.0,11],[12736.4,5220.4,15.0,3.0,11],[12736.4,5226.4,15.0,3.0,11],[12730.4,5232.4,9.0,3.0,11],[12724.4,5238.4,3.0,3.0,11]];
 const BOXES_LOCK = [[1147.4,597.8,111.5,3.1,13,0,0.775],[1119.3,569.2,121.5,3.3,13,0,0.775],[1127.7,505.2,70.8,3.0,13,0,0.775]]; // river wall, middle wall, auxiliary land wall
 // Quad Cities landmarks (roadmap 2). ground: base height from the terrain once the anchor's tile is in (y + dy);
 // halls: walk-in interiors modelled in the GLB (<file>_int) that interiors.js treats as rooms
@@ -156,9 +155,9 @@ MODELS.push(
   { file: 'pavilion', x: 4980, z: 1778, ground: true, clear: [[4980, 1778, 20, 12]], solid: roomWalls(4980.05, 1778.1, 0.4545, 49, 32.2, 12, [['n', -3, 3]]),
     halls: [{ name: 'John Deere Pavilion', kind: 'hall', x: 4980.05, z: 1778.1, w: 49, d: 32.2, rot: 0.4545, ly: 9, light: [0xffffff, 16] }] },
   { file: 'arena', x: 4770, z: 1725, ground: true, load: 1000, clear: [[4770, 1725, 40, 40]], solid: [] }, // walls: arena_int below
-  { file: 'oldmain', x: 2333, z: 2126.5, ground: true, clear: [[2333, 2126.5, 10, 6]], solid: [[2333, 2126.5, 27, 12, 20]] },
-  { file: 'circa21', x: 337, z: 1545, ground: true, clear: [[337, 1545, 10, 15], [315, 1533, 6, 8]], solid: [[337, 1545, 13.5, 22.5, 18], [315.5, 1533, 8.2, 11, 9]] },
-  { file: 'deerehq', x: 12637, z: 5202, ground: true, load: 900, clear: [[12637, 5202, 40, 12], [12755, 5195, 15, 20]], solid: [[12637.2, 5202.5, 51.5, 17.2, 30], ...BOXES_DEERE] },
+  { file: 'oldmain', x: 2333, z: 2126.5, ground: true, clear: [[2333, 2126.5, 10, 6]], solid: [] }, // walls: oldmain_int
+  { file: 'circa21', x: 337, z: 1545, ground: true, clear: [[337, 1545, 10, 15], [315, 1533, 6, 8]], solid: [[315.5, 1533, 8.2, 11, 9]] }, // the theatre's walls: circa21_int
+  { file: 'deerehq', x: 12637, z: 5202, ground: true, load: 900, clear: [[12637, 5202, 40, 12], [12755, 5195, 15, 20]], solid: [[12637.2, 5202.5, 51.5, 17.2, 30]] }, // display building walls: deerehq_int
   // Arsenal Island: the Clock Tower building, Lock and Dam 15 (roller dam + locks, on the water)
   { file: 'clocktower', x: 1140, z: 778, ground: true, load: 900, clear: [[1147, 778, 12, 12], [1138, 765, 4, 4]],
     solid: [[1140.9, 778, 28, 9.15, 22, 0, 0.624], [1133.9, 768.3, 3.8, 3.8, 36, 0, 0.624], [1161.8, 769.9, 9, 9, 13, 0, 0.624]] },
@@ -188,6 +187,12 @@ MODELS.push(
   RINT('northpark', 150, -4330, null, 450, 36.2),
   // Quad Cities International Airport: ticketing, baggage claim, the checkpoint, concourses A and B
   RINT('mli', 5930, 7740, null, 330),
+  // Deere & Company World HQ: the display building (lobby, display floor with the machines and the Girard mural)
+  RINT('deerehq', 12637, 5202, null, 300),
+  // Circa '21 Dinner Playhouse: the lobby and the tiered dinner theatre
+  RINT('circa21', 337, 1545, null, 220),
+  // Augustana's Old Main: the rotunda under the dome, the hall, a classroom and the old library
+  RINT('oldmain', 2333, 2126.5, null, 220),
 );
 const LOAD = 700, DROP = 900;
 for (const L of MODELS) for (const [x, z, hw, hd] of L.clear) lots.extra.push({ x, z, fx: 0, fz: 1, hw, hd });

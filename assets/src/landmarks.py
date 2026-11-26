@@ -3602,7 +3602,14 @@ def circa21(render=True):
     H = 14.5
     for i, L, Ln, mid in sides(Pf):
         front = mid[1] > yF - 1.0
-        K.quad(L, 0, Ln, -3, H, 0, brick)
+        dg = door_gap(L, Ln, G(*CIRCA_DOOR), 1.8) if front else None
+        if dg:  # the doors under the marquee (circa21_int behind them)
+            K.quad(L, 0, dg[0], -3, H, 0, brick)
+            K.quad(L, dg[1], Ln, -3, H, 0, brick)
+            K.quad(L, dg[0], dg[1], 4.0, H, 0, brick)
+            K.quad(L, dg[0], dg[1], -3, 0.12, 0, tc)
+        else:
+            K.quad(L, 0, Ln, -3, H, 0, brick)
         if Ln > 6:
             nb = max(1, round(Ln / 3.6))
             windows(K, L, 0.8, Ln - 0.8, 4.6, 4.4, 2, nb, brick, wf=0.55, hf=0.6, rec=0.25, lit=0.5, sill=tc, head=tc)
@@ -3688,26 +3695,34 @@ def deerehq(render=True):
     K.prism(P, -6, 0, lin('#3a2a20'), top=False)
     # display building east
     D_ = ccw([G(12744.7, 5157.4), G(12785.7, 5160.7), G(12784.0, 5181.5), G(12755.2, 5179.2), G(12751.3, 5227.4), G(12721.4, 5240.3), G(12726.6, 5175.7)])
+    DZ = DEERE_DZ  # the display building stands on the hill east of the ravine, 14 m above the anchor (deerehq_int)
     for i, L, Ln, mid in sides(D_):
-        K.quad(L, 0, Ln, -3, 10.7, -0.5, bronze, GLASS)
+        dg = door_gap(L, Ln, G(*DEERE_DOOR), 2.0)
+        if dg:  # the visitors' doors at the east end
+            K.quad(L, 0, dg[0], DZ - 14, DZ + 10.7, -0.5, bronze, GLASS)
+            K.quad(L, dg[1], Ln, DZ - 14, DZ + 10.7, -0.5, bronze, GLASS)
+            K.quad(L, dg[0], dg[1], DZ + 3.2, DZ + 10.7, -0.5, bronze, GLASS)
+            K.obox(L, dg[0] - 0.5, dg[1] + 0.5, DZ + 3.2, DZ + 3.5, -0.5, 2.5, cor, BODY, ())
+        else:
+            K.quad(L, 0, Ln, DZ - 14, DZ + 10.7, -0.5, bronze, GLASS)
         for h in (4.6, 10.2):
-            K.obox(L, -0.3, Ln + 0.3, h, h + 0.5, -0.5, 0.9, cor, BODY, ('d-',))
+            K.obox(L, -0.3, Ln + 0.3, DZ + h, DZ + h + 0.5, -0.5, 0.9, cor, BODY, ('d-',))
         for k in range(int(Ln // 6) + 1):
             u = min(Ln, k * 6)
-            K.obox(L, u - 0.3, u + 0.3, -3, 10.7, -0.2, 0.5, cor, BODY, ('h-',))
-    roof(K, D_, 10.7, roofc)
+            K.obox(L, u - 0.3, u + 0.3, DZ - 14, DZ + 10.7, -0.2, 0.5, cor, BODY, ('h-',))
+    roof(K, D_, DZ + 10.7, roofc)
     # glass bridge on the 4th floor
     bx0, by0 = G(12689, 5200)
     bx1, by1 = G(12728, 5200)
-    K.box(bx0, bx1, by0 - 2, by0 + 2, 12, 15.5, bronze, GLASS, ())
-    K.box(bx0, bx1, by0 - 2.2, by0 + 2.2, 15.5, 16.0, cor, BODY, ())
+    K.box(bx0, bx1, by0 - 2, by0 + 2, 16, 19.5, bronze, GLASS, ())
+    K.box(bx0, bx1, by0 - 2.2, by0 + 2.2, 19.5, 20.0, cor, BODY, ())
     lod0 = K.obj('deerehq_lod0')
     K1 = Kit(672)
     K1.prism(P, -6, H, bronze, topcol=roofc)
     for i, L, Ln, mid in sides(P):
         for f in range(nfl):
             K1.quad(L, 0, Ln, f * fh + fh - 0.5, f * fh + fh, 0.05, cor)
-    K1.prism(D_, -3, 10.7, bronze, topcol=roofc)
+    K1.prism(D_, DEERE_DZ - 14, DEERE_DZ + 10.7, bronze, topcol=roofc)
     lod1 = K1.obj('deerehq_lod1')
     res = finish('deerehq', [lod0, lod1], anchor)
     if render:
