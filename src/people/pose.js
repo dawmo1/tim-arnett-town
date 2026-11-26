@@ -379,6 +379,49 @@ function meleePose(P, n, k, still) {
   keys(P, k, list.map(([kk, fn]) => [kk, (Q) => { copyPose(Q, MB); if (still) stance(Q); fn(Q); }]));
 }
 
+// ---------- cover (src/cover.js): cv = { high, wall (+1: the cover is on the body's left), peek 0..1, blind, hit, edge } ----------
+// Low: a deep crouch, shoulder and head tucked in toward the cover, rising to a half crouch to aim over it.
+// High: upright with the back turned into the wall and the head looking along it; leaning out to aim.
+function coverBody(P, cv, sp, ch, dt) {
+  const w = cv.wall, pk = cv.peek || 0, hit = cv.hit || 0;
+  if (sp > 0.2) ch.walk = (ch.walk || 0) + dt * (4 + sp * 3.5);
+  const sh = sp > 0.2 ? Math.sin(ch.walk || 0) : 0, lift = Math.max(0, sh), lift2 = Math.max(0, -sh);
+  if (!cv.high) {
+    const c = 1 - Math.max(pk * 0.7, (cv.blind || 0) * 0.3); // (blind fire: up a little, to get the gun over the top)
+    P.root[1] = -0.55 * c; P.root[0] = 0.05 * w * c + 0.06 * w * hit;
+    // the leg nearer the cover kneels, the outer one is planted ready to push off
+    const kn = w > 0 ? 'L' : 'R', pl = w > 0 ? 'R' : 'L';
+    set(P, 'thigh' + kn, (-38 - 20 * lift) * c, 0, 6 * w * c); set(P, 'shin' + kn, (128 - 20 * lift) * c); set(P, 'foot' + kn, 35 * c);
+    set(P, 'thigh' + pl, (-100 + 18 * lift2) * c, 0, -14 * w * c); set(P, 'shin' + pl, (112 - 25 * lift2) * c); set(P, 'foot' + pl, -18 * c);
+    set(P, 'hips', 6 * c, 14 * w * c, 0);
+    set(P, 'spine', 26 * c, 18 * w * c, (14 * c + 12 * hit) * w); set(P, 'chest', 10 * c, 10 * w * c, 6 * w * c);
+    set(P, 'neck', -6 * c); set(P, 'head', -14 * c, -34 * w * c, -8 * w * c);
+  } else {
+    const c = 1 - pk;
+    P.root[0] = (0.07 + 0.06 * hit) * w * c;
+    set(P, 'hips', 0, -34 * w * c, 3 * w * c);
+    set(P, 'spine', -4 * c, -8 * w * c, (7 + 12 * hit) * w * c); set(P, 'chest', -6 * c, -6 * w * c, 4 * w * c);
+    set(P, 'neck', 0, 18 * w * c); set(P, 'head', -2, 34 * w * c, 6 * w * c);
+    set(P, 'thighL', -4 - 22 * lift, 0, 7); set(P, 'thighR', -4 - 22 * lift2, 0, -7); set(P, 'shinL', 6 + 35 * lift); set(P, 'shinR', 6 + 35 * lift2); set(P, 'footL', -4); set(P, 'footR', -4);
+    if (pk > 0) { add(P, 'spine', 0, 0, -14 * w * pk); P.root[0] -= 0.08 * w * pk; }
+  }
+}
+function coverArms(P, cv, st) {
+  const w = cv.wall, gun = st.weapon === 'gun', near = w > 0 ? 'L' : 'R', far = w > 0 ? 'R' : 'L';
+  if (cv.blind && gun) { // the gun held up over the top (low) or out round the side (high) without looking
+    if (!cv.high) { armsUp(P, 'R', -172, 0, 6, -18); armsUp(P, 'L', st.rifle ? -160 : -40, 0, st.rifle ? -4 : 20, st.rifle ? -30 : -110); add(P, 'head', 22); add(P, 'neck', 10); add(P, 'spine', 8); }
+    else { armsUp(P, 'R', -92, 0, -6, -4); armsUp(P, 'L', st.rifle ? -88 : -30, 0, st.rifle ? -26 : 10, st.rifle ? -12 : -100); add(P, 'head', 14, -30 * w); }
+    return;
+  }
+  if (gun) { // ready: muzzle up by the shoulder, the other hand on it
+    if (st.rifle) { armsUp(P, 'R', -38, 0, -8, -112); armsUp(P, 'L', -64, 0, -28, -104); set(P, 'handR', 0, 0, 14); }
+    else { armsUp(P, 'R', -32, 0, 6, -138); armsUp(P, 'L', -44, 0, -22, -98); set(P, 'handR', 30, 0, 0); }
+    return;
+  }
+  if (!cv.high) { armsUp(P, near, -48, 0, 34, -38); armsUp(P, far, -42, 0, -4, -78); } // a hand on the cover, the other on the knee
+  else { armsUp(P, near, 12, 0, 26, -24); armsUp(P, far, -16, 0, -6, -40); } // palm flat to the wall
+}
+
 // ---------- hit reactions (combat.js react() sets ch.react = { kind, t, dur, mag, sx }) ----------
 function reactPose(P, r) {
   const u = r.t / r.dur, a = (u < 0.14 ? sm(u / 0.14) : 1 - sm((u - 0.14) / 0.86)) * r.mag, sx = r.sx;
@@ -480,6 +523,7 @@ export function animate(ch, dt, st) {
     if (st.skate) { P.root[1] -= 0.08; set(P, 'thighL', -10, 0, 12); set(P, 'thighR', 10, 0, -12); set(P, 'shinL', 15); set(P, 'shinR', 15); set(P, 'hips', 0, 70); set(P, 'spine', 5, -50); armsUp(P, 'L', 0, 25, -10); armsUp(P, 'R', 0, 25, -10); }
     const pitch = st.pitch || 0;
     if (st.cover) { P.root[1] -= 0.4; add(P, 'thighL', -70); add(P, 'thighR', -70); add(P, 'shinL', 95); add(P, 'shinR', 95); add(P, 'spine', 15); }
+    if (st.coverPose) { coverBody(P, st.coverPose, sp, ch, dt); rate = 20; }
     if (st.melee || st.punch) { // a combo move (src/combat.js) or an NPC's punches (punch: { i: 0 jab .. 3 uppercut, 4 kick, t: 0..1 })
       const m = st.melee || { n: PUNCH_N[st.punch.i] || 'jab', k: st.punch.t };
       meleePose(P, m.n, clamp01(m.k), sp <= 0.25);
@@ -519,6 +563,7 @@ export function animate(ch, dt, st) {
         [0.78, C((Q) => { armsUp(Q, 'L', -40, 0, -10, -55); set(Q, 'chest', 0, -8); })],
         [1, C((Q) => armsUp(Q, 'L', -60, 0, -28, -70))],
       ]);
+    } else if (st.coverPose) { coverArms(P, st.coverPose, st);
     } else if (st.handsUp) {
       armsUp(P, 'L', -170, 0, 22, -15); armsUp(P, 'R', -170, 0, 22, -15); set(P, 'handL', 0, 0, 20); set(P, 'handR', 0, 0, -20);
       add(P, 'upper_armL', Math.sin(t * 9) * 2); add(P, 'upper_armR', Math.sin(t * 9.4) * 2);

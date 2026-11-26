@@ -27,6 +27,7 @@ import { initCarLights, updateCarLights, setLightQuality, wetUniform } from './c
 import { initPhysics, updateRagdolls, ragdoll, release, ragPos, syncPhysics, standUp } from './ragdoll.js';
 import * as anim from './anim.js';
 import * as combat from './combat.js';
+import * as cover from './cover.js';
 import { initNav, updateNav } from './nav.js';
 import { knock, flinch } from './npc.js';
 import * as police from './police.js';
@@ -338,7 +339,8 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyJ' && !toggleJob()) ui.flashPrompt('No side job for this ride'); // taxi, ambulance, fire truck, police car, scooter
   if (e.code === 'KeyH' && me.veh && !me.seat && !me.dead) { if (me.veh.T.ebike) ebikes.bell(); else modHorn(me.veh); } // horn (carmods.js: the car's own horn mod)
   else if (e.code === 'KeyG' || e.code === 'KeyH') talk(e.code === 'KeyG');
-  if (e.code === 'KeyC' && playing && !me.veh && !me.dead && !typing) { me.crouch = !me.crouch; ui.flashPrompt(me.crouch ? 'Crouching (C to stand)' : 'Standing'); }
+  if (e.code === 'KeyC' && playing && !me.veh && !me.dead && !typing && !cover.active()) { me.crouch = !me.crouch; ui.flashPrompt(me.crouch ? 'Crouching (C to stand)' : 'Standing'); }
+  if (e.code === 'KeyF' && !me.veh && !me.dead && !me.swim && !me.enter && !me.move && !me.ch.rag && !me.rag && !anim.busy()) { if (cover.press(me, Math.sin(camYaw), Math.cos(camYaw))) me.crouch = false; } // take cover (src/cover.js)
 });
 addEventListener('keyup', (e) => { keys.delete(e.code); if ((e.code === 'Tab' || e.code === 'KeyQ') && wheelOpen) closeWheel(true); });
 addEventListener('blur', () => { keys.clear(); mouseDown = false; });
@@ -791,7 +793,7 @@ net.handlers.vehicle = (id, rec) => {
 net.handlers.vehicleGone = (id) => { const v = vehById.get(id); if (!v) return; if (me.veh === v && me.seat) ejectMe(); resetVehicle(v); };
 net.handlers.event = (e) => {
   switch (e.type) {
-    case 'hit': if (e.to === net.uid) damageMe(+e.dmg || 0, String(e.by || 'someone'), e.from, e.ix !== undefined ? { x: +e.ix, y: 3.5, z: +e.iz } : null); break;
+    case 'hit': if (e.to === net.uid && !shotBlocked(e)) damageMe(+e.dmg || 0, String(e.by || 'someone'), e.from, e.ix !== undefined ? { x: +e.ix, y: 3.5, z: +e.iz } : null); break;
     case 'vehHit': if (me.veh && !me.seat && me.veh.id === e.id) damageVehicle(me.veh, +e.dmg || 0, e.imp ? { cp: [e.px, e.pz], imp: e.imp } : null); break;
     case 'bump': {
       if (me.veh && !me.seat && me.veh.id === e.id) applyBump(me.veh, e);
@@ -1032,6 +1034,20 @@ function hurtWalker(w, dmg, dx, dz, p, force = 3, byNpc = false) {
   return false;
 }
 // imp (optional): a push like {x, y, z}; big pushes knock you over
+// A bullet from (sx, sy, sz) at you in cover hits the cover instead: sparks or dust where it struck. true = you're safe.
+function coverSaves(sx, sy, sz) {
+  const p = !me.veh && cover.blocks(me, sx, sy, sz);
+  if (!p) return false;
+  fx.impact(p, { x: p.nx, y: 0, z: p.nz }, p.metal ? 'metal' : 'wall');
+  if (p.metal) fx.sparks(p.x, p.y, p.z, 4, p.nx, p.nz);
+  return true;
+}
+// a shot from another player or the police host: blocked by the cover you're behind?
+function shotBlocked(e) {
+  if (e.sx !== undefined) return coverSaves(+e.sx, +e.sy, +e.sz);
+  const r = e.g && remotes.get(e.from);
+  return !!r && coverSaves(r.x, r.y + 1.4, r.z);
+}
 function damageMe(dmg, by, bu, imp) {
   if (me.dead || dmg <= 0 || adm.god) return;
   dmg *= 0.45; // the player is tougher than everyone else (about 2.2x the health, bar still reads 0-100)
@@ -1337,20 +1353,21 @@ function raycast(o, d, maxT) {
   const near = (x, z) => Math.abs(x - o.x) < maxT && Math.abs(z - o.z) < maxT;
   for (const w of walkers) {
     if (w.dead || !near(w.x, w.z)) continue;
-    const wy = w.y || 0;
+    const wy = (w.y || 0) - (w.ducked && w.mode === 'hostile' ? 0.5 : 0); // (crouched behind cover)
     test(raySphere(o.x, o.y, o.z, d.x, d.y, d.z, w.x, wy + 1.05, w.z, 0.48), 'walker', w, false);
     test(raySphere(o.x, o.y, o.z, d.x, d.y, d.z, w.x, wy + 1.72, w.z, 0.26), 'walker', w, true);
   }
   for (const r of remotes.values()) {
     if (r.dead || (r.vehObj && !r.vehObj.T.bike) || !near(r.x, r.z)) continue;
-    test(raySphere(o.x, o.y, o.z, d.x, d.y, d.z, r.x, r.y + 1.05, r.z, 0.48), 'player', r, false);
-    test(raySphere(o.x, o.y, o.z, d.x, d.y, d.z, r.x, r.y + 1.72, r.z, 0.26), 'player', r, true);
+    const ry = r.y - (r.coverLow ? 0.5 : 0);
+    test(raySphere(o.x, o.y, o.z, d.x, d.y, d.z, r.x, ry + 1.05, r.z, 0.48), 'player', r, false);
+    test(raySphere(o.x, o.y, o.z, d.x, d.y, d.z, r.x, ry + 1.72, r.z, 0.26), 'player', r, true);
   }
   for (const v of vehicles) if (v !== me.veh && !v.exploded && near(v.x, v.z)) test(vehRay(o, d, v), 'veh', v);
   for (const u of police.cops.values()) {
     if (police.isDown(u)) continue;
     if (u.kind < 2) { if (near(u.v.x, u.v.z)) test(vehRay(o, d, u.v), 'cop', u); }
-    else if (u.kind === 2) { if (near(u.x, u.z)) { const uy = u.y || 0; test(raySphere(o.x, o.y, o.z, d.x, d.y, d.z, u.x, uy + 1.05, u.z, 0.48), 'cop', u, false); test(raySphere(o.x, o.y, o.z, d.x, d.y, d.z, u.x, uy + 1.72, u.z, 0.26), 'cop', u, true); } }
+    else if (u.kind === 2) { if (near(u.x, u.z)) { const uy = (u.y || 0) - (u.inCover && (u.aimT || 0) < 0.5 ? 0.5 : 0); test(raySphere(o.x, o.y, o.z, d.x, d.y, d.z, u.x, uy + 1.05, u.z, 0.48), 'cop', u, false); test(raySphere(o.x, o.y, o.z, d.x, d.y, d.z, u.x, uy + 1.72, u.z, 0.26), 'cop', u, true); } }
     else test(raySphere(o.x, o.y, o.z, d.x, d.y, d.z, u.x, u.y, u.z, 2.8), 'cop', u);
   }
   best.p = { x: o.x + d.x * best.t, y: o.y + d.y * best.t, z: o.z + d.z * best.t };
@@ -1359,7 +1376,7 @@ function raycast(o, d, maxT) {
 function applyHit(hit, w, d) {
   if (hit.kind === 'walker') { const k = hurtWalker(hit.ref, w.dmg * (hit.head ? 2.5 : 1), d.x, d.z, hit.p, w.pellets ? 2.2 : w.name === 'Rifle' ? 4.5 : 3); ui.hitMarker(k); fx.soundHitMark(k); }
   else if (hit.kind === 'player') {
-    sendEvent('hit', { to: hit.ref.uid, dmg: r1(w.dmg * (hit.head ? 2 : 1)), by: me.name });
+    sendEvent('hit', { to: hit.ref.uid, dmg: r1(w.dmg * (hit.head ? 2 : 1)), by: me.name, g: 1 });
     combat.react(hit.ref.ch, hit.ref.h, d.x, d.z, hit.p.y - hit.ref.y, 0.4); // (their own screen plays it too, and sends it on)
     fx.blood(hit.p.x, hit.p.y, hit.p.z, d.x, d.z); fx.soundHitMark(false); ui.hitMarker(false);
   } else if (hit.kind === 'veh') { cj.bulletHit(hit.ref, hit.p); damageVehicle(hit.ref, w.dmg * 0.45 * (hit.ref.mods?.bp ? 0.4 : 1)); if (hit.ref.patrol) report('hitcop', hit.ref.x, hit.ref.z); }
@@ -1380,12 +1397,14 @@ function fire(w) {
   if (w.grenade) { if (a.mag <= 0 && a.res > 0) { a.mag = 1; a.res--; } throwGrenade(w.molotov ? 'molotov' : 'nade'); refreshWeaponHud(); return; }
   if (w.rocket) { if (a.mag <= 0 && a.res > 0) startReload(); fireRocket(); refreshWeaponHud(); return; }
   me.aimT = 0.8;
-  if (!me.veh) me.h = camYaw;
+  const blind = cover.blind() && !aiming; // blind-firing over / round cover: wild
+  if (blind) cover.blindShot();
+  if (!me.veh && !cover.inCover()) me.h = camYaw;
   const { o, d } = aimRay();
   const from = handPos();
   let last = null;
   for (let i = 0; i < (w.pellets || 1); i++) {
-    const dd = spread(d, w.spread * combat.spreadMul(aiming, me.crouch) * (me.veh ? 1.6 : 1) * (1 + Math.min(1, drunk.lvl) * 1.5));
+    const dd = spread(d, w.spread * combat.spreadMul(aiming, me.crouch || cover.inCover()) * (me.veh ? 1.6 : 1) * (blind ? 3.2 : 1) * (1 + Math.min(1, drunk.lvl) * 1.5));
     const hit = raycast(o, dd, w.range);
     shootProps(o, dd, hit.t);
     applyHit(hit, w, dd);
@@ -1730,7 +1749,7 @@ function updateVehicles(dt, tSec, nowMs) {
 
 function updatePlayer(dt) {
   const px = me.x, pz = me.z;
-  if (me.ch.rag || me.dead || me.rag || me.enter) combat.meleeCancel();
+  if (me.ch.rag || me.dead || me.rag || me.enter) { combat.meleeCancel(); cover.leave(); }
   if (me.ch.rag) {
     // ragdolled: the body is physics-driven; we just follow it
     const p = ragPos(me.ch); me.x = p.x; me.z = p.z; me.y = W.isLand(p.x, p.z) ? W.groundHeight(p.x, p.z) : W.SWIM_Y;
@@ -1779,6 +1798,7 @@ function updatePlayer(dt) {
   const w = WEAPONS[me.weapon];
   const wantFire = locked && still && (w.auto ? mouseDown : clicked);
   clicked = false;
+  if (wantFire && w.melee && cover.active()) cover.leave(); // a punch from cover: step out and throw it
   if (wantFire && (me.cd <= 0 || w.melee) && !me.dead && !me.swim && !(me.veh && w.melee)) fire(w);
   if (me.veh || me.swim || me.dead || !w.melee) combat.meleeCancel();
 }
@@ -1885,6 +1905,7 @@ function footUpdate(dt, fwd, side) {
     if (k >= 1) { me.move = null; me.grounded = true; }
     return;
   }
+  if (cover.active() && !me.swim && coverStep(dt, fwd, side)) return;
   const crouch = !!me.crouch && !me.swim;
   const mv = combat.meleeNow(); // throwing a punch / swinging: feet mostly planted
   const speed = (me.swim ? 2.6 : aiming ? 2.6 : crouch ? 2.0 : sprint ? 8 : 4.5) * adm.speed * (mv ? combat.meleeMoveScale() : 1);
@@ -1913,7 +1934,6 @@ function footUpdate(dt, fwd, side) {
   if (!interior.room && (W.offMap(me.x, me.z) || (W.isLand(me.x, me.z) && W.surfaceHeight(me.x, me.z, me.y) - me.y > (me.swim ? 1.9 : 0.7)))) { me.x = ox; me.z = oz; }
   const p = W.pushOutCircle(me.x, me.z, 0.4, me.y);
   me.x = p.x; me.z = p.z;
-  me.inCover = crouch && p.hit;
   const pushers = [...vehicles];
   for (const u of police.cops.values()) if (u.kind < 2) pushers.push(u.v);
   for (const v of pushers) {
@@ -1953,17 +1973,44 @@ function footUpdate(dt, fwd, side) {
   me.ch.g.rotation.set(0, me.h, 0);
   const wpn = WEAPONS[me.weapon];
   me.recoil = Math.max(0, (me.recoil || 0) - dt * 8);
-  me.netPose = ((crouch && !me.inCover && !aimPose) ? 1 : 0) | ((me.inCover && !aimPose) ? 2 : 0) | (me.reloadT > 0 ? 4 : 0); me.netPitch = aimPose ? Math.round(-camPitch * 57) : 0; me.netK = 0;
+  me.netPose = ((crouch && !aimPose) ? 1 : 0) | (me.reloadT > 0 ? 4 : 0); me.netPitch = aimPose ? Math.round(-camPitch * 57) : 0; me.netK = 0;
   // the phone: thumbing it in front of you, or held to your ear on a call (stacks with walking)
   if (phone.isOpen() && !myAct) myAct = { n: phone.inCall() ? 'call' : 'phone', k: 0, side: 1 };
   if (myAct && me.moveSpeed > 0 && !anim.busy() && myAct.n !== 'phone' && myAct.n !== 'call') { anim.stop(); myAct = null; } // walking off cancels a small action
   anim.holdProps(me.ch, myAct);
-  animateCharacter(me.ch, dt, { ...anim.poseFields(myAct), crouch: crouch && !me.inCover && !aimPose, cover: me.inCover && !aimPose, speed: aimPose ? Math.min(me.moveSpeed, 3) : me.moveSpeed, aim: aimPose, swim: me.swim,
+  animateCharacter(me.ch, dt, { ...anim.poseFields(myAct), crouch: crouch && !aimPose, speed: aimPose ? Math.min(me.moveSpeed, 3) : me.moveSpeed, aim: aimPose, swim: me.swim,
     melee: me.swim ? null : mv, swing: me.swing > 0 ? 1 - me.swing : 0, // (swing: a grenade throw)
     moveRel: aimPose && ml > 0 ? angDiff(me.h, Math.atan2(mx, mz)) : 0, aimYaw: aimPose ? angDiff(me.h, camYaw) : 0,
     weapon: me.swim ? 'none' : wk, wmodel: me.swim ? null : wpn.model, rifle: wpn.long, recoil: me.recoil, reload: me.reloadT > 0 ? 1 - me.reloadT / combat.reloadTime(wpn) : 0, pitch: aimPose ? -camPitch * 57 : 0, carry: !aimPose && wpn.long });
 }
 
+// In cover (src/cover.js works out where you are along it and how far you've popped out); false = you just left it.
+function coverStep(dt, fwd, side) {
+  const rx = -Math.cos(camYaw), rz = Math.sin(camYaw);
+  let mx = Math.sin(camYaw) * fwd + rx * side, mz = Math.cos(camYaw) * fwd + rz * side;
+  const ml = Math.hypot(mx, mz); if (ml > 0) { mx /= ml; mz /= ml; }
+  const wpn = WEAPONS[me.weapon], wk = wpn.kind;
+  const r = cover.update(dt, { x: me.x, y: me.y, z: me.z, mx, mz, cfx: Math.sin(camYaw), cfz: Math.cos(camYaw), aiming: aiming || !!me.robAim, gun: wk === 'gun', jump: keys.has('Space') });
+  if (r.left) {
+    if (r.x !== undefined) { me.x = r.x; me.z = r.z; }
+    if (r.vault) { me.h = r.h; tryClimb(); }
+    return false;
+  }
+  me.x = r.x; me.z = r.z;
+  const aimPose = !!r.aimOut;
+  me.h += angDiff(me.h, aimPose ? camYaw : r.h) * Math.min(1, dt * 14);
+  const gh = interior.room ? interior.room.y : W.surfaceHeight(me.x, me.z, me.y);
+  me.y = gh; me.vy = 0; me.grounded = true;
+  me.moveSpeed = r.speed;
+  me.recoil = Math.max(0, (me.recoil || 0) - dt * 8);
+  me.netPose = me.reloadT > 0 ? 4 : 0; me.netPitch = aimPose ? Math.round(-camPitch * 57) : 0; me.netK = 0;
+  me.ch.g.visible = true; me.ch.g.position.set(me.x, me.y, me.z); me.ch.g.rotation.set(0, me.h, 0);
+  if (myAct && !anim.busy() && myAct.n !== 'phone' && myAct.n !== 'call') { anim.stop(); myAct = null; }
+  anim.holdProps(me.ch, myAct);
+  animateCharacter(me.ch, dt, { ...anim.poseFields(myAct), ...r.pose, speed: r.speed, aim: aimPose, aimYaw: aimPose ? angDiff(me.h, camYaw) : 0,
+    weapon: wk, wmodel: wpn.model, rifle: wpn.long, recoil: me.recoil, reload: me.reloadT > 0 ? 1 - me.reloadT / combat.reloadTime(wpn) : 0, pitch: aimPose ? -camPitch * 57 : 0 });
+  return true;
+}
 // admin noclip: fly where the camera looks, through everything. Space up, Shift down, Ctrl fast.
 function flyUpdate(dt, fwd, side) {
   const sp = (keys.has('ControlLeft') || keys.has('ControlRight') ? 60 : 18) * adm.speed, cp = Math.cos(camPitch);
@@ -2121,8 +2168,12 @@ function updateRemotes(dt) {
       const ra = anim.remoteAct(s[21], s[22]);
       anim.holdProps(r.ch, ra);
       if (bits & 24) animateCharacter(r.ch, dt, bits & 8 ? { climb: +s[19] || 0 } : { vault: +s[19] || 0 });
-      else if (ra && ra.n !== 'phone' && ra.n !== 'call' && !anim.isCombat(ra.n)) animateCharacter(r.ch, dt, { act: ra });
-      else animateCharacter(r.ch, dt, { ...anim.poseFields(ra), ...combat.remoteFields(r, ra, dt), moveRel: wk === 'gun' && r.speed > 0.5 ? angDiff(r.h, Math.atan2(r.vx, r.vz)) : 0, speed: r.speed, aim: wk === 'gun' && !(bits & 2), swim: sw, dead: r.dead, crouch: !!(bits & 1), cover: !!(bits & 2), reload: bits & 4 ? (performance.now() / 1300) % 1 : 0, pitch: +s[18] || 0, carry: !!wr?.long && wk !== 'gun', weapon: sw ? 'none' : wk, wmodel: sw ? null : wr?.model ?? null, rifle: !!wr?.long });
+      else if (ra && ra.n !== 'phone' && ra.n !== 'call' && !anim.isCombat(ra.n) && !anim.isState(ra.n)) animateCharacter(r.ch, dt, { act: ra });
+      else {
+        const cv = ra && ra.n.startsWith('cover') ? ra : null; // in cover: k = how far they've popped out
+        r.coverLow = !!cv && !cv.n.endsWith('High') && cv.k < 0.5;
+        animateCharacter(r.ch, dt, { ...anim.poseFields(ra), ...combat.remoteFields(r, ra, dt), moveRel: wk === 'gun' && r.speed > 0.5 ? angDiff(r.h, Math.atan2(r.vx, r.vz)) : 0, speed: r.speed, aim: wk === 'gun' && (cv ? cv.k > 0.55 : !(bits & 2)), swim: sw, dead: r.dead, crouch: !!(bits & 1), cover: !!(bits & 2) && !cv, reload: bits & 4 ? (performance.now() / 1300) % 1 : 0, pitch: +s[18] || 0, carry: !!wr?.long && wk !== 'gun', weapon: sw ? 'none' : wk, wmodel: sw ? null : wr?.model ?? null, rifle: !!wr?.long });
+      }
     }
     r.tagT = (r.tagT || 0) - dt;
     if (r.tagT <= 0) { r.tagT = 0.3; const d = Math.hypot(r.x - camera.position.x, r.z - camera.position.z); r.tagOn = !r.dead && d < 40 && W.lineOfSight(camera.position.x, camera.position.y, camera.position.z, r.x, r.y + 2.2, r.z); }
@@ -2547,12 +2598,17 @@ function updateThreat(dt) {
 // where the camera is and which way it looks (so people and cars appear out of sight)
 const camDir = new THREE.Vector3();
 function camView() { camera.getWorldDirection(camDir); const l = Math.hypot(camDir.x, camDir.z) || 1; return { x: camera.position.x, z: camera.position.z, fx: camDir.x / l, fz: camDir.z / l }; }
+cover.initCover({
+  vehicles: () => { const L = vehicles.slice(); for (const u of police.cops.values()) if (u.kind < 2 && u.v) L.push(u.v); return L; },
+  myVeh: () => me.veh,
+  sound: (kind) => fx.footstep(kind === 'veh' ? 'metal' : 'concrete', 1.6),
+});
 setNpcContext({
   focus: () => (playing ? { x: me.veh ? me.veh.x : me.x, z: me.veh ? me.veh.z : me.z } : W.places.menu),
   quality: () => activeQuality,
   threat: () => threatState,
   target: () => (playing && !me.dead ? { x: me.veh ? me.veh.x : me.x, y: me.veh ? me.veh.y : me.y, z: me.veh ? me.veh.z : me.z, dead: me.dead, inVeh: !!me.veh } : null),
-  hitPlayer: (dmg, by, w) => damageMe(dmg, by, '', w && w.hostile === 'melee' && Math.random() < 0.2 ? { x: Math.sin(w.h) * 6, y: 2, z: Math.cos(w.h) * 6 } : null),
+  hitPlayer: (dmg, by, w) => { if (w && w.hostile === 'gun' && coverSaves(w.x, (w.y || 0) + 1.4, w.z)) return; damageMe(dmg, by, '', w && w.hostile === 'melee' && Math.random() < 0.2 ? { x: Math.sin(w.h) * 6, y: 2, z: Math.cos(w.h) * 6 } : null); },
   vehicles: () => movingVehicles,
   allVehicles: () => vehicles,
   player: () => (playing ? { x: me.veh ? me.veh.x : me.x, z: me.veh ? me.veh.z : me.z, dead: me.dead, inVeh: !!me.veh, speed: me.moveSpeed || 0, vehSpeed: me.veh ? Math.abs(me.veh.speed) : 0, fancy: me.veh && (me.veh.T.limo || me.veh.T.name === 'Sports car' || me.veh.T.muscle), stars: wanted.stars, armed: WEAPONS[me.weapon].kind !== 'none' || WEAPONS[me.weapon].name === 'Knife', mask: MASKS[normLook(me.look)[18]], top: TOPS[normLook(me.look)[6]] } : null),
@@ -2619,7 +2675,7 @@ police.initPolice(scene, {
   extraViewers: () => patrolViewers(),
   now: () => net.now(),
   vehicles: () => vehicles,
-  damagePlayer: (uid, dmg, by) => { if (uid === net.uid) damageMe(dmg, by, 'police'); else sendEvent('hit', { to: uid, dmg: r1(dmg), by }); },
+  damagePlayer: (uid, dmg, by, from) => { if (uid === net.uid) { if (!(from && coverSaves(from.x, from.y, from.z))) damageMe(dmg, by, 'police'); } else sendEvent('hit', { to: uid, dmg: r1(dmg), by, ...(from ? { sx: r1(from.x), sy: r1(from.y), sz: r1(from.z) } : {}) }); },
   explode: (x, y, z, by) => boom(x, y, z, by, 'police'),
   copShot: (from, s) => { fx.tracer(from, { x: s[0], y: s[1], z: s[2] }); fx.muzzleFlash(from); fx.soundShot('pistol', distCam(from.x, from.z)); },
   announce: (uid, text) => { if (uid === net.uid) ui.announce(text, '', '#ff5e5b'); },
@@ -2837,7 +2893,7 @@ function update(dt, t) {
 }
 
 // the player's action for other players: [code (negative = mirrored), progress] in s[21], s[22] (src/anim.js)
-function actNet() { if (!myAct) { const c = combat.netAct(me.ch); return c ? [anim.codeOf(c.n), Math.round(c.k * 100) / 100] : [0, 0]; } const c = anim.codeOf(myAct.n); return [c * (myAct.side < 0 ? -1 : 1), Math.round((myAct.k || 0) * 100) / 100]; }
+function actNet() { if (!myAct) { const cv = cover.netAct(); if (cv) return [anim.codeOf(cv.n) * cv.side, cv.k]; const c = combat.netAct(me.ch); return c ? [anim.codeOf(c.n), Math.round(c.k * 100) / 100] : [0, 0]; } const c = anim.codeOf(myAct.n); return [c * (myAct.side < 0 ? -1 : 1), Math.round((myAct.k || 0) * 100) / 100]; }
 // Slow pan over the riverfront while the menu is open.
 let menuFocus = null; // once you press Play the (hidden) menu camera streams around your spawn instead
 function menuCamera(t) {

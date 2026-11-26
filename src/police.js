@@ -166,7 +166,7 @@ function shoot(u, from, p, acc, dmg) {
   u.seq++;
   u.shot = [p.x + (hit ? 0 : (Math.random() - 0.5) * 5), (p.y || 0) + (p.inVeh ? 1 : 1.2), p.z + (hit ? 0 : (Math.random() - 0.5) * 5)];
   ctx.copShot(from, u.shot);
-  if (hit) ctx.damagePlayer(p.uid, dmg, 'the police');
+  if (hit) ctx.damagePlayer(p.uid, dmg, 'the police', from); // (from: cover between you and them can stop it)
 }
 
 // ---------- host simulation ----------

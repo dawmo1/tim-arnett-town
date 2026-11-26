@@ -14,6 +14,12 @@ const LIST = ['', 'carOpen', 'carIn', 'carShut', 'carOut', 'shutStand', 'door', 
 const COMBAT = new Set(LIST.slice(LIST.indexOf('jab')));
 export const isCombat = (n) => COMBAT.has(n);
 LIST.push('carTry', 'carSmash', 'carReach', 'hotwire', 'carHandsUp'); // vehicle mechanics (carjack.js), after the combat codes
+// body states posed over walking, not held actions: cover (src/cover.js: sign = the side the cover is on, k = how far
+// popped out) and swimming (src/swim.js: k = the camera pitch underwater, mapped 0..1)
+const STATES = ['coverLow', 'coverHigh', 'coverBlindLow', 'coverBlindHigh', 'swimTread', 'swimBreast', 'swimCrawl', 'swimUnder', 'swimDive'];
+LIST.push(...STATES);
+const STATE = new Set(STATES);
+export const isState = (n) => STATE.has(n);
 const CODE = new Map(LIST.map((n, i) => [n, i]));
 export const codeOf = (n) => CODE.get(n) || 0;
 // props held during an action (character.js PROP_AT)
@@ -69,6 +75,10 @@ export function remoteAct(code, k) {
 // st fields for an action: phone poses stack on walking, the rest take over the body
 export function poseFields(a) {
   if (!a || COMBAT.has(a.n)) return {};
+  if (STATE.has(a.n)) {
+    if (a.n.startsWith('cover')) return { coverPose: { high: a.n.endsWith('High'), wall: a.side, peek: a.k, blind: a.n.includes('Blind') ? 1 : 0 } };
+    return { swim: { style: a.n.slice(4).toLowerCase(), pitch: (a.k - 0.5) * 180 } };
+  }
   if (a.n === 'phone') return { text: true };
   if (a.n === 'call') return { phone: true };
   return { act: a };

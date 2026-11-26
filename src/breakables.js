@@ -66,6 +66,14 @@ export function benchNear(x, z, r = 1.5) {
   return best && { x: best.x, y: best.y, z: best.z, h: best.h, ref: best.ref };
 }
 
+// intact props solid enough to crouch behind (src/cover.js): [{ ref, kind, x, y, z, r }]
+const COVER_KINDS = new Set(['bench', 'planter', 'hedge', 'picket', 'busstop', 'mailbox', 'newsbox', 'bin', 'ruralbox', 'menuboard']);
+export function coverProps(x, z, r) {
+  const out = [];
+  for (const e of near(x, z, r, [])) if (COVER_KINDS.has(e.kind)) out.push({ ref: e.ref, kind: e.kind, x: e.x, y: e.y, z: e.z, r: KIND[e.kind].r });
+  return out;
+}
+
 // ---------- debris ----------
 const darkMat = new THREE.MeshStandardMaterial({ color: 0x2b2f33, roughness: 0.6 });
 const stopMat = new THREE.MeshStandardMaterial({ color: 0xc62828, roughness: 0.6 });
