@@ -2745,7 +2745,10 @@ def adler_int(render=True):
     for r in range(16):
         y = sy - 3.5 - r * 0.95
         z = 0.05 + r * 0.18
-        K.box(ax0 + 1, ax1 - 1, y - 0.95, y, 0, z, lin('#4c1420'))
+        if y - 0.95 < ay0:
+            break  # the back row stops at the rear wall (the lobby is behind it)
+        for a, b in ((ax0 + 1, (ax0 + ax1) / 2 - 1.2), ((ax0 + ax1) / 2 + 1.2, ax1 - 1)):  # the centre aisle stays open
+            K.box(a, b, y - 0.95, y, 0, z, lin('#4c1420'))
         for a, b in ((ax0 + 2, (ax0 + ax1) / 2 - 1.2), ((ax0 + ax1) / 2 + 1.2, ax1 - 2)):
             seats(K, a, b, y - 0.4, z, wine)
     # the balcony over the back (south) third
@@ -3664,6 +3667,8 @@ def circa21(render=True):
                 storefront(K, L, 0.4, Ln - 0.4, 0, 4.0, lin('#2a2a2a'), 3)
                 K.text('SPEAKEASY', L, Ln / 2, 4.3, 0.15, 0.6, lin('#ff4f9a'), NEON, 0.05, res=1)
     roof(K, Ps, 9.0, roofc, par=lin('#9a5a44'), parh=0.6)
+    # the lobby opens into the house through the wall between the front block and the auditorium (circa21_int)
+    cut_door(K, G(325.7, 1534.0), G(349.8, 1534.0), 333.0 - 325.7, 341.0 - 325.7, -0.5, 4.4)
     lod0 = K.obj('circa21_lod0')
     K1 = Kit(662)
     K1.prism(Pf, -3, H, brick, topcol=roofc)
@@ -3812,6 +3817,10 @@ def mli(render=True):
     K.text('QUAD CITIES INTERNATIONAL AIRPORT', F_, 60, 7.2, 0.55, 1.6, lin('#ffffff'), NEON, 0.1, res=1)
     for k in range(6):
         K.cyl(*F_(25 + k * 15, 0, 8.0)[:2], 0.35, 0, 4.2, white, BODY, 8)
+    # where the concourses join the hub, the walls between them open up (mli_int)
+    for a, b, u0, u1 in (((132.1, 147.9), (132.2, 126.0), 0.0, 21.9), ((137.2, 142.1), (132.2, 126.0), 0.0, 16.9),
+                         ((168.7, 121.5), (169.4, 142.0), 0.0, 20.5), ((161.9, 92.2), (169.4, 142.0), 29.6, 50.4)):
+        cut_door(K, G(*MLI_G(*a)), G(*MLI_G(*b)), u0, u1, -0.5, 6.0)
     lod0 = K.obj('mli_lod0')
     K1 = Kit(682)
     for poly, H, rc in ((T, 11.0, roofc), (A_, 7.0, lin('#c9ccd0')), (B_, 7.0, lin('#c9ccd0'))):

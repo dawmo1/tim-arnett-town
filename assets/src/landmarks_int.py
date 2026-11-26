@@ -609,6 +609,10 @@ def northpark(render=True):
         K.text('NORTHPARK', lambda u, h, d, F2=F2: F2(u, h, -d - 0.2), 0, H + 1.2, 0.0, 3.0, lin('#ffffff'), NEON, 0.2, res=1)
         K.text('NORTHPARK', lambda u, h, d, F2=F2: F2(-u, h, d + 0.2), 0, H + 1.2, 0.0, 3.0, lin('#ffffff'), NEON, 0.2, res=1)
     K.box(sx - 11, sx + 11, sy - 0.15, sy + 0.15, H, H + 1.2, lin('#424242'))
+    a, b = G(146.3, -4253.3), G(117.7, -4261.2)  # the mall's south wall behind the entrance vestibule opens into it
+    s0 = math.hypot(*[np_b(12, 75)[k] - a[k] for k in (0, 1)])
+    s1 = math.hypot(*[np_b(-8, 75)[k] - a[k] for k in (0, 1)])
+    cut_door(K, a, b, min(s0, s1), max(s0, s1), -0.5, 6.0, tol=1.5)
     lod0 = K.obj('northpark_lod0')
     K1 = Kit(722)
     K1.prism(P, -4, H, brick, topcol=roofc)
@@ -1237,8 +1241,8 @@ def circa21_int(render=True):
     # the lobby (front block) and the auditorium; the doors from 3rd Ave, the lobby into the house
     lx0, lx1, lz0, lz1 = 324.6, 349.4, 1523.0, 1533.6
     ax0, ax1, az0, az1 = 326.4, 349.0, 1534.4, 1566.6
-    ghall(K, G, lx0, lx1, lz0, lz1, 4.6, cream, lin('#d8c9a8'), [carpet, carpet2], [('n', CIRCA_DOOR[0] - 1.8, CIRCA_DOOR[0] + 1.8, 3.6), ('s', 333.0, 341.0, 3.4)], tile=1.5, dado=(1.1, wood), trim=gold)
-    ghall(K, G, ax0, ax1, az0, az1, 15.0, lin('#7a3326'), lin('#3a2a2a'), [carpet, carpet2], [('n', 333.0, 341.0, 3.4)], tile=2.0, dado=(1.4, wood), trim=gold)
+    ghall(K, G, lx0, lx1, lz0, lz1, 4.6, cream, lin('#d8c9a8'), [carpet, carpet2], [('n', CIRCA_DOOR[0] - 1.8, CIRCA_DOOR[0] + 1.8, 3.6), ('s', 333.0, 341.0, 4.3)], tile=1.5, dado=(1.1, wood), trim=gold)
+    ghall(K, G, ax0, ax1, az0, az1, 15.0, lin('#7a3326'), lin('#3a2a2a'), [carpet, carpet2], [('n', 333.0, 341.0, 4.3)], tile=2.0, dado=(1.4, wood), trim=gold)
     for f in K.faces:  # ghall() builds on 0: lift both rooms to the floor
         for v in f[0]:
             v.z += F
@@ -1266,8 +1270,8 @@ def circa21_int(render=True):
         gb(343.3 + k * 0.55, 343.45 + k * 0.55, 1533.0, 1533.15, 1.2 + (k % 3) * 0.5, 1.5 + (k % 3) * 0.5, [lin('#2e7d32'), lin('#8d5524'), lin('#d7ccc8')][k % 3])
     Rm.person(G(346, 1531.8), G(346, 1526), 'stand', 0, 'vendor')
     Rm.spot(G(346, 1528.0), 2.4, 'menu', "Circa '21 Bar", 'dinner')
-    for k in range(4):  # show posters
-        a = G(331 + k * 4.2, 1533.55)
+    for k, px in enumerate((325.0, 327.8, 330.5)):  # show posters beside the doors into the house (the bar is on the other side)
+        a = G(px, 1533.55)
         K.box(a[0], a[0] + 2.4, a[1] - 0.02, a[1] + 0.02, F + 1.4, F + 3.4, [lin('#c62828'), lin('#1d3c6e'), lin('#f9a825'), lin('#2e5a32')][k], BODY, ())
     for p in ((329, 1528), (339, 1527)):
         Rm.person(G(*p), G(p[0] + 3, p[1]), 'chat', 0, 'diner')
@@ -1645,7 +1649,7 @@ def lodge_int(render=True):
         gb(x0, x0 + (hx1 - hx0) / 16, hz0, hz1, F - 0.02, F, plank if i % 2 else plank2, BODY, ('h-', 'u-', 'u+', 'd-', 'd+'))
     Ph = [G(hx0, hz0), G(hx1, hz0), G(hx1, hz1), G(hx0, hz1)]
     n0 = len(K.faces)
-    outline(K, Rm, Ph, ['h'] * 4, 6.0 - F, stone, None, {0: (20.4, 22.8), 3: (7.7, 9.7)}, h=8)
+    outline(K, Rm, Ph, ['h'] * 4, 6.0 - F, stone, None, {0: (20.4, 22.8), 2: (14.2, 16.4), 3: (7.7, 9.7)}, h=8)  # north doors, the terrace door, the museum
     for f in K.faces[n0:]:
         for v in f[0]:
             v.z += F
@@ -1701,8 +1705,7 @@ def lodge_int(render=True):
         Rm.person(G(x, z), G(410, 6556.5), 'sit', 0, 'visitor')
     wtext(K, G(386, 6548.15), G(392, 6548.15), G(389, 6555), 'WATCH TOWER LODGE', 3, 3.6, 0.42, lin('#e8dcc0'), BODY, 0.03)
     # the terrace doors to the bluff (south wall): glazed, lit by the sky
-    for k in range(4):
-        x = 386 + k * 6
+    for x in (383, 389, 401, 407):  # (x 395..397.2 is the open door to the terrace)
         a, b = G(x, 6564.88), G(x + 2.2, 6564.88)
         vwall(K, a, b, F, F + 2.8, lin('#d8e8f0'), G(x, 6555), LIT)
     Rm.person(G(398, 6551), G(398, 6560), 'stand', 0, 'office')  # the site's ranger
@@ -1738,13 +1741,12 @@ def lodge_int(render=True):
         for k in range(3):
             K.box(c[0] + 1.6 + k * 0.3, c[0] + 1.75 + k * 0.3, c[1] - 1 + k * 0.6, c[1] - 0.85 + k * 0.6, F2 + 0.62, F2 + 1.3, lin('#7a4a2a'))
     # glass cases of objects along the east and west walls, Black Hawk's portrait, the dugout canoe
-    for (x0, x1) in ((373.6, 377.0), (356.0, 357.2)):
-        for k in range(4):
-            z0 = 6549 + k * 7
+    for (x0, x1, zs) in ((373.6, 377.0, (6548.0, 6558.6, 6565.6, 6572.0)), (356.0, 357.2, (6549, 6556, 6563, 6570))):  # (clear of the door from the hall)
+        for z0 in zs:
             gb(x0, x1, z0, z0 + 5, F2, F2 + 0.9, lin('#4a3a2a'))
             gb(x0, x1, z0, z0 + 5, F2 + 0.9, F2 + 1.6, lin('#cfe3ee'), LIT)
             for j in range(5):
-                gb(x0 + 0.3, x0 + 0.6, z0 + 0.5 + j * 0.9, z0 + 0.8 + j * 0.9, F2 + 0.9, F2 + 1.1 + (j % 3) * 0.15, [lin('#c8102e'), lin('#e0b040'), lin('#2f6a8a'), lin('#d8ccb0')][(j + k) % 4])
+                gb(x0 + 0.3, x0 + 0.6, z0 + 0.5 + j * 0.9, z0 + 0.8 + j * 0.9, F2 + 0.9, F2 + 1.1 + (j % 3) * 0.15, [lin('#c8102e'), lin('#e0b040'), lin('#2f6a8a'), lin('#d8ccb0')][(j + int(z0)) % 4])
             blk(x0, x1, z0, z0 + 5, 1.6, F2)
     a, b = G(364, 6577.35), G(368, 6577.35)
     vwall(K, a, b, F2 + 0.9, F2 + 3.0, lin('#6a4a30'), G(366, 6570))
