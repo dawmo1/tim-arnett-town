@@ -130,7 +130,7 @@ python3 tools/serve.py 8765
 
 ## Session status (2026-11-27)
 
-- Everything below is merged into `main` and live.
+- Everything below is merged into `main` and live, including take cover (F, `src/cover.js`), NPC melee turn-taking (`npc.js` `brawl()`) and swimming (`src/swim.js`).
 - **Roadmap items done:** 1 e-bikes, 2 car models, 3 animations, 4 character models, 5 enterable landmarks (Riverdale HS skipped: outside the map).
 - **Also done:**
   - Carjacking and street mechanics (`src/carjack.js`).
