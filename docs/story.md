@@ -4,47 +4,68 @@ Nothing is in the game yet. The plot below is a **draft for Dain to approve**; c
 
 ## Decided (Dain, 2026-11-26)
 
-- **Main character:** Flynn Arnett, Tim Arnett's son.
-- **Tone:** drama-comedy GTA satire of the Midwest.
+- **Main character:** Flynn Arnett, Tim Arnett's son. Based on a real person, with permission; everything exaggerated GTA-style.
+- **Tone:** drama-comedy GTA satire. Nothing off-limits.
 - **Scope:** build Chapters 1 and 2 first, add more chapters later.
 - **Solo only:** story missions are single-player; the online world stays as it is.
+- **Real people:** only what Dain tells us goes in. No online lookups of private people. Friends and their families go in the public repo by first name.
+
+## Flynn Arnett (from Dain)
+
+- **17**, lives in **Geneseo, IL**. Geneseo High School (Maple Leafs): football team and trap shooting.
+- **Looks:** about 5'10", heavy build, blonde hair. Grey sweatpants and a torn T-shirt, always.
+- **Personality:** "dumb, funny, dumb." The clown. Everything makes him angry and everything makes him laugh. Says "bro" constantly.
+- **Job:** dishwasher at GBC (Geneseo Brewing Company).
+- **Car:** a beat-up Ford Escape (parody name in game) that he drives recklessly and hits people with.
+- **Food:** McDonald's, everything on the menu.
+- **Into:** gaming, the gym, cars, phonk and corny music.
+- **Running gags:**
+  - Tim keeps stealing Flynn's cart and hitting it himself.
+  - Flynn calls his mom "Jugs."
+  - Flynn beats up anyone who talks about his late grandma Lorece.
+- **Family:** dad Tim Arnett, mom Rebecca Arnett ("Jugs"), late grandma Lorece.
+- **Best friends:** Taefyl, Eric and Joshua. **Ex:** Neveah.
 
 ## Draft plot
 
-**Premise.** Tim Arnett's face is on every billboard in the Quad Cities: Tim Arnett Injury Law, Arnett Auto, Arnett Arms, Tim's Threads, the Arnett Belle casino, and now "Mayor Tim" for mayor of Davenport. Flynn, his twenty-something son, comes home broke after flaming out in Chicago. Tim puts him to work "in the family business" and Flynn slowly finds out how much of that business is a con. Running thread: Flynn wants his dad's respect, Tim wants a son who'll make him look good, and neither gets what he wants.
+**Premise.** In the game, Tim Arnett is the loudest man in Henry County. His face is on billboards all over the Quad Cities: Tim Arnett Injury Law, Arnett Auto, Arnett Arms, Tim's Threads and the Arnett Belle casino. Now he's running for mayor of Geneseo as "Mayor Tim." Flynn just wants his cart back, a McDonald's run and a quiet shift washing dishes at GBC. Every time Tim needs a dirty job done, Flynn gets dragged in, and Flynn's "help" makes everything ten times worse. Running thread: Flynn wants his dad to respect him (and stop stealing his cart); Tim wants a son who makes him look good on camera.
 
 ### Characters (draft)
 
-- **Flynn Arnett:** the player. Sarcastic, a decent driver, terrible with money, better person than his dad.
-- **Tim Arnett:** loud, beloved local celebrity and businessman, running for mayor. All handshake and no conscience, but he does love his kid in his own way.
-- **Dez:** Flynn's best friend from high school, works the Arnett Auto lot, comic relief and getaway driver.
-- **Aunt Rhonda Arnett:** Tim's sister, runs Arnett Arms, the only Arnett who tells Flynn the truth.
-- **Gloria Vance:** Tim's opponent for mayor. Squeaky clean in public.
-- **"Big Lou" Ostrowski:** Rock Island money man whose cash is quietly behind the Arnett Belle. Chapter 2's heavy.
+- **Flynn Arnett:** the player.
+- **Tim Arnett:** Flynn's dad. Game version: Quad Cities billboard mogul running for mayor, steals his son's cart. Waiting on Dain for what the real Tim is like.
+- **Rebecca "Jugs" Arnett:** Flynn's mom. The only one who can make Flynn and Tim shut up. Waiting on Dain for her personality.
+- **Grandma Lorece:** passed away. Her memory is sacred; insult her and a fight starts (a scripted brawl trigger).
+- **Taefyl, Eric, Joshua:** Flynn's crew, who ride along on missions. Need one line each from Dain on what they're like.
+- **Neveah:** Flynn's ex. Shows up at the worst possible moments.
+- **Gloria Vance:** Tim's opponent for mayor (fictional).
+- **"Big Lou" Ostrowski:** Rock Island money man secretly behind Tim's businesses (fictional). Chapter 2's villain.
 
-### Chapter 1: "Prodigal Son" (Davenport)
+### Chapter 1: "Bro" (Geneseo)
 
-1. **Homecoming.** Flynn gets off the bus downtown; Tim is late, sends Dez. Drive home to the Arnett house (the first safehouse). Teaches driving and the map.
-2. **Billboard Duty.** Someone is defacing Tim's billboards. Drive around Davenport cleaning them, then chase the vandal (a Vance campaign kid) through the Village of East Davenport.
-3. **Repo Man.** Arnett Auto needs a car "repossessed" from a customer in Bettendorf. It turns out the customer paid in full. First robbery-style mission and first wanted level.
-4. **Slip and Fall.** Tim's law firm needs a client. Flynn stages a fender-bender at NorthPark Mall with a hired "victim" who keeps overacting. Comedy chase from mall security and police.
-5. **Night at the Ballpark.** Tim hosts a campaign fundraiser at Modern Woodmen Park. Flynn has to keep a drunk donor away from the press, then deliver a bag of cash he isn't supposed to open. He opens it.
-6. **The Debate.** Mayoral debate at the Adler Theatre. Tim wants Flynn to swap Vance's notes; Flynn finds out the cash bag came from Big Lou. Ends with Tim winning the debate and Flynn knowing his dad is in deep with Rock Island money.
+1. **Cart Thief.** Flynn wakes up and his cart is gone. Tim has it. Chase Tim around Geneseo in the Escape. Teaches driving, the map and the phone; ends with Tim hitting the cart in Flynn's face.
+2. **Dish Pit.** A shift at GBC: a dishwashing minigame that goes off the rails when Tim brings his campaign team in for lunch and stiffs the bill. Flynn has to chase the campaign van down State Street.
+3. **Two Cheeseburger Problem.** The crew does a McDonald's run in the Escape: "everything on the menu." Flynn hits a Vance campaign volunteer in the parking lot, and it's caught on camera. First wanted level.
+4. **Friday Night Lights.** A football game at Bob Reade Field. Tim uses it as a campaign rally. Flynn has to keep Neveah away from Tim's camera crew, then the game turns into a brawl after a rival player talks about Grandma Lorece.
+5. **Trap Day.** Trap shooting practice with the team (the trap-shooting activity from the roadmap). Tim shows up and wants Flynn to "accidentally" shoot down a Vance campaign drone.
+6. **Town Hall.** Mayoral debate in downtown Geneseo by the Central Theatre. Tim wants Flynn to swap Vance's notes. Flynn finds a bag of cash in Tim's car from Big Lou. Tim wins the debate and Flynn realises Dad is in with Rock Island money.
 
-### Chapter 2: "Across the River" (Rock Island, Moline, the river)
+### Chapter 2: "Across the River" (Quad Cities)
 
-1. **Toll Bridge.** Tim sends Flynn over the Centennial Bridge to make a "payment" to Big Lou at The District in Rock Island. Lou says it's short and keeps Flynn's car as interest.
-2. **Rhonda's Range.** Aunt Rhonda gears Flynn up at Arnett Arms and tells him the Arnett Belle has been losing money for years. Weapons and shooting mission.
-3. **John Deere Joyride.** To cover the debt, Lou has Flynn steal a prototype tractor from Deere in Moline (ties into the planned tractor vehicle type). Slow-speed police chase played for laughs.
-4. **Channel Cat.** A meeting on the Channel Cat water taxi goes wrong; Flynn finds out Gloria Vance is also taking Lou's money. Boat and foot chase along the riverfront.
-5. **Belle of the Ball.** Election night party at the Arnett Belle. Flynn and Dez rob Lou's cut out of the casino's own counting room, with Tim's blessing or without it (player chooses).
-6. **Lock and Dam.** Lou's crew chases Flynn up the river to Lock & Dam 15. Big chase, showdown at the lock. Ending: Tim wins the election, Lou is arrested, and in the last scene Tim tells Flynn the feds were tipped off by... Tim, who used his own son as bait. Cliffhanger into Chapter 3.
+1. **Road Trip.** Tim sends Flynn and the crew down I-74 to make a "payment" to Big Lou at The District in Rock Island. Lou says it's short and keeps the Escape as interest. Flynn has to get a new ride.
+2. **Aunt's Range.** Gear up at Arnett Arms (Davenport). Weapons and shooting mission.
+3. **John Deere Joyride.** To cover the debt, Lou has Flynn steal a prototype tractor from Deere in Moline. Slow-speed police chase played for laughs.
+4. **Channel Cat.** A meeting on the Channel Cat water taxi goes wrong; Flynn finds out Vance is on Lou's payroll too. Boat and foot chase on the riverfront.
+5. **Belle of the Ball.** Election night at the Arnett Belle casino. Flynn and the crew rob Lou's cut from the counting room, with or without Tim's blessing (player chooses). Jugs shows up mid-heist.
+6. **Lock and Dam.** Lou's crew chases Flynn to Lock & Dam 15. Showdown at the lock; Flynn gets the Escape back, wrecked. Ending: Tim wins, Lou is arrested, and Tim admits he tipped off the feds and used Flynn as bait. Flynn hits Tim's cart. Cliffhanger into Chapter 3.
 
 ### Still to decide
 
-- Flynn's look (age, hair, clothes) and Tim's look.
-- Which real house is the Arnett house safehouse (for example a McClellan Heights or Prospect Park house in Davenport).
-- Whether the Chapter 2 mission 5 choice changes the ending.
+- What the real Tim and Rebecca are like (job, personality, sayings, look).
+- One line each on Taefyl, Eric, Joshua and Neveah.
+- Which house is the Arnett house in Geneseo (the first safehouse); a street is enough.
+- Flynn's ringtone (something stupid).
+- Where the trap team actually shoots (Bi-State Sportsman's in Colona is the nearest real range found).
 
 ## Planning first (with Dain)
 
