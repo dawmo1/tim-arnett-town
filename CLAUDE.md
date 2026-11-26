@@ -133,7 +133,11 @@ python3 tools/serve.py 8765
 
 - Working branch `claude/modest-mayer-aphv17` (pushed, NOT merged into `main` yet; the live site is unchanged).
 - Merged into it: e-bikes and Arnett Bike docks, detailed car models with LODs, landmark interiors (arena, NorthPark, airport, Deere display building, Circa '21, Old Main, Clock Tower, Watch Tower Lodge; Riverdale HS skipped, outside the map).
-- Merged as WIP: San Andreas-style people + interaction animations (`src/anim.js`); the animations are unfinished. After merging, re-check the e-bike pedalling pose (the hip and knee joints moved down 1.5-2 cm).
+- Merged as WIP: San Andreas-style people + interaction animations (`src/anim.js`); the animations are unfinished.
+  - Confirmed in-game: getting in and out of cars, getting up after a fall.
+  - Built but only seen in previews: doors, counters, sitting, phone, minigame poses, walk styles.
+  - Not done: punching, sitting on outdoor benches, testing the animation sync between players (`s[21]`, `s[22]`).
+  - First thing to check: render the people to confirm the texture-seam fix still holds after the last texture-lookup change. After merging, re-check the e-bike pedalling pose (the hip and knee joints moved down 1.5-2 cm).
 - To do before pushing to `main`:
   - online fixes: passenger-seat race, admin time and weather for everyone, stale event cleanup.
   - Dain must run `cd tools && npm run checks` on the Mac (check-roads needs `tools/cache`).
