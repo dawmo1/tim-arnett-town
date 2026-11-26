@@ -100,7 +100,8 @@ python3 tools/serve.py 8765
 
 ## Story mode (planned, nothing in the game yet)
 
-- No story code exists yet. Dain wants it planned first. The proposed structure is in `docs/story.md`.
+- No story code exists yet. **On hold (Dain, 2026-11-26): online must be fully polished before story mode is worked on.**
+- The chosen premise is version 5, "Dead Dad Walking" (Flynn Arnett, 17, Geneseo; Tim fakes his death), in `docs/story.md`, with open questions for Dain.
 - **The plot is Dain's call.** Plan acts, characters and missions with him before writing any code or content.
 
 ## Roadmap (Dain, 2026-11-25), in no fixed order
