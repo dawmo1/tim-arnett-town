@@ -14,6 +14,7 @@ import { mat } from './character.js';
 import { textTexture } from './util.js';
 import { loadLazy, dropLazy } from './assets.js';
 import { addHall, removeHall } from './interiors.js';
+import { ROOMS } from './landmark-rooms.js';
 import { onRegion } from './regions/index.js';
 
 let scene, ctx;
@@ -44,7 +45,6 @@ function tryBuild(t) {
     ['ballpark', () => near(t, -372, 559) && buildBallpark(-372, 559)],
     ['fountain', () => near(t, 197, -2183) && buildFountain(197, -2183)],
     ['casino', () => near(t, 520, 330) && buildCasino(520)],
-    ['northpark', () => near(t, 290, -4413) && buildRoofSign(290, -4413, 'NORTHPARK', '#ffffff', 22)],
     ['helipad', () => near(t, 150, 120) && buildHelipad()],
     ['marina', () => near(t, 2605, -561) && buildMarina(2605, -561)],
     ['leclaire-boats', () => near(t, -60, 520) && buildMarina(-60, 470)],
@@ -66,7 +66,7 @@ const MODELS = [
     [469.85, 109.2, 6.25, 9.6, 10], [451.6, 109.2, 24.5, 9.6, 40, 10], ...roomWalls(451.6, 109.2, 0, 24, 18.4, 10, [['s', -2, 2]])] }, // lobby (blackhawk_int) behind the 3rd St doors
   { file: 'adler', x: 342.4, z: 91.2, y: 8.6, clear: [[342.4, 91.2, 18, 16.5]], solid: [[342.4, 104.7, 19.7, 5.2, 21, 6.8], [342.4, 86, 19.7, 13.5, 10, 18.5], [327.35, 104.7, 4.65, 5.2, 7],
     [357.45, 104.7, 4.65, 5.2, 7], ...roomWalls(342.4, 104.7, 0, 20, 9.4, 7, [['s', -3, 3], ['n', -4, 4]]), ...roomWalls(342.4, 86.05, 0, 37.8, 25.1, 19, [['s', -4, 4]]),
-    [342.4, 77.5, 18.9, 4.5, 1.1]] }, // lobby + auditorium (adler_int); the stage
+    [342.4, 77.5, 18.9, 4.5, 1.1], [333.35, 92.3, 7.85, 6.3, 1.5], [351.45, 92.3, 7.85, 6.3, 1.5]] }, // lobby + auditorium (adler_int); the stage; the raked seats either side of the centre aisle
   { file: 'figge', x: 109, z: 340, y: 3.4, clear: [[109, 340, 46, 18]], solid: [[109, 340, 46, 18, 19, 7], [66, 340, 4, 18, 7], [152, 340, 4, 18, 7],
     ...roomWalls(109, 340, 0, 78, 36, 7, [['n', -3, 3]]), [141.5, 350, 2.5, 6, 3, 0]] }, // grand lobby (figge_int) from 2nd St; the stair
   { file: 'banktower', x: 141, z: 164.7, y: 8.0, clear: [[141, 164.7, 13.5, 21]], solid: [[141, 164.7, 15.2, 22.9, 68, 14], [141, 179, 15.2, 8.6, 14],
@@ -89,7 +89,7 @@ const MODELS = [
   { file: 'conservatory', x: 196, z: -2394, y: 37.4, clear: [[196, -2394, 15, 8]], solid: [[173, -2394, 14, 12, 4, 4.4], [200, -2394, 12, 12, 6, 9.5], [221.5, -2394, 8.5, 8, 4, 3.9],
     ...roomWalls(173, -2394, 0, 26, 22, 5, [['e', -2, 2]]), ...roomWalls(200, -2394, 0, 22, 22, 10, [['w', -2, 2], ['e', -2, 2]]), ...roomWalls(221.5, -2394, 0, 15, 14, 5, [['w', -2, 2], ['e', -1.5, 1.5]]),
     [200, -2394, 3.2, 3.2, 0.5]] }, // east door -> wings and the palm house (conservatory_int)
-  { file: 'northpark', x: 132, z: -4257, y: 36.9, h: -0.277, clear: [], solid: [[130.6, -4252.2, 15, 5, 17]] }, // the mall's south entrance (the mall is OSM)
+  { file: 'northpark', x: 150, z: -4330, y: 36.2, load: 900, clear: [[150, -4320, 2, 2]], solid: [] }, // the mall shell (replaces the OSM mall; the anchors stay OSM); walls: northpark_int
   { file: 'rivercenter', x: 461, z: 172, y: 5.1, clear: [[461, 172, 40, 20], [513, 157, 8, 12]], solid: [[415.75, 185.5, 14.75, 16.5, 20], [465, 172, 35, 27, 8, 12], [513, 157, 10, 14, 20],
     [421, 130, 2.2, 11.6, 4.2, 6], ...roomWalls(415.5, 155.25, 0, 29, 25.5, 19, [['n', -3, 3], ['e', -3, 3]]), ...roomWalls(465, 172, 0, 70, 54, 13, [['w', -19.75, -13.75]])] }, // atrium + Great River Hall (rivercenter_int)
 ];
@@ -126,9 +126,6 @@ MODELS.push(
   INT('conservatory_int', 196, -2394, 37.4, [['Vander Veer Conservatory', 173, -2394, 26, 22, 4], ['Vander Veer Conservatory', 200, -2394, 22, 22, 8], ['Vander Veer Conservatory', 221.5, -2394, 15, 14, 3.5]]),
 );
 // collision for the big irregular footprints (OSM outlines rasterised into 6-8 m strips by the build script)
-const BOXES_ARENA = [[4787.8,1667.8,4.0,4.0,26],[4795.8,1675.8,12.0,4.0,26],[4779.8,1683.8,36.0,4.0,26],[4767.8,1691.8,56.0,4.0,26],[4767.8,1699.8,56.0,4.0,26],[4767.8,1707.8,56.0,4.0,26],[4767.8,1715.8,64.0,4.0,26],[4767.8,1723.8,64.0,4.0,26],[4767.8,1731.8,64.0,4.0,26],[4767.8,1739.8,64.0,4.0,26],[4763.8,1747.8,52.0,4.0,26],[4827.8,1747.8,4.0,4.0,26],[4763.8,1755.8,52.0,4.0,26],[4759.8,1763.8,48.0,4.0,26],[4771.8,1771.8,28.0,4.0,26],[4779.8,1779.8,4.0,4.0,26]];
-const BOXES_DEERE = [[12760.4,5160.4,21.0,3.0,11],[12760.4,5166.4,27.0,3.0,11],[12757.4,5172.4,30.0,3.0,11],[12754.4,5178.4,27.0,3.0,11],[12742.4,5184.4,15.0,3.0,11],[12739.4,5190.4,12.0,3.0,11],[12739.4,5196.4,12.0,3.0,11],[12739.4,5202.4,12.0,3.0,11],[12736.4,5208.4,15.0,3.0,11],[12736.4,5214.4,15.0,3.0,11],[12736.4,5220.4,15.0,3.0,11],[12736.4,5226.4,15.0,3.0,11],[12730.4,5232.4,9.0,3.0,11],[12724.4,5238.4,3.0,3.0,11]];
-const BOXES_MLI = [...[[5863.1,7631.4,4.0,4.0,12],[5867.1,7639.4,16.0,4.0,12],[5871.1,7647.4,20.0,4.0,12],[5871.1,7655.4,28.0,4.0,12],[5879.1,7663.4,28.0,4.0,12],[5895.1,7671.4,28.0,4.0,12],[5903.1,7679.4,28.0,4.0,12],[5911.1,7687.4,28.0,4.0,12],[5927.1,7695.4,28.0,4.0,12],[5935.1,7703.4,28.0,4.0,12],[5951.1,7711.4,36.0,4.0,12],[5975.1,7719.4,44.0,4.0,12],[5979.1,7727.4,40.0,4.0,12],[5979.1,7735.4,40.0,4.0,12],[5975.1,7743.4,44.0,4.0,12],[5975.1,7751.4,44.0,4.0,12],[5939.1,7759.4,8.0,4.0,12],[5999.1,7759.4,20.0,4.0,12],[5935.1,7767.4,4.0,4.0,12],[5931.1,7775.4,8.0,4.0,12],[5927.1,7783.4,4.0,4.0,12],[5923.1,7791.4,8.0,4.0,12],[5923.1,7799.4,16.0,4.0,12],[5911.1,7807.4,20.0,4.0,12],[5911.1,7815.4,20.0,4.0,12],[5903.1,7823.4,20.0,4.0,12],[5903.1,7831.4,12.0,4.0,12],[5911.1,7839.4,4.0,4.0,12]], ...[[5927.3,7829.3,3.0,3.0,8],[5927.3,7835.3,9.0,3.0,8],[5927.3,7841.3,15.0,3.0,8],[5933.3,7847.3,15.0,3.0,8],[5942.3,7853.3,18.0,3.0,8],[5948.3,7859.3,18.0,3.0,8],[5957.3,7865.3,15.0,3.0,8],[5963.3,7871.3,15.0,3.0,8],[5963.3,7877.3,9.0,3.0,8]], ...[[5800.2,7738.7,6.0,3.0,8],[5806.2,7744.7,12.0,3.0,8],[5806.2,7750.7,18.0,3.0,8],[5809.2,7756.7,21.0,3.0,8],[5818.2,7762.7,18.0,3.0,8],[5824.2,7768.7,18.0,3.0,8],[5830.2,7774.7,18.0,3.0,8],[5842.2,7780.7,18.0,3.0,8],[5848.2,7786.7,18.0,3.0,8],[5854.2,7792.7,18.0,3.0,8],[5860.2,7798.7,18.0,3.0,8],[5872.2,7804.7,18.0,3.0,8],[5875.2,7810.7,15.0,3.0,8],[5875.2,7816.7,9.0,3.0,8]]];
 const BOXES_LOCK = [[1147.4,597.8,111.5,3.1,13,0,0.775],[1119.3,569.2,121.5,3.3,13,0,0.775],[1127.7,505.2,70.8,3.0,13,0,0.775]]; // river wall, middle wall, auxiliary land wall
 // Quad Cities landmarks (roadmap 2). ground: base height from the terrain once the anchor's tile is in (y + dy);
 // halls: walk-in interiors modelled in the GLB (<file>_int) that interiors.js treats as rooms
@@ -157,18 +154,50 @@ MODELS.push(
   // Moline / Rock Island
   { file: 'pavilion', x: 4980, z: 1778, ground: true, clear: [[4980, 1778, 20, 12]], solid: roomWalls(4980.05, 1778.1, 0.4545, 49, 32.2, 12, [['n', -3, 3]]),
     halls: [{ name: 'John Deere Pavilion', kind: 'hall', x: 4980.05, z: 1778.1, w: 49, d: 32.2, rot: 0.4545, ly: 9, light: [0xffffff, 16] }] },
-  { file: 'arena', x: 4770, z: 1725, ground: true, load: 1000, clear: [[4770, 1725, 40, 40]], solid: [...BOXES_ARENA, [4832, 1740, 7, 7, 12]] },
-  { file: 'oldmain', x: 2333, z: 2126.5, ground: true, clear: [[2333, 2126.5, 10, 6]], solid: [[2333, 2126.5, 27, 12, 20]] },
-  { file: 'circa21', x: 337, z: 1545, ground: true, clear: [[337, 1545, 10, 15], [315, 1533, 6, 8]], solid: [[337, 1545, 13.5, 22.5, 18], [315.5, 1533, 8.2, 11, 9]] },
-  { file: 'deerehq', x: 12637, z: 5202, ground: true, load: 900, clear: [[12637, 5202, 40, 12], [12755, 5195, 15, 20]], solid: [[12637.2, 5202.5, 51.5, 17.2, 30], ...BOXES_DEERE] },
+  { file: 'arena', x: 4770, z: 1725, ground: true, load: 1000, clear: [[4770, 1725, 40, 40]], solid: [] }, // walls: arena_int below
+  { file: 'oldmain', x: 2333, z: 2126.5, ground: true, clear: [[2333, 2126.5, 10, 6]], solid: [] }, // walls: oldmain_int
+  { file: 'circa21', x: 337, z: 1545, ground: true, clear: [[337, 1545, 10, 15], [315, 1533, 6, 8]], solid: [[315.5, 1533, 8.2, 11, 9]] }, // the theatre's walls: circa21_int
+  { file: 'deerehq', x: 12637, z: 5202, ground: true, load: 900, clear: [[12637, 5202, 40, 12], [12755, 5195, 15, 20]], solid: [[12637.2, 5202.5, 51.5, 17.2, 30]] }, // display building walls: deerehq_int
   // Arsenal Island: the Clock Tower building, Lock and Dam 15 (roller dam + locks, on the water)
   { file: 'clocktower', x: 1140, z: 778, ground: true, load: 900, clear: [[1147, 778, 12, 12], [1138, 765, 4, 4]],
-    solid: [[1140.9, 778, 28, 9.15, 22, 0, 0.624], [1133.9, 768.3, 3.8, 3.8, 36, 0, 0.624], [1161.8, 769.9, 9, 9, 13, 0, 0.624]] },
+    solid: [[1161.8, 769.9, 9, 9, 13, 0, 0.624]] }, // the main block and the tower: clocktower_int
   { file: 'lockdam', x: 728.65, z: 549.55, y: WATER_Y, load: 1200, clear: [], solid: [[728.65, 549.55, 189.2, 9, 20, 0, -0.683]] },
   { file: 'lock15', x: 1133.45, z: 583.55, y: WATER_Y, load: 1000, clear: [], solid: BOXES_LOCK },
   // Quad Cities International Airport: terminal + concourses, the tower and the Elliott hangar
-  { file: 'mli', x: 5930, z: 7740, ground: true, load: 1500, clear: [[5930, 7735, 60, 60], [5945, 7855, 20, 15], [5835, 7780, 30, 25]], solid: [...BOXES_MLI] },
+  { file: 'mli', x: 5930, z: 7740, ground: true, load: 1500, clear: [[5930, 7735, 60, 60], [5945, 7855, 20, 15], [5835, 7780, 30, 25]], solid: [] }, // walls: mli_int
   { file: 'mlitower', x: 5698, z: 8971, ground: true, load: 1500, clear: [[5698, 8971, 5, 5], [5904, 8990, 30, 60]], solid: [[5698, 8971, 5.2, 5.2, 39], [5904, 8990, 35.5, 65.5, 20]] },
+);
+// Roadmap-5 interiors (assets/src/landmarks_int.py -> <file>_int.glb, src/landmark-rooms.js): built on the same
+// ground height as the exterior, they bring the building's walls (with its real doors open), the people inside and the
+// counters. halls: [{name, x, z, w, d, rot, up, ly, light}] (up: the floor above the anchor's height; null: the builder's own
+// halls from landmark-rooms.js); each hall gets the crowd and counters standing inside it.
+function RINT(file, x, z, halls, load = 280, y) { // y: a fixed base height instead of the ground's
+  const R = ROOMS[file] || { solid: [], crowd: [], spots: [], halls: [] }, hs = (halls || R.halls || []).map((h) => ({ kind: 'hall', rot: 0, ...h, crowd: [], spots: [] }));
+  const owner = (px, pz) => hs.find((h) => { const dx = px - h.x, dz = pz - h.z, c = Math.cos(h.rot), s = Math.sin(h.rot); return Math.abs(dx * c - dz * s) < h.w / 2 && Math.abs(dx * s + dz * c) < h.d / 2; });
+  for (const p of R.crowd) owner(p[0], p[1])?.crowd.push(p);
+  for (const p of R.spots) owner(p[0], p[1])?.spots.push(p);
+  for (const h of hs) { if (!h.crowd.length) h.crowd = null; if (!h.spots.length) h.spots = null; }
+  return { file: file + '_int', x, z, ...(y === undefined ? { ground: true } : { y }), load, clear: [], solid: R.solid, halls: hs };
+}
+MODELS.push(
+  // Vibrant Arena: the rotunda lobby, the ring concourse and the bowl
+  RINT('arena', 4770, 1725, [{ name: 'Vibrant Arena', x: 4780, z: 1725, w: 100, d: 100, up: 0.5, ly: 16, light: [0xfff2dc, 30] },
+    { name: 'Vibrant Arena', x: 4832, z: 1740, w: 16, d: 16, up: 0.5, ly: 9, light: [0xfff2dc, 10] }], 320),
+  // NorthPark Mall: the concourses, centre court, food court, the wing to Von Maur (halls from the builder)
+  RINT('northpark', 150, -4330, null, 450, 36.2),
+  // Quad Cities International Airport: ticketing, baggage claim, the checkpoint, concourses A and B
+  RINT('mli', 5930, 7740, null, 330),
+  // Deere & Company World HQ: the display building (lobby, display floor with the machines and the Girard mural)
+  RINT('deerehq', 12637, 5202, null, 300),
+  // Circa '21 Dinner Playhouse: the lobby and the tiered dinner theatre
+  RINT('circa21', 337, 1545, null, 220),
+  // Augustana's Old Main: the rotunda under the dome, the hall, a classroom and the old library
+  RINT('oldmain', 2333, 2126.5, null, 220),
+  // the Arsenal's Clock Tower Building: tower vestibule, the Corps of Engineers' lobby and corridors
+  RINT('clocktower', 1140, 778, null, 220),
+  // Watch Tower Lodge (Black Hawk State Historic Site; the exterior is the countryside region's model): the great hall
+  // and the Hauberg Indian Museum
+  RINT('lodge', 400, 6560, null, 220),
 );
 const LOAD = 700, DROP = 900;
 for (const L of MODELS) for (const [x, z, hw, hd] of L.clear) lots.extra.push({ x, z, fx: 0, fz: 1, hw, hd });
@@ -211,7 +240,7 @@ function placeModel(L, g) {
     else root.add(o); // moving parts
   }
   scene.add(root); L.obj = root;
-  L.rooms = L.halls?.map((h) => addHall({ ...h, y: L.y + 0.02 }));
+  L.rooms = L.halls?.map((h) => addHall({ ...h, y: L.y + (h.up ?? 0.02) }));
   L.onLoad?.(root);
 }
 let modelT = 0;
@@ -344,16 +373,6 @@ function buildCasino(x0) {
   const gw = group(x, WATER_Y + 1.2, w.z + 12, 0); box(gw, 0x8d6e63, 3, 0.3, 26, 0, 0, 0); box(gw, 0x5d4037, 0.1, 1, 26, 1.4, 0.6, 0); box(gw, 0x5d4037, 0.1, 1, 26, -1.4, 0.6, 0);
   casino.x = x; casino.z = z; casino.door = { x: w.x, z: w.z - 3 };
   ctx.onCasino?.(casino.door, Math.PI);
-  return true;
-}
-
-// ---------- signs on real landmarks ----------
-function buildRoofSign(x, z, text, color, size = 14) { // big letters on the roof of the tallest building at (x, z)
-  let top = W.roofAt(x, z); if (!isFinite(top)) top = terrainHeight(x, z) + 12;
-  const g = group(x, top, z, 0);
-  const s = signMesh([text], size, size / 7, { w: 1024, h: 146, bg: 'rgba(0,0,0,0)', fg: color, size: 110, glow: 1.6 }); s.position.y = size / 14 + 1.2; s.material.transparent = true; g.add(s);
-  const s2 = s.clone(); s2.rotation.y = Math.PI / 2; g.add(s2);
-  box(g, 0x424242, size, 0.2, 0.2, 0, 1, 0);
   return true;
 }
 

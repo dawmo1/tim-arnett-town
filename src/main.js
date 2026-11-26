@@ -2448,7 +2448,7 @@ initEmergency(scene, {
   extinguish: (v) => { v.burnAt = 0; v.burnBy = ''; fx.stopFire(v.fire); v.fire = null; v.hp = Math.max(v.hp, -v.T.hp * 0.3); writeVeh(v, true); },
 });
 interior.initInteriors(scene);
-initVenues({ openShop });
+initVenues({ openShop, clothingItems });
 phone.initPhone({
   player: () => ({ x: me.veh ? me.veh.x : me.x, z: me.veh ? me.veh.z : me.z, dead: me.dead, inVeh: !!me.veh, inRoom: !!interior.room, speed: me.veh ? Math.abs(me.veh.speed || 0) : 0 }),
   waypoint: () => waypoint,
@@ -2584,6 +2584,7 @@ function seatPeople(dt) {
 
 // Sky, weather, lights, wildlife and ambience. Runs in the menu too.
 function updateWorldLife(dt, nowMs, t) {
+  weather.indoors = !!interior.room;
   const thunder = updateDayNight(dt, adm.clockFrozen ?? nowMs + adm.clockOff, camera.position); // admin time cheats (local only)
   if (thunder) setTimeout(() => fx.soundThunder(0.6 + Math.random() * 0.4), thunder * 1000);
   const n = weather.night;

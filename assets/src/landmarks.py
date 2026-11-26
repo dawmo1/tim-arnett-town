@@ -130,7 +130,7 @@ class Kit:
         for p in me.polygons:
             self.face([M4 @ me.vertices[i].co for i in p.vertices], col, m)
 
-    def text(self, s, L, u, h, d, size, col, m=NEON, depth=0.15, align='CENTER', res=2, bold=0.0):
+    def text(self, s, L, u, h, d, size, col, m=NEON, depth=0.15, align='CENTER', res=2, bold=0.0, front=False):
         """letters standing in frame L: baseline centre at (u, h), front at d (facing +d)"""
         cu = bpy.data.curves.new('t', 'FONT')
         cu.body = s
@@ -148,6 +148,8 @@ class Kit:
         M4.translation = o
         cnt = 0
         for p in me.polygons:
+            if front and p.normal.z < 0.9:
+                continue  # front=True: only the letters' faces (painted-on signs: a fraction of the triangles)
             self.face([M4 @ (me.vertices[i].co + Vector((0, 0, depth / 2))) for i in p.vertices], col, m)
             cnt += 1
         ob.evaluated_get(dg).to_mesh_clear()
@@ -1799,56 +1801,7 @@ def conservatory(render=True):
 B['conservatory'] = conservatory
 
 
-# ================================================================ NORTHPARK MALL entrance
-# The mall itself stays the OSM building; this is its south entrance off the Kimberly Road lot: a tall
-# glazed gable between brick towers, the lit NORTHPARK name, and a drive-up canopy. Back face at y = 0.
-def northpark(render=True):
-    K = Kit(161)
-    brick, cream, glass, steel = lin('#a8634a'), lin('#e6dccb'), lin('#3a5566'), lin('#d0d0d0')
-    w, d = 15.0, 10.0
-    for x in (-w, w - 5):  # brick towers
-        K.box(x, x + 5, -d, 0, -3, 14, brick)
-        K.box(x - 0.2, x + 5.2, -d - 0.2, 0.2, 14, 14.8, cream)
-        F = lambda u, h, dd, x=x: (x + u, -d - dd, h)
-        for h in (2, 6.5, 10):
-            K.quad(F, 1.5, 3.5, h, h + 2.5, 0.02, glass, GLASS)
-    # glazed gable between them
-    gx0, gx1 = -w + 5, w - 5
-    F = lambda u, h, dd: (gx0 + u, -d + 1 - dd, h)
-    Wd = gx1 - gx0
-    K.face([F(0, 0, 0), F(Wd, 0, 0), F(Wd, 12, 0), F(Wd / 2, 17, 0), F(0, 12, 0)], glass, LIT)
-    for k in range(9):
-        u = k * Wd / 8
-        top = 12 + 5 * (1 - abs(u - Wd / 2) / (Wd / 2))
-        K.obox(F, u - 0.1, u + 0.1, 0, top, 0, 0.15, steel, BODY, ('d-',))
-    for h in (3.5, 7, 10.5):
-        K.obox(F, 0, Wd, h - 0.08, h + 0.08, 0, 0.15, steel, BODY, ('d-',))
-    for sgn in (-1, 1):  # roof slopes
-        K.oface([Vector((gx0 if sgn < 0 else gx1, -d + 1, 12)), Vector((0, -d + 1, 17)), Vector((0, 0, 17)), Vector((gx0 if sgn < 0 else gx1, 0, 12))], Vector((0, -d / 2, 0)), lin('#5b5f63'))
-    # name over the entrance
-    K.box(-11, 11, -d - 0.6, -d + 1, 14.8, 17.0, cream, BODY, ())
-    K.text('NORTHPARK', lambda u, h, dd: (u, -d - 0.6 - dd, h), 0, 15.2, 0.0, 1.9, lin('#c8102e'), NEON, 0.12, bold=0.02)
-    # entrance doors and drive-up canopy on columns
-    K.quad(F, 3, Wd - 3, 0, 3.2, 0.05, lin('#ffe6b8'), LIT)
-    K.box(-9, 9, -d - 8, -d + 1, 4.6, 5.2, cream, BODY, ())
-    K.face([(-8.8, -d - 7.8, 4.59), (-8.8, -d + 0.8, 4.59), (8.8, -d + 0.8, 4.59), (8.8, -d - 7.8, 4.59)], lin('#fff1c4'), LIT)
-    for x in (-8.4, 8.4):
-        K.cyl(x, -d - 7.4, 0.35, -1, 4.6, cream, BODY, 8)
-    lod0 = K.obj('northpark_lod0')
-    K1 = Kit(162)
-    K1.box(-w, w, -d, 0, -3, 14.8, brick)
-    K1.quad(F, 0, Wd, 0, 12, 0.3, glass, LIT)
-    K1.box(-11, 11, -d - 0.6, -d + 1, 14.8, 17.0, cream, BODY, ())
-    K1.text('NORTHPARK', lambda u, h, dd: (u, -d - 0.6 - dd, h), 0, 15.2, 0.0, 1.9, lin('#c8102e'), NEON, 0.12, res=1)
-    K1.box(-9, 9, -d - 8, -d + 1, 4.6, 5.2, cream, BODY, ())
-    lod1 = K1.obj('northpark_lod1')
-    res = finish('northpark', [lod0, lod1], None)
-    if render:
-        res['png'] = shots('northpark', (0, -8, 7), 55, lod1, views=((20, 10),))
-    return res
-
-
-B['northpark'] = northpark
+# (NORTHPARK MALL: the whole mall shell and its interior are in landmarks_int.py)
 
 
 # ================================================================ QUAD CITIES (roadmap 2): shared bits
@@ -2792,7 +2745,10 @@ def adler_int(render=True):
     for r in range(16):
         y = sy - 3.5 - r * 0.95
         z = 0.05 + r * 0.18
-        K.box(ax0 + 1, ax1 - 1, y - 0.95, y, 0, z, lin('#4c1420'))
+        if y - 0.95 < ay0:
+            break  # the back row stops at the rear wall (the lobby is behind it)
+        for a, b in ((ax0 + 1, (ax0 + ax1) / 2 - 1.2), ((ax0 + ax1) / 2 + 1.2, ax1 - 1)):  # the centre aisle stays open
+            K.box(a, b, y - 0.95, y, 0, z, lin('#4c1420'))
         for a, b in ((ax0 + 2, (ax0 + ax1) / 2 - 1.2), ((ax0 + ax1) / 2 + 1.2, ax1 - 2)):
             seats(K, a, b, y - 0.4, z, wine)
     # the balcony over the back (south) third
@@ -3294,12 +3250,18 @@ def arena(render=True):
     char, purple, white, roofc, glass = lin('#6b6e73'), lin('#5b2c83'), lin('#e8e8e8'), lin('#2c2f36'), lin('#3a5566')
     K = Kit(611)
     H = 24.0
+    rx, ry = G(4832, 1740)
     for i, L, Ln, mid in sides(P):
-        K.quad(L, 0, Ln, -3, H, 0, char)
-        K.quad(L, 0, Ln, 4.0, 5.2, 0.03, purple)
+        # up to the rotunda's height the wall stops where it runs inside the glass drum (the lobby opens into the concourse)
+        cut = [u for u in [k * Ln / 40 for k in range(41)] if math.hypot(L(u, 0, 0)[0] - rx, L(u, 0, 0)[1] - ry) < 8.0]
+        spans = [(0, Ln)] if not cut else [s for s in ((0, min(cut)), (max(cut), Ln)) if s[1] - s[0] > 0.05]
+        for a, b in spans:
+            K.quad(L, a, b, -3, 12.0, 0, char)
+            K.quad(L, a, b, 4.0, 5.2, 0.03, purple)
+            if b - a > 6:
+                K.quad(L, a + 0.5, b - 0.5, 0.4, 3.6, 0.04, glass, LIT)
+        K.quad(L, 0, Ln, 12.0, H, 0, char)
         K.quad(L, 0, Ln, H - 3.0, H, 0.05, white)
-        if Ln > 6:
-            K.quad(L, 0.5, Ln - 0.5, 0.4, 3.6, 0.04, glass, LIT)
     K.prism(P, H - 0.1, H, roofc, sides=False)
     # the bowl's roof rises in a shallow dome over the round part
     cx, cy = G(4780, 1725)
@@ -3310,10 +3272,17 @@ def arena(render=True):
     rooftop_junk(K, *G(4725, 1725), H, K.rnd, 4, 10)
     # glass rotunda entrance (east) with a dark cone roof and the name on the rim facing it
     rx, ry = G(4832, 1740)
-    K.cyl(rx, ry, 8, -3, 12, glass, LIT, 12)
+    for k in range(12):  # the drum, with the doors to the plaza in its east bay (arena_int is behind them)
+        a0, a1 = -math.pi / 12 + k * math.pi / 6, math.pi / 12 + k * math.pi / 6
+        L, Ln = frame((rx + math.cos(a0) * 8, ry + math.sin(a0) * 8), (rx + math.cos(a1) * 8, ry + math.sin(a1) * 8))
+        K.quad(L, 0, Ln, 3.9 if k == 0 else -3, 12, 0, glass, LIT)
+        if k == 0:
+            K.quad(L, 0, Ln, -3, 0.5, 0, lin('#555555'))
+            K.obox(L, -0.2, Ln + 0.2, 3.4, 3.9, 0, 1.6, white, BODY, ())  # canopy over the doors
+    K.cyl(rx, ry, 8, 12, 12.01, roofc, BODY, 12, a0=-math.pi / 12)
     K.cyl(rx, ry, 8.4, 12, 18, roofc, BODY, 12, r1=1.0)
     for k in range(12):
-        a = k * math.pi / 6
+        a = k * math.pi / 6 + math.pi / 12
         K.box(rx + math.cos(a) * 8.05 - 0.15, rx + math.cos(a) * 8.05 + 0.15, ry + math.sin(a) * 8.05 - 0.15, ry + math.sin(a) * 8.05 + 0.15, 0, 12, white)
     for (gx, gz) in ((4806, 1677), (4813, 1764), (4776, 1779), (4790, 1665)):
         sx, sy = G(gx, gz)
@@ -3373,7 +3342,18 @@ def clocktower(render=True):
     # the tower: 7.6 m square on the front centre, clock stage, pyramid roof
     tw = 3.8
     T = rpoly(R, -tw, tw, -d / 2 - 2 * tw + 1.0, -d / 2 + 1.0)
+    fr = R(0, -d / 2 - 2 * tw + 1.0)
     for i, L, Ln, mid in sides(T):
+        if math.hypot(mid[0] - fr[0], mid[1] - fr[1]) < 0.5:  # the tower's front: the arched door (clocktower_int behind it)
+            K.quad(L, 0, Ln / 2 - 1.3, -3, 27.0, 0, lime)
+            K.quad(L, Ln / 2 + 1.3, Ln, -3, 27.0, 0, lime)
+            K.quad(L, Ln / 2 - 1.3, Ln / 2 + 1.3, 3.7, 27.0, 0, lime)
+            K.quad(L, Ln / 2 - 1.3, Ln / 2 + 1.3, -3, 0.5, 0, lime2)
+            for k in range(7):  # voussoirs round the arch
+                a0, a1 = math.pi * k / 7, math.pi * (k + 1) / 7
+                K.obox(lambda u, h, dd: L(Ln / 2 + u, 3.2 + h, dd), math.cos(a1) * 1.6, math.cos(a0) * 1.6, math.sin(a0) * 0.5, math.sin(a0) * 0.5 + 0.5, 0, 0.12, lime2, BODY, ('d-',))
+            windows(K, L, 1.6, Ln - 1.6, 7.0, 5.0, 3, 1, lime, wf=0.5, hf=0.6, rec=0.4, edge=0, lit=0.3)
+            continue
         K.quad(L, 0, Ln, -3, 27.0, 0, lime)
         windows(K, L, 1.6, Ln - 1.6, 2.0, 5.0, 4, 1, lime, wf=0.5, hf=0.6, rec=0.4, edge=0, lit=0.3)
         belt(K, L, 0, Ln, 22.0, lime2, 0.3, 0.6)
@@ -3399,6 +3379,9 @@ def clocktower(render=True):
     for i, L, Ln, mid in sides(Wg):
         windows(K, L, 0.6, Ln - 0.6, 0, 4.2, 3, max(1, round(Ln / 3.4)), lime, wf=0.45, hf=0.6, rec=0.3, lit=0.3)
     roof(K, Wg, 12.6, slate)
+    # the way in: through the main front behind the tower, and the tower's back wall (clocktower_int)
+    cut_door(K, R(-w / 2, -d / 2), R(w / 2, -d / 2), w / 2 - 3.4, w / 2 + 3.4, 0.4, 6.4)
+    cut_door(K, R(-tw, -d / 2 + 1.0), R(tw, -d / 2 + 1.0), 0.2, 2 * tw - 0.2, 0.4, 6.4)
     lod0 = K.obj('clocktower_lod0')
     K1 = Kit(622)
     K1.prism(P, -3, eave, lime, top=False)
@@ -3636,7 +3619,14 @@ def circa21(render=True):
     H = 14.5
     for i, L, Ln, mid in sides(Pf):
         front = mid[1] > yF - 1.0
-        K.quad(L, 0, Ln, -3, H, 0, brick)
+        dg = door_gap(L, Ln, G(*CIRCA_DOOR), 1.8) if front else None
+        if dg:  # the doors under the marquee (circa21_int behind them)
+            K.quad(L, 0, dg[0], -3, H, 0, brick)
+            K.quad(L, dg[1], Ln, -3, H, 0, brick)
+            K.quad(L, dg[0], dg[1], 4.0, H, 0, brick)
+            K.quad(L, dg[0], dg[1], -3, 0.12, 0, tc)
+        else:
+            K.quad(L, 0, Ln, -3, H, 0, brick)
         if Ln > 6:
             nb = max(1, round(Ln / 3.6))
             windows(K, L, 0.8, Ln - 0.8, 4.6, 4.4, 2, nb, brick, wf=0.55, hf=0.6, rec=0.25, lit=0.5, sill=tc, head=tc)
@@ -3677,6 +3667,8 @@ def circa21(render=True):
                 storefront(K, L, 0.4, Ln - 0.4, 0, 4.0, lin('#2a2a2a'), 3)
                 K.text('SPEAKEASY', L, Ln / 2, 4.3, 0.15, 0.6, lin('#ff4f9a'), NEON, 0.05, res=1)
     roof(K, Ps, 9.0, roofc, par=lin('#9a5a44'), parh=0.6)
+    # the lobby opens into the house through the wall between the front block and the auditorium (circa21_int)
+    cut_door(K, G(325.7, 1534.0), G(349.8, 1534.0), 333.0 - 325.7, 341.0 - 325.7, -0.5, 4.4)
     lod0 = K.obj('circa21_lod0')
     K1 = Kit(662)
     K1.prism(Pf, -3, H, brick, topcol=roofc)
@@ -3722,26 +3714,34 @@ def deerehq(render=True):
     K.prism(P, -6, 0, lin('#3a2a20'), top=False)
     # display building east
     D_ = ccw([G(12744.7, 5157.4), G(12785.7, 5160.7), G(12784.0, 5181.5), G(12755.2, 5179.2), G(12751.3, 5227.4), G(12721.4, 5240.3), G(12726.6, 5175.7)])
+    DZ = DEERE_DZ  # the display building stands on the hill east of the ravine, 14 m above the anchor (deerehq_int)
     for i, L, Ln, mid in sides(D_):
-        K.quad(L, 0, Ln, -3, 10.7, -0.5, bronze, GLASS)
+        dg = door_gap(L, Ln, G(*DEERE_DOOR), 2.0)
+        if dg:  # the visitors' doors at the east end
+            K.quad(L, 0, dg[0], DZ - 14, DZ + 10.7, -0.5, bronze, GLASS)
+            K.quad(L, dg[1], Ln, DZ - 14, DZ + 10.7, -0.5, bronze, GLASS)
+            K.quad(L, dg[0], dg[1], DZ + 3.2, DZ + 10.7, -0.5, bronze, GLASS)
+            K.obox(L, dg[0] - 0.5, dg[1] + 0.5, DZ + 3.2, DZ + 3.5, -0.5, 2.5, cor, BODY, ())
+        else:
+            K.quad(L, 0, Ln, DZ - 14, DZ + 10.7, -0.5, bronze, GLASS)
         for h in (4.6, 10.2):
-            K.obox(L, -0.3, Ln + 0.3, h, h + 0.5, -0.5, 0.9, cor, BODY, ('d-',))
+            K.obox(L, -0.3, Ln + 0.3, DZ + h, DZ + h + 0.5, -0.5, 0.9, cor, BODY, ('d-',))
         for k in range(int(Ln // 6) + 1):
             u = min(Ln, k * 6)
-            K.obox(L, u - 0.3, u + 0.3, -3, 10.7, -0.2, 0.5, cor, BODY, ('h-',))
-    roof(K, D_, 10.7, roofc)
+            K.obox(L, u - 0.3, u + 0.3, DZ - 14, DZ + 10.7, -0.2, 0.5, cor, BODY, ('h-',))
+    roof(K, D_, DZ + 10.7, roofc)
     # glass bridge on the 4th floor
     bx0, by0 = G(12689, 5200)
     bx1, by1 = G(12728, 5200)
-    K.box(bx0, bx1, by0 - 2, by0 + 2, 12, 15.5, bronze, GLASS, ())
-    K.box(bx0, bx1, by0 - 2.2, by0 + 2.2, 15.5, 16.0, cor, BODY, ())
+    K.box(bx0, bx1, by0 - 2, by0 + 2, 16, 19.5, bronze, GLASS, ())
+    K.box(bx0, bx1, by0 - 2.2, by0 + 2.2, 19.5, 20.0, cor, BODY, ())
     lod0 = K.obj('deerehq_lod0')
     K1 = Kit(672)
     K1.prism(P, -6, H, bronze, topcol=roofc)
     for i, L, Ln, mid in sides(P):
         for f in range(nfl):
             K1.quad(L, 0, Ln, f * fh + fh - 0.5, f * fh + fh, 0.05, cor)
-    K1.prism(D_, -3, 10.7, bronze, topcol=roofc)
+    K1.prism(D_, DEERE_DZ - 14, DEERE_DZ + 10.7, bronze, topcol=roofc)
     lod1 = K1.obj('deerehq_lod1')
     res = finish('deerehq', [lod0, lod1], anchor)
     if render:
@@ -3769,11 +3769,35 @@ def mli(render=True):
     for poly, H, rc in ((T, 11.0, roofc), (A_, 7.0, lin('#c9ccd0')), (B_, 7.0, lin('#c9ccd0'))):
         P = ccw([G(*p) for p in poly])
         for i, L, Ln, mid in sides(P):
-            K.quad(L, 0, Ln, -3, H, 0, wall)
             n = outward(L)
+            land = poly is T and n.y > 0.3
+            gaps = []
+            if land and Ln > 8:  # the doors to the curb (MLI_DOORS, landmarks_int.py): open below 3.4 m
+                o, ux_ = Vector(L(0, 0, 0)), (Vector(L(1, 0, 0)) - Vector(L(0, 0, 0)))
+                for gx, gz in MLI_DOORS:
+                    c = Vector((*G(gx, gz), 0))
+                    t = (c - o).dot(ux_)
+                    if 1 < t < Ln - 1 and ((c - o) - ux_ * t).length < 1.5:
+                        gaps.append(t)
+            if gaps:
+                K.quad(L, 0, Ln, 3.4, H, 0, wall)
+                ed = [0] + [x for t in sorted(gaps) for x in (t - 2.2, t + 2.2)] + [Ln]
+                for k in range(0, len(ed), 2):
+                    K.quad(L, ed[k], ed[k + 1], -3, 3.4, 0, wall)
+            else:
+                K.quad(L, 0, Ln, -3, H, 0, wall)
             if Ln > 8:
-                land = poly is T and n.y > 0.3
-                K.quad(L, 0.5, Ln - 0.5, 0.4 if land else 3.0, H - 1.2 if land else 5.6, 0.03, glass, LIT)
+                if gaps:
+                    cuts = sorted(gaps)
+                    K.quad(L, 0.5, Ln - 0.5, 3.4, H - 1.2, 0.03, glass, LIT)
+                    edges = [0.5] + [x for t in cuts for x in (t - 2.2, t + 2.2)] + [Ln - 0.5]
+                    for k in range(0, len(edges), 2):
+                        K.quad(L, edges[k], edges[k + 1], 0.4, 3.4, 0.03, glass, LIT)
+                    for t in cuts:
+                        K.quad(L, t - 2.2, t + 2.2, -3, 0.4, 0.03, lin('#666666'))
+                        K.obox(L, t - 2.6, t + 2.6, 3.4, 3.7, 0, 1.2, lin('#2b2b2b'), BODY, ())
+                else:
+                    K.quad(L, 0.5, Ln - 0.5, 0.4 if land else 3.0, H - 1.2 if land else 5.6, 0.03, glass, LIT)
                 if land:
                     for k in range(int(Ln // 3) + 1):
                         u = min(Ln - 0.5, 0.5 + k * 3)
@@ -3793,6 +3817,10 @@ def mli(render=True):
     K.text('QUAD CITIES INTERNATIONAL AIRPORT', F_, 60, 7.2, 0.55, 1.6, lin('#ffffff'), NEON, 0.1, res=1)
     for k in range(6):
         K.cyl(*F_(25 + k * 15, 0, 8.0)[:2], 0.35, 0, 4.2, white, BODY, 8)
+    # where the concourses join the hub, the walls between them open up (mli_int)
+    for a, b, u0, u1 in (((132.1, 147.9), (132.2, 126.0), 0.0, 21.9), ((137.2, 142.1), (132.2, 126.0), 0.0, 16.9),
+                         ((168.7, 121.5), (169.4, 142.0), 0.0, 20.5), ((161.9, 92.2), (169.4, 142.0), 29.6, 50.4)):
+        cut_door(K, G(*MLI_G(*a)), G(*MLI_G(*b)), u0, u1, -0.5, 6.0)
     lod0 = K.obj('mli_lod0')
     K1 = Kit(682)
     for poly, H, rc in ((T, 11.0, roofc), (A_, 7.0, lin('#c9ccd0')), (B_, 7.0, lin('#c9ccd0'))):
@@ -3850,3 +3878,7 @@ def mlitower(render=True):
 
 
 B['mlitower'] = mlitower
+
+
+# roadmap-5 interiors (Moline, Rock Island, Arsenal, airport, NorthPark, Black Hawk): their own file
+exec(open(ROOT + 'assets/src/landmarks_int.py').read(), globals())

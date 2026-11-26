@@ -178,7 +178,7 @@ export function updateDayNight(dt, nowMs, cam) {
   if (envT <= 0) { envT = 2.5; refreshEnvLight(); }
 
   // rain streaks around the camera
-  rain.visible = sky.rain > 0.05;
+  rain.visible = sky.rain > 0.05 && !sky.indoors; // indoors: main.js sets it while you stand in a room
   if (rain.visible) {
     const count = Math.floor(RAIN_N * sky.rain);
     rain.geometry.setDrawRange(0, count * 2);
@@ -192,7 +192,7 @@ export function updateDayNight(dt, nowMs, cam) {
     rain.geometry.attributes.position.needsUpdate = true;
   }
   // snowflakes around the camera
-  snowP.visible = sky.snowing > 0.05;
+  snowP.visible = sky.snowing > 0.05 && !sky.indoors;
   if (snowP.visible) {
     const count = Math.floor(SNOW_N * sky.snowing), t = nowMs / 1000;
     snowP.geometry.setDrawRange(0, count);

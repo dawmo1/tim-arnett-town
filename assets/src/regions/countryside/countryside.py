@@ -118,6 +118,9 @@ def lodge(render=True):
     K.box(mx + 4, mx + 6.4, cy1 - 0.05, cy1 + 0.25, 0, 3.0, TIMBER)
     K.box(mx + 6.8, mx + 11.2, cy1 + 0.1, cy1 + 0.3, 3.2, 4.1, TIMBER)
     K.text('WATCH TOWER LODGE', SF(mx + 9, cy1 + 0.31), 0, 3.42, 0, 0.42, lin('#e8dcc0'), BODY, 0.03)
+    # the doorway from the great hall into the Hauberg museum through the shared wall (landmarks/lodge_int.glb)
+    a, b = G(378.0, 6578.0), G(378.0, 6546.7)
+    cut_door(K, a, b, 6578.0 - 6557.2, 6578.0 - 6555.2, -0.5, 3.4)
     lod0 = K.obj('lodge_lod0')
 
     K1 = Kit(202, ao=4.0)

@@ -59,7 +59,7 @@ export function fetchTile(tx, tz) {
   if (pending.has(key)) return pending.get(key);
   const ox = tx * TILE, oz = tz * TILE;
   const p = Promise.all([rawTile(key), lotsReady(ox + TILE / 2, oz + TILE / 2), loadRegionsNear(ox + TILE / 2, oz + TILE / 2)]).then(([j]) => {
-    const t = { key, tx, tz, ox, oz, h: decodeHeights(j), c: decodeClasses(j), b: regionNames(clearLots(j.b, ox, oz), ox, oz), t: j.t, k: j.k, e: j.e.filter((id) => G.edges[id]), p: j.p || {}, l: j.l || {}, a: j.a || {}, used: performance.now() };
+    const t = { key, tx, tz, ox, oz, h: decodeHeights(j), c: decodeClasses(j), b: regionNames(clearLots(j.b, ox, oz), ox, oz), t: clearTrees(j.t, ox, oz), k: j.k, e: j.e.filter((id) => G.edges[id]), p: j.p || {}, l: j.l || {}, a: j.a || {}, used: performance.now() };
     tiles.set(key, t); pending.delete(key);
     return t;
   }).catch((e) => { pending.delete(key); throw e; });
@@ -112,6 +112,18 @@ function regionNames(b, ox, oz) {
 }
 // a region model's `clear` boxes knock the OSM buildings under it out of the tiles, like the landmarks' (lots.extra)
 onRegion((r) => { for (const L of r.models) for (const [x, z, hw, hd] of L.clear) { const lot = { x, z, fx: 0, fz: 1, hw, hd }; lots.extra.push(lot); if (lots.list) lots.list.push(lot); } });
+// and the trees standing where a landmark or region model clears the ground (they'd grow through its rooms)
+function clearTrees(tr, ox, oz) {
+  if (!tr || !tr.length) return tr || [];
+  const near = lots.extra.filter((L) => lotNear(L, ox, oz));
+  if (!near.length) return tr;
+  const out = [];
+  for (let i = 0; i < tr.length; i += 4) {
+    const x = tr[i] + ox, z = tr[i + 1] + oz;
+    if (!near.some((L) => Math.abs((x - L.x) * L.fz - (z - L.z) * L.fx) < L.hw && Math.abs((x - L.x) * L.fx + (z - L.z) * L.fz) < L.hd)) out.push(tr[i], tr[i + 1], tr[i + 2], tr[i + 3]);
+  }
+  return out;
+}
 function clearLots(b, ox, oz) {
   const near = (lots.list || lots.extra).filter((L) => lotNear(L, ox, oz));
   if (!near.length) return b;
