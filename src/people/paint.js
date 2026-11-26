@@ -6,11 +6,14 @@
 // Body UVs: u = region + local u, v = local v (see assets/src/people.py).
 import * as THREE from 'three';
 
+// 8 x 12 cells: the first 64 are the original layout, the rest hold the newer faces, tops, bottoms and hats
+export const ROWS = 12;
 export const CELL = {
-  face: (f, scared) => (scared ? 10 : 0) + f, ski: 20, tim: 21, mascotFace: 22, skin: 23, hair: 24, hat: 25, hatPolice: 26,
-  fixed: 27, tattoo: 28, shoeBoot: 31, top: (i) => 32 + i, bottom: (i) => 52 + i, shoe: (i) => (i === 2 ? 31 : 62 + i),
+  face: (f, scared) => (f < 10 ? (scared ? 10 : 0) + f : 64 + (f - 10) * 2 + (scared ? 1 : 0)), ski: 20, tim: 21, mascotFace: 22, skin: 23, hair: 24, hat: 25, hatPolice: 26,
+  fixed: 27, tattoo: 28, shoeBoot: 31, top: (i) => (i < 20 ? 32 + i : 72 + i - 20), bottom: (i) => (i < 10 ? 52 + i : 82 + i - 10), shoe: (i) => (i === 2 ? 31 : 62 + i),
+  trucker: 84,
 };
-const S = 256, N = 8, SIZE = S * N;
+const S = 256, N = 8, SIZE = S * N, SIZEY = S * ROWS;
 const A = 255, B = 204, K = 153, F = 102;
 
 let g, m; // colour + mask contexts
@@ -18,7 +21,17 @@ let ox = 0, oy = 0; // current cell origin
 const rnd = mulberry(1234);
 function mulberry(a) { return () => { a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 const gray = (v) => `rgb(${v},${v},${v})`;
-const X = (u) => ox + u * S, Y = (v) => oy + (1 - v) * S;
+// each cell keeps a PAD border (filled by stretching its edge pixels) so mipmaps don't bleed in the neighbouring cell
+export const PAD = 0.06;
+const X = (u) => ox + (PAD + u * (1 - 2 * PAD)) * S, Y = (v) => oy + (PAD + (1 - v) * (1 - 2 * PAD)) * S;
+function bleed(c, cols, rows) {
+  const p = Math.round(PAD * S), q = S - 2 * p;
+  for (let r = 0; r < rows; r++) for (let k = 0; k < cols; k++) {
+    const x = k * S, y = r * S;
+    c.drawImage(c.canvas, x + p, y, 1, S, x, y, p, S); c.drawImage(c.canvas, x + p + q - 1, y, 1, S, x + p + q, y, p, S);
+    c.drawImage(c.canvas, x, y + p, S, 1, x, y, S, p); c.drawImage(c.canvas, x, y + p + q - 1, S, 1, x, y + p + q, S, p);
+  }
+}
 function cell(i) { ox = (i % N) * S; oy = Math.floor(i / N) * S; }
 // paint a shape into both canvases: col = css colour (or grey level 0-255), lvl = mask level
 function paint(lvl, col, fn) {
@@ -26,7 +39,8 @@ function paint(lvl, col, fn) {
   g.strokeStyle = g.fillStyle; m.strokeStyle = m.fillStyle;
   fn(g); fn(m);
 }
-const rect = (lvl, col, u0, v0, u1, v1) => paint(lvl, col, (c) => c.fillRect(X(u0), Y(v1), X(u1) - X(u0), Y(v0) - Y(v1)));
+// (snapped to whole pixels: anti-aliased edges between two fills would blend mask levels into a different tint)
+const rect = (lvl, col, u0, v0, u1, v1) => paint(lvl, col, (c) => { const x0 = Math.round(X(u0)), y0 = Math.round(Y(v1)); c.fillRect(x0, y0, Math.round(X(u1)) - x0, Math.round(Y(v0)) - y0); });
 const ell = (lvl, col, u, v, ru, rv, rot = 0) => paint(lvl, col, (c) => { c.beginPath(); c.ellipse(X(u), Y(v), ru * S, rv * S, rot, 0, 7); c.fill(); });
 const line = (lvl, col, pts, w) => paint(lvl, col, (c) => { c.lineWidth = w; c.lineCap = 'round'; c.lineJoin = 'round'; c.beginPath(); pts.forEach(([u, v], i) => (i ? c.lineTo(X(u), Y(v)) : c.moveTo(X(u), Y(v)))); c.stroke(); });
 const poly = (lvl, col, pts) => paint(lvl, col, (c) => { c.beginPath(); pts.forEach(([u, v], i) => (i ? c.lineTo(X(u), Y(v)) : c.moveTo(X(u), Y(v)))); c.closePath(); c.fill(); });
@@ -70,7 +84,13 @@ const FACE = [ // eye spacing, eye size, brow thick, nose width, lip width, lip 
   { es: 0.11, ez: 1.08, bt: 0.8, nw: 0.95, lw: 1.05, lf: 1.3, age: 0, stub: 0, iris: '#2b1b12', fem: 1 },
   { es: 0.104, ez: 1.15, bt: 0.7, nw: 0.85, lw: 0.9, lf: 1.0, age: 0.1, stub: 0, iris: '#3c79a8', fem: 1 },
   { es: 0.108, ez: 1.0, bt: 0.85, nw: 0.95, lw: 1.0, lf: 0.9, age: 0.8, stub: 0, iris: '#5a4a35', fem: 1 },
+  // 10 teen boy (smooth, no stubble, a few freckles), 11 teen girl, 12 older man (lined, heavy brows), 13 woman with freckles
+  { es: 0.11, ez: 1.08, bt: 0.95, nw: 0.92, lw: 0.95, lf: 0.85, age: 0, stub: 0, iris: '#3f6f9a', teen: 1, freck: 0.5 },
+  { es: 0.11, ez: 1.14, bt: 0.7, nw: 0.85, lw: 0.92, lf: 1.05, age: 0, stub: 0, iris: '#4b3524', fem: 1, teen: 1 },
+  { es: 0.112, ez: 0.88, bt: 1.6, nw: 1.15, lw: 1.05, lf: 0.75, age: 1.2, stub: 0.4, iris: '#5d7183' },
+  { es: 0.112, ez: 1.05, bt: 0.8, nw: 0.9, lw: 1.0, lf: 1.1, age: 0.15, stub: 0, iris: '#58703f', fem: 1, freck: 1 },
 ];
+for (const f of FACE) f.es = 0.112 + (f.es - 0.106) * 0.4; // eyes sit in the sculpted sockets (people.py)
 // face cell coordinates (u around the head, 0.5 = front; v up). Key heights:
 const EYE = 0.54, BROW = 0.6, NOSE = 0.45, MOUTH = 0.37, CHIN = 0.27;
 function faceBase() {
@@ -80,10 +100,10 @@ function faceBase() {
   radial(0.5, 0.72, 0.28, 'rgba(255,255,255,0.18)');
   radial(0.5, 0.46, 0.22, 'rgba(255,255,255,0.12)');
   grad(0.5, 0, 0.5, 0.3, [[0, 'rgba(60,30,20,0.4)'], [1, 'rgba(0,0,0,0)']]);
-  for (const s of [-1, 1]) radial(0.5 + s * 0.2, 0.55, 0.08, 'rgba(70,40,30,0.25)');
+  for (const s of [-1, 1]) radial(0.5 + s * 0.2, 0.55, 0.08, 'rgba(70,40,30,0.18)');
 }
 function eye(cu, v, f, scared, s) {
-  const w = 0.054 * f.ez * (scared ? 1.1 : 1), h = 0.026 * f.ez * (scared ? 1.45 : 1);
+  const w = 0.062 * f.ez * (scared ? 1.1 : 1), h = 0.032 * f.ez * (scared ? 1.45 : 1);
   radial(cu, v + 0.004, 0.08, 'rgba(60,30,30,0.4)'); // socket shadow
   if (f.fem) radial(cu, v + 0.012, 0.045, 'rgba(120,70,110,0.25)'); // eye shadow
   ell(F, '#ece8e2', cu, v, w, h);
@@ -91,12 +111,12 @@ function eye(cu, v, f, scared, s) {
   ell(F, '#0d0b0a', cu + s * 0.002, v - 0.001, h * 0.42, h * 0.42);
   ell(F, '#ffffff', cu + s * 0.002 - 0.006, v + 0.006, h * 0.22, h * 0.22);
   // upper lid + lashes, lower lid
-  line(F, f.fem ? '#120c0a' : '#2a1a14', [[cu - w, v - 0.002], [cu - w * 0.4, v + h * 0.95], [cu + w * 0.4, v + h * 0.95], [cu + w, v - 0.002]], f.fem ? 4.5 : 3.2);
+  line(F, f.fem ? '#120c0a' : '#2a1a14', [[cu - w, v - 0.002], [cu - w * 0.4, v + h * 0.95], [cu + w * 0.4, v + h * 0.95], [cu + w, v - 0.002]], f.fem ? 6 : 5);
   if (f.fem) line(F, '#120c0a', [[cu + s * w, v + 0.002], [cu + s * (w + 0.012), v + 0.012]], 2);
   line(K, 200, [[cu - w * 0.8, v - h * 0.9], [cu + w * 0.8, v - h * 0.9]], 1.4);
 }
 function brow(cu, v, f, scared, angry, s) {
-  const t = 7 * f.bt, w = 0.064;
+  const t = 10 * f.bt, w = 0.07;
   const inner = scared ? 0.025 : angry ? -0.02 : 0, outer = scared ? -0.005 : angry ? 0.012 : 0.004;
   line(B, f.fem ? 95 : 70, [[cu - s * w, v + inner], [cu, v + 0.012 + (inner + outer) / 2], [cu + s * w, v + outer]], t);
 }
@@ -123,11 +143,12 @@ function paintFace(i, scared) {
     brow(cu, BROW, f, scared, false, s);
   }
   // nose: shadow on the sides, highlight down the ridge, nostrils
+  // (the nose is sculpted: only a little colour at the tip and the nostrils)
   const nw = 0.034 * f.nw;
-  radial(0.5 - nw, NOSE + 0.02, 0.05, 'rgba(70,35,25,0.45)'); radial(0.5 + nw, NOSE + 0.02, 0.05, 'rgba(70,35,25,0.45)');
-  line(K, 255, [[0.5, NOSE + 0.07], [0.5, NOSE + 0.005]], 3);
-  for (const s of [-1, 1]) ell(K, 120, 0.5 + s * nw * 0.55, NOSE - 0.012, 0.011, 0.007);
-  radial(0.5, NOSE - 0.03, 0.045, 'rgba(60,30,20,0.4)');
+  radial(0.5, NOSE, 0.03, 'rgba(190,80,70,0.12)');
+  for (const s of [-1, 1]) ell(K, 110, 0.5 + s * nw * 0.5, NOSE - 0.016, 0.009, 0.005);
+  if (f.freck) for (let k = 0; k < 160 * f.freck; k++) { const u = 0.5 + (rnd() - 0.5) * 0.36, v = 0.42 + rnd() * 0.12; if (Math.abs(u - 0.5) < 0.03 && v > 0.47) continue; ell(K, 150 + rnd() * 30, u, v, 0.0025, 0.0025); }
+  if (f.teen) radial(0.5, 0.45, 0.2, 'rgba(255,255,255,0.06)');
   line(K, 200, [[0.48, CHIN + 0.035], [0.52, CHIN + 0.035]], 2);
   // cheeks
   for (const s of [-1, 1]) radial(0.5 + s * 0.1, 0.45, 0.07, f.fem ? 'rgba(220,90,90,0.3)' : 'rgba(200,90,80,0.15)');
@@ -199,7 +220,8 @@ function shirtCollar(lvl = A, col = 238) { for (const s of [-1, 1]) poly(lvl, co
 function cuffs(v = 0.0, h = 0.05, lvl = A, col = 200) { for (const [a0, a1] of [ARM_L, ARM_R]) rect(lvl, col, a0, v, a1, v + h); }
 function pocket(u, v, w = 0.05, h = 0.07, lvl = A, col = 210) { rect(lvl, col, u - w / 2, v - h, u + w / 2, v); stitch([[u - w / 2, v], [u - w / 2, v - h], [u + w / 2, v - h], [u + w / 2, v]]); }
 function text(str, u, v, size, col = '#fff', lvl = F, font = 'Arial Black') {
-  for (const c of [g, m]) { c.save(); c.font = `900 ${size * S}px ${font}, Impact`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillStyle = c === g ? col : gray(lvl); c.fillText(str, X(u), Y(v)); c.restore(); }
+  // (u runs right-to-left across the front of the body and hats, so text is drawn mirrored to read the right way)
+  for (const c of [g, m]) { c.save(); c.font = `900 ${size * S}px ${font}, Impact`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillStyle = c === g ? col : gray(lvl); c.translate(X(u), Y(v)); c.scale(-1, 1); c.fillText(str, 0, 0); c.restore(); }
 }
 function reflective(v0, v1, col = '#d8dbe0', armsToo = true) {
   rect(F, col, 0, v0, 0.6, v1);
@@ -207,7 +229,7 @@ function reflective(v0, v1, col = '#d8dbe0', armsToo = true) {
   shade((c) => { c.fillStyle = 'rgba(255,255,255,0.35)'; c.fillRect(X(0), Y(v1), X(0.6) - X(0), 2); });
 }
 const TOP_PAINT = {
-  tee: () => { topBase(A, 228, 0.3); collar(K, 232, 0.035); line(A, 205, [[0.24, 1], [0.3, 0.955], [0.36, 1]], 4); if (rnd() < 2) { rect(B, 220, 0.25, 0.62, 0.35, 0.78); } for (const [a0, a1] of [ARM_L, ARM_R]) darken(a0, 0.7, a1, 0.72, 0.2); },
+  tee: () => { topBase(A, 228, 0.3); collar(K, 232, 0.035); line(A, 205, [[0.24, 1], [0.3, 0.955], [0.36, 1]], 4); for (const [a0, a1] of [ARM_L, ARM_R]) darken(a0, 0.7, a1, 0.72, 0.2); },
   tank: () => { topBase(A, 228, 0); for (const s of [0, 0.45]) rect(K, 232, s, 0.82, s + 0.15, 1); vneck(0.12); },
   polo: () => { topBase(A, 225, 0.3); shirtCollar(B, 230); placket(); buttons('#f4f2ec', 3, 0.94, 0.78); cuffs(0.7, 0.04, B, 225); },
   shirt_s: () => { topBase(A, 232, 0.3); shirtCollar(); placket(); buttons(); pocket(0.37, 0.8); },
@@ -226,7 +248,26 @@ const TOP_PAINT = {
   hivis: () => { topBase(B, 228, 0.3); rect(A, 235, 0.0, 0.05, 0.6, 0.93); vneck(0.15, B, 228); reflective(0.3, 0.36, '#e4e6e8', false); reflective(0.5, 0.56, '#e4e6e8', false); for (const u of [0.22, 0.38]) rect(F, '#e4e6e8', u - 0.02, 0.56, u + 0.02, 0.93); },
   varsity: () => { topBase(A, 220, 1); for (const [a0, a1] of [ARM_L, ARM_R]) rect(B, 238, a0, 0.06, a1, 1); cuffs(0, 0.06, A, 200); for (let k = 0; k < 3; k++) rect(B, 240, 0, 0.015 + k * 0.025, 0.6, 0.025 + k * 0.025); text('D', 0.38, 0.78, 0.13, '#ffffff', B); buttons('#e8e6e0', 5, 0.9, 0.12); collar(B, 240, 0.04); },
   coat: () => { topBase(A, 210, 1); rect(A, 195, 0.28, 0.0, 0.32, 1); buttons('#2a2a2a', 5, 0.88, 0.2); for (let k = 0; k < 5; k++) ell(F, '#2a2a2a', 0.36, 0.88 - k * 0.17, 0.006, 0.006); shirtCollar(B, 235); pocket(0.18, 0.35, 0.08, 0.02, A, 175); pocket(0.42, 0.35, 0.08, 0.02, A, 175); cuffs(0, 0.06, A, 185); },
-  mascot: () => { rect(F, '#8c8f94', 0, 0, 1, 1); noise(0.4, 2); ell(F, '#d9d4cb', 0.3, 0.45, 0.14, 0.35); for (let k = 0; k < 400; k++) shade((c) => { c.fillStyle = `rgba(255,255,255,${rnd() * 0.15})`; c.fillRect(ox + rnd() * S, oy + rnd() * S, 1, 4); }); },
+  mascot: () => { rect(F, '#8c8f94', 0, 0, 1, 1); noise(0.4, 2); ell(F, '#d9d4cb', 0.3, 0.45, 0.14, 0.35); for (let k = 0; k < 400; k++) shade((c) => { c.fillStyle = `rgba(255,255,255,${rnd() * 0.15})`; c.fillRect(ox + rnd() * S, oy + rnd() * S, 1, 4); }); },  // ---- newer tops (appended to TOPS) ----
+  puffer: () => { topBase(A, 226, 1); for (let k = 0; k < 9; k++) { const v = k * 0.115; shade((c) => { const gr = c.createLinearGradient(0, Y(v + 0.115), 0, Y(v)); gr.addColorStop(0, 'rgba(255,255,255,0.18)'); gr.addColorStop(0.5, 'rgba(0,0,0,0)'); gr.addColorStop(0.92, 'rgba(0,0,0,0.3)'); gr.addColorStop(1, 'rgba(0,0,0,0.5)'); c.fillStyle = gr; c.fillRect(ox, Y(v + 0.115), S, Y(v) - Y(v + 0.115)); }); } line(F, '#2a2a2a', [[0.3, 0.98], [0.3, 0.02]], 2.5); rect(B, 230, 0.27, 0.9, 0.33, 1); cuffs(0, 0.05, F, '#1d1d1f'); rect(F, '#1d1d1f', 0, 0, 0.6, 0.04); },
+  denim: () => { topBase(A, 214, 1); shade((c) => { c.fillStyle = 'rgba(255,255,255,0.07)'; for (let k = 0; k < 500; k++) c.fillRect(ox + rnd() * S, oy + rnd() * S, 1, 3); }); shirtCollar(A, 200); placket(); buttons('#b08d57', 6); for (const u of [0.2, 0.4]) { pocket(u, 0.82, 0.08, 0.1, A, 205); line(A, 196, [[u - 0.06, 0.65], [u - 0.06, 0.05]], 1.5); stitch([[u - 0.06, 0.65], [u - 0.06, 0.05]]); } rect(A, 205, 0, 0, 0.6, 0.07); cuffs(0, 0.07, A, 205); stitch([[0, 0.07], [0.6, 0.07]]); },
+  jersey: () => { topBase(A, 230, 0.32); vneck(0.1, B, 235); for (const [a0, a1] of [ARM_L, ARM_R]) { rect(B, 235, a0, 0.72, a1, 0.76); rect(B, 235, a0, 0.79, a1, 0.81); } text('23', 0.3, 0.6, 0.2, '#fff', B, 'Arial Black'); text('23', 0.05, 0.55, 0.16, '#fff', B); text('23', 0.55, 0.55, 0.16, '#fff', B); text('QC', 0.3, 0.84, 0.06, '#fff', B); for (const s of [0.15, 0.45]) rect(B, 238, s - 0.008, 0.0, s + 0.008, 0.9); },
+  scrubs: () => { topBase(A, 232, 0.3); vneck(0.16, K, 232); line(A, 205, [[0.24, 1], [0.3, 0.84], [0.36, 1]], 3); pocket(0.38, 0.8, 0.06, 0.08, A, 215); line(F, '#e8e8e8', [[0.37, 0.82], [0.37, 0.74]], 2); rect(A, 215, 0, 0, 0.6, 0.05); },
+  apron: () => { topBase(B, 228, 0.3); collar(K, 232, 0.035); rect(A, 225, 0.17, 0.0, 0.43, 0.78); poly(A, 225, [[0.2, 0.78], [0.4, 0.78], [0.37, 0.98], [0.23, 0.98]]); for (const u of [0.0, 0.5]) rect(A, 215, u + 0.02, 0.35, u + 0.08, 0.38); pocket(0.3, 0.42, 0.18, 0.12, A, 210); text('HY-WAY', 0.3, 0.68, 0.045, '#fff', F); line(F, '#d03a2f', [[0.22, 0.62], [0.38, 0.62]], 2); stitch([[0.17, 0.0], [0.17, 0.78], [0.43, 0.78], [0.43, 0.0]]); },
+  chore: () => { topBase(A, 212, 1); noise(0.18, 0.7); shirtCollar(B, 200); for (let k = 0; k < 14; k++) line(B, 185, [[0.22 + k * 0.012, 1], [0.22 + k * 0.012, 0.93]], 1); placket(); buttons('#3a2a1a', 5, 0.9, 0.2); for (const u of [0.18, 0.42]) { pocket(u, 0.38, 0.1, 0.13, A, 200); pocket(u, 0.82, 0.07, 0.09, A, 200); } cuffs(0, 0.05, A, 195); for (const [a0, a1] of [ARM_L, ARM_R]) radial((a0 + a1) / 2, 0.5, 0.06, 'rgba(0,0,0,0.15)'); },
+  graphic: () => { topBase(A, 228, 0.3); collar(K, 232, 0.035); line(A, 205, [[0.24, 1], [0.3, 0.955], [0.36, 1]], 4); text('QUAD', 0.3, 0.8, 0.065, '#fff', B); text('CITIES', 0.3, 0.72, 0.065, '#fff', B); for (let k = 0; k < 3; k++) line(B, 235, [[0.2, 0.62 - k * 0.03], [0.25, 0.64 - k * 0.03], [0.3, 0.62 - k * 0.03], [0.35, 0.64 - k * 0.03], [0.4, 0.62 - k * 0.03]], 3); for (const [a0, a1] of [ARM_L, ARM_R]) darken(a0, 0.7, a1, 0.72, 0.2); },
+  camo: () => { topBase(A, 205, 1); for (let k = 0; k < 70; k++) ell(B, 215, rnd(), rnd(), 0.02 + rnd() * 0.05, 0.015 + rnd() * 0.03, rnd() * 3); for (let k = 0; k < 50; k++) ell(F, '#3a3222', rnd(), rnd(), 0.015 + rnd() * 0.035, 0.01 + rnd() * 0.025, rnd() * 3); for (let k = 0; k < 40; k++) ell(F, '#6b6a3e', rnd(), rnd(), 0.015 + rnd() * 0.03, 0.01 + rnd() * 0.02, rnd() * 3); line(F, '#2a2a2a', [[0.3, 0.98], [0.3, 0.02]], 2); shirtCollar(F, '#3e3a2a'); rect(F, '#e0782c', 0, 0.52, 0.6, 0.56); },
+  cardigan: () => { topBase(A, 220, 1); for (let k = 0; k < 60; k++) shade((c) => { c.fillStyle = 'rgba(0,0,0,0.05)'; c.fillRect(ox + rnd() * S, oy, 1, S); }); poly(B, 232, [[0.24, 1], [0.36, 1], [0.33, 0.45], [0.27, 0.45]]); for (const s_ of [-1, 1]) line(A, 200, [[0.3 + s_ * 0.06, 1], [0.3 + s_ * 0.03, 0.45], [0.3 + s_ * 0.03, 0]], 5); buttons('#d8cfc0', 4, 0.42, 0.08); rect(A, 195, 0, 0, 0.6, 0.06); cuffs(0, 0.07, A, 195); },
+  torn: () => { // a worn-out tee: rips showing skin, a ragged hem, grime
+    topBase(A, 222, 0.26); collar(K, 232, 0.04); line(A, 200, [[0.24, 1], [0.3, 0.95], [0.36, 1]], 3);
+    for (const [u, v, r] of [[0.22, 0.42, 0.03], [0.4, 0.62, 0.022], [0.05, 0.3, 0.028], [0.52, 0.2, 0.03], [0.33, 0.12, 0.02], [0.64, 0.83, 0.02]]) {
+      const pts = []; for (let k = 0; k < 9; k++) { const a = (k / 9) * Math.PI * 2, rr = r * (0.6 + rnd() * 0.7); pts.push([u + Math.cos(a) * rr, v + Math.sin(a) * rr * 1.4]); }
+      poly(K, 232, pts); shade((c) => { c.strokeStyle = 'rgba(0,0,0,0.35)'; c.lineWidth = 1.5; c.beginPath(); pts.forEach(([pu, pv], i) => (i ? c.lineTo(X(pu), Y(pv)) : c.moveTo(X(pu), Y(pv)))); c.closePath(); c.stroke(); });
+    }
+    const hem = [[0, 0]]; for (let k = 0; k <= 24; k++) hem.push([k / 40, 0.02 + rnd() * 0.06]); hem.push([0.6, 0]); poly(K, 232, hem);
+    for (let k = 0; k < 14; k++) radial(rnd() * 0.6, rnd(), 0.03 + rnd() * 0.04, 'rgba(70,55,35,0.25)');
+    for (const [a0, a1] of [ARM_L, ARM_R]) { const sl = []; for (let k = 0; k <= 8; k++) sl.push([a0 + (a1 - a0) * k / 8, 0.74 + rnd() * 0.03]); sl.push([a1, 0.7]); sl.push([a0, 0.7]); poly(K, 232, sl); }
+  },
 };
 // ---------------- bottoms (pelvis band v 0.8..1 around; legs: left u 0..0.5, right 0.5..1, v 0 ankle .. 0.8 hip) ----------------
 const KNEE = 0.376;
@@ -248,7 +289,8 @@ const BOT_PAINT = {
   work: () => { botBase(A, 205); belt('#3b2a18', '#999'); for (const l0 of [0, 0.5]) { rect(F, '#d8dbe0', l0, 0.07, l0 + 0.5, 0.11); rect(A, 190, l0 + 0.18, 0.33, l0 + 0.32, 0.42); } },
   fire: () => { botBase(F, '#5e5135'); noise(0.2); for (const l0 of [0, 0.5]) { rect(F, '#e8e070', l0, 0.12, l0 + 0.5, 0.17); rect(F, '#d8dbe0', l0, 0.17, l0 + 0.5, 0.19); } rect(F, '#2a2a2a', 0, 0.93, 1, 1); },
   skirt: () => { botBase(A, 220, 0.5); for (const l0 of [0, 0.5]) { darken(l0, 0.5, l0 + 0.5, 0.52, 0.3); for (let k = 0; k < 5; k++) line(A, 205, [[l0 + 0.05 + k * 0.1, 0.78], [l0 + 0.05 + k * 0.1, 0.52]], 2); } rect(A, 200, 0, 0.95, 1, 1); },
-  mascot: () => { rect(F, '#8c8f94', 0, 0, 1, 1); noise(0.4, 2); for (let k = 0; k < 400; k++) shade((c) => { c.fillStyle = `rgba(255,255,255,${rnd() * 0.15})`; c.fillRect(ox + rnd() * S, oy + rnd() * S, 1, 4); }); rect(F, '#5a3b26', 0, 0, 1, 0.08); },
+  mascot: () => { rect(F, '#8c8f94', 0, 0, 1, 1); noise(0.4, 2); for (let k = 0; k < 400; k++) shade((c) => { c.fillStyle = `rgba(255,255,255,${rnd() * 0.15})`; c.fillRect(ox + rnd() * S, oy + rnd() * S, 1, 4); }); rect(F, '#5a3b26', 0, 0, 1, 0.08); },  leggings: () => { botBase(A, 214, 0.06); rect(A, 200, 0, 0.95, 1, 1); for (const l0 of [0, 0.5]) { radial(l0 + 0.25, 0.55, 0.14, 'rgba(255,255,255,0.18)'); radial(l0 + 0.25, 0.25, 0.1, 'rgba(255,255,255,0.12)'); } },
+  scrubs: () => { botBase(A, 226); rect(A, 210, 0, 0.94, 1, 1); line(F, '#eee', [[0.5, 0.96], [0.49, 0.86]], 2); for (const l0 of [0, 0.5]) { pocket(l0 + 0.1, 0.6, 0.1, 0.1, A, 215); rect(A, 205, l0, 0, l0 + 0.5, 0.03); } },
 };
 // ---------------- shoes (left u 0..0.5, right 0.5..1; within a shoe u goes round from the sole; v heel..toe) ----------------
 function shoe(kind) {
@@ -291,6 +333,13 @@ function paintHat(police) {
   ell(B, 240, 0.5, 0.62, 0.07, 0.07); // logo patch on the front
   rect(A, 205, 0, 0.0, 1, 0.12);
 }
+function paintTrucker() { // mesh-back seed cap: solid front panel with a patch, mesh behind, coloured brim
+  rect(B, 238, 0, 0, 1, 1);
+  shade((c) => { c.fillStyle = 'rgba(0,0,0,0.22)'; for (let y = 0; y < S; y += 4) for (let x = (y / 4) % 2 * 2; x < S; x += 4) c.fillRect(ox + x, oy + y, 2, 2); });
+  rect(A, 225, 0.32, 0.25, 0.68, 1); noise(0.1); rect(A, 215, 0, 0, 1, 0.16);
+  ell(F, '#f4f1e6', 0.5, 0.58, 0.11, 0.08); text('QC SEED', 0.5, 0.6, 0.045, '#2f7a3f', F); paint(F, '#e8c547', (c) => { c.beginPath(); c.ellipse(X(0.5), Y(0.53), 0.02 * S, 0.01 * S, 0, 0, 7); c.fill(); });
+  for (let k = 1; k < 6; k++) stitch([[k / 6, 1], [k / 6, 0.3]]);
+}
 function paintFixed() {
   rect(F, '#1b1c1f', 0, 0.5, 0.5, 1); radial(0.18, 0.85, 0.12, 'rgba(255,255,255,0.25)'); // black plastic / dark lenses
   rect(F, '#7c838a', 0.5, 0.5, 1, 1); // metal
@@ -311,12 +360,13 @@ function paintTattoo() {
 
 export function paintAtlas(size = SIZE) {
   const cv = document.createElement('canvas'), mk = document.createElement('canvas');
-  cv.width = cv.height = mk.width = mk.height = SIZE;
+  cv.width = mk.width = SIZE; cv.height = mk.height = SIZEY;
   g = cv.getContext('2d'); m = mk.getContext('2d');
-  m.fillStyle = '#000'; m.fillRect(0, 0, SIZE, SIZE);
-  g.fillStyle = '#ccc'; g.fillRect(0, 0, SIZE, SIZE);
+  m.fillStyle = '#000'; m.fillRect(0, 0, SIZE, SIZEY);
+  g.fillStyle = '#ccc'; g.fillRect(0, 0, SIZE, SIZEY);
   noiseCanvas = makeNoise();
-  for (let i = 0; i < 10; i++) { cell(CELL.face(i, false)); paintFace(i, false); cell(CELL.face(i, true)); paintFace(i, true); }
+  for (let i = 0; i < FACE.length; i++) { cell(CELL.face(i, false)); paintFace(i, false); cell(CELL.face(i, true)); paintFace(i, true); }
+  cell(CELL.trucker); paintTrucker();
   cell(CELL.ski); paintSkiMask(); cell(CELL.tim); paintTimMask(); cell(CELL.mascotFace); paintMascotFace();
   cell(CELL.skin); paintSkin(); cell(CELL.hair); paintHair(); cell(CELL.hat); paintHat(false); cell(CELL.hatPolice); paintHat(true);
   cell(CELL.fixed); paintFixed(); cell(CELL.tattoo); paintTattoo();
@@ -324,21 +374,23 @@ export function paintAtlas(size = SIZE) {
   tops.forEach((k, i) => { cell(CELL.top(i)); TOP_PAINT[k](); });
   Object.keys(BOT_PAINT).forEach((k, i) => { cell(CELL.bottom(i)); BOT_PAINT[k](); });
   ['sneaker', 'dress', 'boot'].forEach((k, i) => { cell(CELL.shoe(i)); shoe(k); });
+  for (const c of [g, m]) { c.save(); c.imageSmoothingEnabled = false; bleed(c, N, ROWS); c.restore(); }
   // combine colour + mask into one RGBA texture (canvas alpha would be premultiplied and lose colour)
   let cw = cv, mw = mk;
+  const sizeY = size * ROWS / N;
   if (size !== SIZE) {
-    cw = document.createElement('canvas'); mw = document.createElement('canvas'); cw.width = cw.height = mw.width = mw.height = size;
-    cw.getContext('2d').drawImage(cv, 0, 0, size, size); const mctx = mw.getContext('2d'); mctx.imageSmoothingEnabled = false; mctx.drawImage(mk, 0, 0, size, size);
+    cw = document.createElement('canvas'); mw = document.createElement('canvas'); cw.width = mw.width = size; cw.height = mw.height = sizeY;
+    cw.getContext('2d').drawImage(cv, 0, 0, size, sizeY); const mctx = mw.getContext('2d'); mctx.imageSmoothingEnabled = false; mctx.drawImage(mk, 0, 0, size, sizeY);
   }
-  const cd = cw.getContext('2d').getImageData(0, 0, size, size).data, md = mw.getContext('2d').getImageData(0, 0, size, size).data;
-  const out = new Uint8Array(size * size * 4);
-  for (let y = 0; y < size; y++) {
-    const src = y * size * 4, dst = (size - 1 - y) * size * 4; // flip: canvas top = v 1
+  const cd = cw.getContext('2d').getImageData(0, 0, size, sizeY).data, md = mw.getContext('2d').getImageData(0, 0, size, sizeY).data;
+  const out = new Uint8Array(size * sizeY * 4);
+  for (let y = 0; y < sizeY; y++) {
+    const src = y * size * 4, dst = (sizeY - 1 - y) * size * 4; // flip: canvas top = v 1
     for (let x = 0; x < size * 4; x += 4) {
       out[dst + x] = cd[src + x]; out[dst + x + 1] = cd[src + x + 1]; out[dst + x + 2] = cd[src + x + 2]; out[dst + x + 3] = md[src + x];
     }
   }
-  const t = new THREE.DataTexture(out, size, size, THREE.RGBAFormat);
+  const t = new THREE.DataTexture(out, size, sizeY, THREE.RGBAFormat);
   t.colorSpace = THREE.SRGBColorSpace; t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter;
   t.anisotropy = 4; t.needsUpdate = true;
   t.userData.debugCanvas = cv;

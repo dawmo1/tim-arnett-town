@@ -2152,7 +2152,9 @@ const HAIR_COLS = [['Black', 0], ['Dark brown', 1], ['Brown', 3], ['Auburn', 4],
 const NAMES = { tee: 'T-shirt', tank: 'Tank top', polo: 'Polo', shirt_s: 'Short-sleeve shirt', shirt_l: 'Dress shirt & tie', hoodie: 'Hoodie', zip: 'Zip jacket', suit: 'Suit jacket', sweater: 'Sweater', flannel: 'Flannel', track: 'Track jacket', blouse: 'Blouse', varsity: 'Varsity jacket', coat: 'Winter coat', hivis: 'Hi-vis vest',
   jeans: 'Jeans', slacks: 'Slacks', shorts: 'Shorts', cargo: 'Cargo pants', sweats: 'Sweatpants', skirt: 'Skirt', sneaker: 'Sneakers', dress: 'Dress shoes', boot: 'Boots',
   short: 'Short', crew: 'Crew cut', buzz: 'Buzz cut', curly: 'Curly', afro: 'Afro', mohawk: 'Mohawk', balding: 'Bald patch', long: 'Long', bob: 'Bob', shoulder: 'Shoulder length', pony: 'Ponytail', bun: 'Bun', dreads: 'Dreadlocks',
-  cap: 'Baseball cap', beanie: 'Beanie', hard: 'Hard hat', full: 'Full beard', goatee: 'Goatee', mustache: 'Mustache', shades: 'Sunglasses', clear: 'Glasses', ski: 'Ski mask', tim: 'Tim Arnett mask' };
+  cap: 'Baseball cap', beanie: 'Beanie', hard: 'Hard hat', full: 'Full beard', goatee: 'Goatee', mustache: 'Mustache', shades: 'Sunglasses', clear: 'Glasses', ski: 'Ski mask', tim: 'Tim Arnett mask',
+  puffer: 'Puffer jacket', denim: 'Denim jacket', jersey: 'Sports jersey', scrubs: 'Scrubs', chore: 'Work jacket', graphic: 'Quad Cities tee', camo: 'Camo hunting jacket', cardigan: 'Cardigan', torn: 'Torn T-shirt', leggings: 'Leggings',
+  trucker: 'Seed cap', cowboy: 'Cowboy hat', bucket: 'Bucket hat', sidepart: 'Side part', slick: 'Slicked back', fade: 'Skin fade', pixie: 'Pixie cut', wavy: 'Long waves', braids: 'Braids', manbun: 'Man bun', chinstrap: 'Chin strap', boxed: 'Short beard' };
 function setLook(look) {
   me.look = look;
   const g = me.ch.g, pos = g.position.clone(), rot = g.rotation.y;
@@ -2162,22 +2164,22 @@ function setLook(look) {
 function clothingItems() {
   const L = () => normLook(me.look).slice();
   const items = [], put = (label, price, k, v, sub) => items.push({ label, sub, price, buy: () => { const l = L(); for (let i = 0; i < k.length; i++) l[k[i]] = v[i]; setLook(l); } });
-  for (const n of ['tee', 'tank', 'polo', 'shirt_s', 'shirt_l', 'hoodie', 'zip', 'suit', 'sweater', 'flannel', 'track', 'blouse', 'varsity', 'coat', 'hivis']) put(`Top: ${NAMES[n]}`, 40, [6], [TOPS.indexOf(n)]);
+  for (const n of ['tee', 'tank', 'polo', 'shirt_s', 'shirt_l', 'hoodie', 'zip', 'suit', 'sweater', 'flannel', 'track', 'blouse', 'varsity', 'coat', 'hivis', 'puffer', 'denim', 'jersey', 'scrubs', 'chore', 'graphic', 'camo', 'cardigan', 'torn']) put(`Top: ${NAMES[n]}`, 40, [6], [TOPS.indexOf(n)]);
   for (const [n, c] of COLS) put(`Top colour: ${n}`, 10, [7], [c]);
   for (const [n, c] of COLS) put(`Second colour: ${n}`, 10, [8], [c], 'Stripes, collars, the shirt under a jacket');
-  for (const n of ['jeans', 'slacks', 'shorts', 'cargo', 'sweats', 'skirt']) put(`Bottoms: ${NAMES[n]}`, 40, [9], [BOTTOMS.indexOf(n)]);
+  for (const n of ['jeans', 'slacks', 'shorts', 'cargo', 'sweats', 'skirt', 'leggings', 'scrubs']) put(`Bottoms: ${NAMES[n]}`, 40, [9], [BOTTOMS.indexOf(n)]);
   for (const [n, c] of [['Denim', 4], ['Light denim', 19], ['Black', 1], ['Grey', 2], ['Khaki', 11], ['Brown', 13], ['Olive', 10], ['White', 0]]) put(`Bottoms colour: ${n}`, 10, [10], [c]);
   for (const n of ['sneaker', 'dress', 'boot']) put(`Shoes: ${NAMES[n]}`, 30, [11], [SHOES.indexOf(n)]);
   for (const [n, c] of [['White', 0], ['Black', 1], ['Brown', 12], ['Red', 7], ['Blue', 5]]) put(`Shoe colour: ${n}`, 10, [12], [c]);
-  for (const n of ['cap', 'beanie', 'hard']) put(`Hat: ${NAMES[n]}`, 25, [13], [HATS.indexOf(n)]);
+  for (const n of ['cap', 'beanie', 'hard', 'trucker', 'cowboy', 'bucket']) put(`Hat: ${NAMES[n]}`, 25, [13], [HATS.indexOf(n)]);
   for (const [n, c] of COLS.slice(0, 8)) put(`Hat colour: ${n}`, 5, [14], [c]);
   put('No hat', 0, [13], [0]);
   for (const n of ['shades', 'clear']) put(NAMES[n], 20, [15], [GLASSES.indexOf(n)]);
   put('No glasses', 0, [15], [0]);
-  for (const n of ['short', 'crew', 'buzz', 'curly', 'afro', 'mohawk', 'long', 'bob', 'shoulder', 'pony', 'bun', 'dreads', 'balding']) put(`Barber: ${NAMES[n]}`, 25, [4], [HAIRS.indexOf(n)]);
+  for (const n of ['short', 'crew', 'buzz', 'curly', 'afro', 'mohawk', 'long', 'bob', 'shoulder', 'pony', 'bun', 'dreads', 'balding', 'sidepart', 'slick', 'fade', 'pixie', 'wavy', 'braids', 'manbun']) put(`Barber: ${NAMES[n]}`, 25, [4], [HAIRS.indexOf(n)]);
   put('Barber: Shave it all off', 15, [4], [0]);
   for (const [n, c] of HAIR_COLS) put(`Hair dye: ${n}`, 15, [5], [c]);
-  for (const n of ['full', 'goatee', 'mustache']) put(`Barber: ${NAMES[n]}`, 15, [16], [BEARDS.indexOf(n)]);
+  for (const n of ['full', 'goatee', 'mustache', 'chinstrap', 'boxed']) put(`Barber: ${NAMES[n]}`, 15, [16], [BEARDS.indexOf(n)]);
   put('Barber: Clean shave', 10, [16], [0]);
   put('Tattoo: Arm sleeves', 120, [17], [1], 'Shows with short sleeves');
   put('Laser tattoo removal', 60, [17], [0]);
