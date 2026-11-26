@@ -90,7 +90,11 @@ function makeMaterial(L) {
         vec2 gsc = (1.0 - 2.0 * PAD) / vec2(8.0, ROWS_M1 + 1.0) * vec2(textureSize(map, 0)), gdx = dFdx(vMapUv) * gsc, gdy = dFdy(vMapUv) * gsc;
         float plod = 0.5 * log2(max(max(dot(gdx, gdx), dot(gdy, gdy)), 1e-8));
         vec4 tx = textureLod(map, cuv, plod);
-        float a = tx.a;
+        // the mask (alpha) picks the tint, so read it from the nearest texel: a filtered alpha between two levels
+        // (main colour next to an untinted seam) would pick a third tint and draw a coloured line along every edge
+        int mlv = int(clamp(floor(plod + 0.5), 0.0, 5.0));
+        ivec2 msz = textureSize(map, mlv);
+        float a = texelFetch(map, clamp(ivec2(cuv * vec2(msz)), ivec2(0), msz - 1), mlv).a;
         vec3 tint = a > 0.9 ? pTA[ri] : a > 0.7 ? pTB[ri] : a > 0.5 ? pSkin : vec3(1.0);
         vec3 pcol = tx.rgb * tint;
         if (pTat >= 0.0 && ri == 2 && a > 0.5 && a < 0.7) {

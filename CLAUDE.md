@@ -132,11 +132,11 @@ python3 tools/serve.py 8765
 
 - Working branch `claude/modest-mayer-aphv17` (pushed, NOT merged into `main` yet; the live site is unchanged).
 - Merged into it: e-bikes and Arnett Bike docks, detailed car models with LODs, landmark interiors (arena, NorthPark, airport, Deere display building, Circa '21, Old Main, Clock Tower, Watch Tower Lodge; Riverdale HS skipped, outside the map).
-- Merged as WIP: San Andreas-style people + interaction animations (`src/anim.js`); the animations are unfinished.
-  - Confirmed in-game: getting in and out of cars, getting up after a fall.
-  - Built but only seen in previews: doors, counters, sitting, phone, minigame poses, walk styles.
-  - Not done: punching, sitting on outdoor benches, testing the animation sync between players (`s[21]`, `s[22]`).
-  - First thing to check: render the people to confirm the texture-seam fix still holds after the last texture-lookup change. After merging, re-check the e-bike pedalling pose (the hip and knee joints moved down 1.5-2 cm).
+- San Andreas-style people + interaction animations (`src/anim.js`, `src/people/pose.js`):
+  - Confirmed in-game (headless, daylight): getting in and out of cars, getting up after a fall, doors, counters (give/take), sitting (bar seats and street benches, E), phone, pool, slots, e-bike pedalling.
+  - Animation sync between players checked with a simulated remote player: actions, melee moves and flinches all come through `s[21]`/`s[22]`.
+  - The people texture seams are fixed (the tint mask is read from the nearest texel, so no coloured lines along painted edges).
+- Combat (`src/combat.js`): smooth aim camera, recoil, spread crosshair, frame-rate independent fire rates, sticky lock-on, smooth shake, hit pause; melee combos with contact frames (fists, knife, bat/crowbar, stomp on the downed); directional hit reactions. Not done: a take-cover key (Q is the weapon wheel; crouching by a wall is still the cover), NPC melee damage still lands at the start of their swing (npc.js).
 - To do before pushing to `main`:
   - Online fixes are done (2026-11-27). Dain must publish the new `database.rules.json`, which adds the `world` node and old-event deletion.
   - Dain must run `cd tools && npm run checks` on the Mac (check-roads needs `tools/cache`).

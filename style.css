@@ -161,6 +161,15 @@ button { font: inherit; }
 #crosshair.kill::before, #crosshair.kill::after { background: var(--red); }
 #crosshair::before { transform: rotate(45deg); } #crosshair::after { transform: rotate(-45deg); }
 #crosshair.off { display: none; }
+/* spread ticks: --gap is the real spread (combat.js), grows when moving or firing, settles when still */
+#crosshair i { position: absolute; left: 50%; top: 50%; display: none; background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.5); transition: transform .05s linear; }
+#crosshair.ticks i { display: block; }
+#crosshair i:nth-child(-n+2) { width: 2px; height: 7px; margin: 0 0 0 -1px; }
+#crosshair i:nth-child(n+3) { width: 7px; height: 2px; margin: -1px 0 0 0; }
+#crosshair i:nth-child(1) { transform: translateY(calc(-1 * var(--gap, 8px) - 7px)); }
+#crosshair i:nth-child(2) { transform: translateY(var(--gap, 8px)); }
+#crosshair i:nth-child(3) { transform: translateX(calc(-1 * var(--gap, 8px) - 7px)); }
+#crosshair i:nth-child(4) { transform: translateX(var(--gap, 8px)); }
 #prompt { position: absolute; left: 50%; bottom: 120px; transform: translateX(-50%); background: var(--box); padding: 8px 15px; font-size: 19px; font-weight: 500; text-shadow: none; }
 
 /* big banners: coloured title, then a dark band with a strip of the same colour ("MISSION PASSED") */

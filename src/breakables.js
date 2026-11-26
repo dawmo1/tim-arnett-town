@@ -59,6 +59,12 @@ function near(x, z, r, out = []) {
   return out;
 }
 const tmp = [];
+// the nearest intact street bench within r of (x, z), to sit on: { x, y, z, h } (h: the way the seat faces), or null
+export function benchNear(x, z, r = 1.5) {
+  let best = null, bd = r;
+  for (const e of near(x, z, r, [])) if (e.kind === 'bench') { const d = Math.hypot(e.x - x, e.z - z); if (d < bd) { bd = d; best = e; } }
+  return best && { x: best.x, y: best.y, z: best.z, h: best.h, ref: best.ref };
+}
 
 // ---------- debris ----------
 const darkMat = new THREE.MeshStandardMaterial({ color: 0x2b2f33, roughness: 0.6 });
