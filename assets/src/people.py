@@ -23,7 +23,7 @@ from mathutils import Vector
 
 # ---------------- skeleton (rest pose: A-pose) ----------------
 BONES = [
-    ('hips', (0, 0, 0.93), (0, 0, 1.04), None),
+    ('hips', (0, 0, 0.91), (0, 0, 1.04), None),
     ('spine', (0, 0, 1.04), (0, 0, 1.22), 'hips'),
     ('chest', (0, 0, 1.22), (0, 0, 1.43), 'spine'),
     ('neck', (0, 0.01, 1.47), (0, 0.012, 1.56), 'chest'),
@@ -35,8 +35,8 @@ for s, sx in (('L', 1), ('R', -1)):
     J['el' + s] = Vector((0.378 * sx, 0.004, 1.205))
     J['wr' + s] = Vector((0.545 * sx, -0.004, 1.005))
     J['ft' + s] = Vector((0.640 * sx, -0.012, 0.888))
-    J['hi' + s] = Vector((0.095 * sx, 0.0, 0.92))
-    J['kn' + s] = Vector((0.105 * sx, -0.012, 0.50))
+    J['hi' + s] = Vector((0.098 * sx, 0.0, 0.90))
+    J['kn' + s] = Vector((0.107 * sx, -0.012, 0.485))
     J['an' + s] = Vector((0.11 * sx, 0.012, 0.095))
     J['to' + s] = Vector((0.115 * sx, -0.16, 0.03))
     BONES += [
@@ -84,13 +84,17 @@ TORSO_Z = [0.80, 0.86, 0.92, 0.985, 1.06, 1.14, 1.22, 1.30, 1.37, 1.42, 1.46, 1.
 def torso_at(kind, z):
     w, df, db = _torso_at(kind, z)
     w *= 1 + 0.09 * sstep(1.12, 1.36, z)  # broad, square shoulders and chest
+    w *= 1 + 0.08 * (1 - sstep(1.1, 1.3, z))  # a stockier waist and hips
+    df *= 1.06
+    db *= 1.06
     if z > 1.40:  # trapezius: slope from the shoulders in to the neck
         t = sstep(1.40, 1.49, z)
         w *= 1 - 0.3 * t
         df *= 1 - 0.12 * t
-    if z < 0.86:  # crotch: taper smoothly between the legs
-        t = sstep(0.86, 0.80, z)
-        w *= 1 - 0.25 * t
+    if z < 0.88:  # crotch: taper smoothly between the legs (no nappy-like bulge below the hips)
+        t = sstep(0.88, 0.80, z)
+        w *= 1 - 0.4 * t
+        df *= 1 - 0.2 * t
     return [w, df, db]
 
 
@@ -196,7 +200,7 @@ def skull(x, y, z, kind='base'):
         # the lower face keeps its width and depth (a jaw and chin, not an egg), closing into a flat underside
         rf = (0.94 - 0.26 * kz * kz) * min(1.0, (1 - kz) / 0.14)
         R = rr + (max(rr, rf) - rr) * sstep(0.05, 0.6, front)
-        sx_ = 1 - (0.2 - T['jaw'] * 6) * kz * kz  # jaw narrows toward the chin
+        sx_ = 1 - (0.11 - T['jaw'] * 8) * kz * kz  # a square jaw (women's and slim narrow it)
         sy_ = 1 - 0.5 * back * kz * kz  # the back of the skull tucks in above the neck
     else:
         sy_ = 1 - 0.07 * front * z  # forehead slopes back
@@ -215,13 +219,13 @@ def face_disp(u, v, kind='base'):
     T = TYPES[kind]
     du, au = u - 0.5, abs(u - 0.5)
     d = 0.0
-    d += 0.008 * T['brow'] * g1(v - 0.61, 0.035) * g1(du, 0.18)  # brow ridge
+    d += 0.011 * T['brow'] * g1(v - 0.612, 0.032) * g1(du, 0.19)  # brow ridge
     d -= 0.006 * g1(au - 0.112, 0.06) * g1(v - 0.545, 0.04)  # eye hollows
     nz = T['nose']
     if 0.40 < v < 0.64:
         t = sstep(0.62, 0.45, v)
         d += (0.004 + 0.022 * t) * nz * sstep(0.405, 0.45, v) * g1(du, 0.03 + 0.025 * t)  # nose wedge
-    d += 0.005 * T['cheek'] * g1(au - 0.17, 0.07) * g1(v - 0.47, 0.06)  # cheekbones
+    d += 0.007 * T['cheek'] * g1(au - 0.17, 0.06) * g1(v - 0.47, 0.05)  # cheekbones
     d += 0.006 * T['lips'] * g1(du, 0.08) * g1(v - 0.37, 0.035)  # mouth block
     d += 0.009 * T['chin'] * g1(du, 0.09) * g1(v - 0.29, 0.045)  # chin
     d += 0.004 * (T['cheek'] - 1) * g1(au - 0.15, 0.08) * g1(v - 0.38, 0.08)  # heavy: fuller cheeks
@@ -347,7 +351,7 @@ def build(kind):
     nk = T['neck']
     nrings = []
     for i, z in enumerate((1.445, 1.49, 1.525, 1.555, 1.59)):
-        r = (0.064 - 0.009 * i / 4) * nk
+        r = (0.074 - 0.009 * i / 4) * nk
         nrings.append((Vector((0, 0.008 + 0.006 * i / 4, z)), Vector((0, 0.1, 1)), r * 1.08, r * (0.98 if i < 2 else 0.95),
                        blend('chest', 'neck', (z - 1.45) / 0.04) if z < 1.5 else blend('neck', 'head', (z - 1.55) / 0.06), i / 4, i / 4))
 
@@ -356,8 +360,8 @@ def build(kind):
     tube(nrings[::2], 8, lambda u, v: ruv(1, 0.1 + u * 0.3, 0.2 + v * 0.3), closed_end=False, rfn=neck_r)
 
     # ---- arms + hands ----
-    ARM_P = [(-0.14, 0.056, 0.062), (0.0, 0.066, 0.068), (0.2, 0.062, 0.062), (0.44, 0.050, 0.052), (0.56, 0.051, 0.050),
-             (0.8, 0.042, 0.038), (1.0, 0.034, 0.027)]
+    ARM_P = [(-0.14, 0.064, 0.07), (0.0, 0.076, 0.078), (0.2, 0.073, 0.072), (0.44, 0.06, 0.061), (0.56, 0.061, 0.059),
+             (0.8, 0.05, 0.046), (1.0, 0.041, 0.033)]
     for s, sx in (('L', 1), ('R', -1)):
         a, b, c, dtip = J['sh' + s], J['el' + s], J['wr' + s], J['ft' + s]
         _, side0 = ring_frame(b - a)
@@ -389,7 +393,7 @@ def build(kind):
             m = T['arm'] if t < 0.5 else T['fore'] if t < 0.85 else 1 + (T['fore'] - 1) * 0.5
             rings.append((p, ax, rx * m, ry * m, wt, t, t))
         u0 = 0.6 if s == 'L' else 0.8
-        tube(rings, NA, lambda u, v, u0=u0: ruv(2, u0 + 0.2 * u, 1 - max(0, v)), closed_end=False, rfn=arm_r)
+        tube(rings, NA, lambda u, v, u0=u0: ruv(2, u0 + 0.2 * u, 1 - max(0, v)), closed_end=True, rfn=arm_r)
         # hand: a chunky mitten (palm + fingers as one block, curled a little) and a thumb. Palm faces the body.
         hm = T['hand'] * 1.3
         hax = (dtip - c)
@@ -410,15 +414,15 @@ def build(kind):
             prev_t = t
             pr.append((cur.copy(), dirn, th_ * hm, wd * hm, mix_w({'forearm.' + s: 1.0}, hw, min(1, t / 0.1)) if t < 0.1 else hw, t, t))
         tube(pr, 6, huv, closed_end=True, start_cap=False)
-        tb = c + hd * (L * 0.1) + fwd * (0.016 * hm) + inward * 0.004
-        tdir = (hd * 0.6 + fwd * 0.5 + inward * 0.45).normalized()
+        tb = c + hd * (L * 0.24) + fwd * (0.02 * hm) + inward * 0.006
+        tdir = (hd * 0.45 + fwd * 0.8 + inward * 0.2).normalized()  # the thumb stands clear of the mitten
         tp = [tb, tb + tdir * 0.03 * hm, tb + tdir * 0.03 * hm + (tdir + hd * 0.6).normalized() * 0.03 * hm]
-        fr = [(tp[j], (tp[min(j + 1, 2)] - tp[max(j - 1, 0)]), (0.016 - 0.002 * j) * hm, (0.014 - 0.002 * j) * hm, hw, j / 2, j / 2) for j in range(3)]
+        fr = [(tp[j], (tp[min(j + 1, 2)] - tp[max(j - 1, 0)]), (0.019 - 0.002 * j) * hm, (0.017 - 0.002 * j) * hm, hw, j / 2, j / 2) for j in range(3)]
         tube(fr, 5, huv, closed_end=True)
 
     # ---- legs + shoes ----
-    LEG_P = [(-0.08, 0.086, 0.092), (0.0, 0.096, 0.1), (0.26, 0.086, 0.086), (0.5, 0.064, 0.066), (0.58, 0.062, 0.066),
-             (0.72, 0.060, 0.066), (0.9, 0.046, 0.048), (1.0, 0.045, 0.047)]
+    LEG_P = [(-0.08, 0.098, 0.104), (0.0, 0.108, 0.112), (0.26, 0.098, 0.098), (0.5, 0.075, 0.077), (0.58, 0.072, 0.076),
+             (0.72, 0.071, 0.078), (0.9, 0.054, 0.056), (1.0, 0.052, 0.054)]
     for s, sx in (('L', 1), ('R', -1)):
         a, b, c = J['hi' + s], J['kn' + s], J['an' + s]
         lat = 3 * math.pi / 2 if sx > 0 else math.pi / 2
@@ -451,26 +455,20 @@ def build(kind):
         u0 = 0.0 if s == 'L' else 0.5
         tube(rings, NL, lambda u, v, u0=u0: ruv(3, u0 + 0.5 * u, 0.8 * (1 - max(0, v))), closed_end=True, rfn=leg_r)
         # shoe: lofted heel to toe; flat sole with a lip, rounded toe box, collar round the ankle
-        sh = [(0.08, 0.046, 0.108), (0.045, 0.062, 0.118), (-0.03, 0.064, 0.09), (-0.115, 0.063, 0.07), (-0.175, 0.054, 0.056), (-0.205, 0.034, 0.04)]
-        NS = 8
+        sh = [(0.085, 0.05, 0.11), (0.06, 0.064, 0.122), (0.0, 0.068, 0.10), (-0.08, 0.068, 0.078), (-0.15, 0.066, 0.066),
+              (-0.195, 0.058, 0.058), (-0.222, 0.042, 0.046), (-0.232, 0.022, 0.032)]
+        # section (x, z) as fractions of (w, h), going round from the middle of the sole: a flat sole with a lip, then the upper
+        SEC = [(0, 0), (1.0, 0), (1.06, 0.26), (0.97, 0.62), (0.56, 1.0), (-0.56, 1.0), (-0.97, 0.62), (-1.06, 0.26), (-1.0, 0)]
+        NS = len(SEC)
         rows = []
         for y, w, h in sh:
             row = []
-            for k in range(NS):
-                th = 2 * math.pi * k / NS  # 0 = bottom centre
-                sn, cs = math.sin(th), math.cos(th)
-                if cs > 0.35:  # the sole: flat, a touch wider
-                    px = sn / max(1e-3, math.sqrt(1 - 0.35 ** 2)) * w * 1.04 if abs(sn) < 0.94 else sn * w * 1.04
-                    px = max(-w * 1.04, min(w * 1.04, px))
-                    pz = 0.0 if cs > 0.8 else 0.012
-                else:
-                    px = sn * w
-                    pz = 0.012 + (0.35 - cs) / 1.35 * (h - 0.012)
-                    pz = 0.012 + (h - 0.012) * (1 - (1 - (0.35 - cs) / 1.35) ** 1.8)
+            for fx_, fz_ in SEC:
+                pz = fz_ * h if fz_ != 0.26 else min(0.03, 0.26 * h)  # the sole is ~3 cm thick everywhere
                 wv = {'foot.' + s: 1.0} if y < -0.01 else blend('shin.' + s, 'foot.' + s, 0.65)
-                row.append(B.vert((c.x + px, c.y + y - 0.02, pz), wv))
+                row.append(B.vert((c.x + fx_ * w, c.y + y - 0.02, pz), wv))
             rows.append((row, y))
-        uu = lambda kk, yy: ruv(4, (0.0 if s == 'L' else 0.5) + 0.5 * (kk / NS), (0.085 - yy) / 0.275)
+        uu = lambda kk, yy: ruv(4, (0.0 if s == 'L' else 0.5) + 0.5 * (kk / NS), (0.085 - yy) / 0.32)
         for (r0, y0), (r1, y1) in zip(rows, rows[1:]):
             for k in range(NS):
                 k2 = (k + 1) % NS

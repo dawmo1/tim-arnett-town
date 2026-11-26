@@ -56,7 +56,8 @@ const clamp01 = (t) => (t < 0 ? 0 : t > 1 ? 1 : t);
 // relaxed standing: slight elbow bend, arms a touch out, breathing
 function stand(P, t, ch) {
   const br = Math.sin(t * 1.6 + ch.seed) * 1.2;
-  set(P, 'upper_armL', 3, 0, 6); set(P, 'upper_armR', 3, 0, -6);
+  const ao = ch.armOut || 0; // heavier builds hold their arms out from the body
+  set(P, 'upper_armL', 3, 0, 6 + ao); set(P, 'upper_armR', 3, 0, -6 - ao);
   set(P, 'forearmL', -10); set(P, 'forearmR', -10);
   set(P, 'handL', 0, 0, -4); set(P, 'handR', 0, 0, 4);
   add(P, 'chest', -br * 0.6); add(P, 'spine', 1);
@@ -75,7 +76,8 @@ function locomote(P, p, s, w, ch) {
   set(P, 'shinL', knee(1)); set(P, 'shinR', knee(-1));
   set(P, 'footL', -(P.thighL[0] + P.shinL[0]) * 0.65 + 6 * amp); set(P, 'footR', -(P.thighR[0] + P.shinR[0]) * 0.65 + 6 * amp);
   const armA = (16 + 34 * w) * amp;
-  set(P, 'upper_armL', s1 * armA + 4 * w, 0, 7 + 4 * w); set(P, 'upper_armR', -s1 * armA + 4 * w, 0, -7 - 4 * w);
+  const ao = ch.armOut || 0;
+  set(P, 'upper_armL', s1 * armA + 4 * w, 0, 7 + 4 * w + ao); set(P, 'upper_armR', -s1 * armA + 4 * w, 0, -7 - 4 * w - ao);
   set(P, 'forearmL', -14 - 70 * w - Math.max(0, s1) * 12 * amp); set(P, 'forearmR', -14 - 70 * w - Math.max(0, -s1) * 12 * amp);
   set(P, 'handL', -5, 0, -5); set(P, 'handR', -5, 0, 5);
   set(P, 'hips', 0, s1 * (5 + 4 * w) * amp, 0); set(P, 'spine', 3 + 9 * w, -s1 * (6 + 5 * w) * amp, 0); set(P, 'chest', 2 + 4 * w, -s1 * 3 * amp, 0);

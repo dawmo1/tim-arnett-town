@@ -76,53 +76,63 @@ const stitch = (pts) => shade((c) => { c.setLineDash([3, 3]); c.strokeStyle = 'r
 const FACE = [ // eye spacing, eye size, brow thick, nose width, lip width, lip full, age, stubble, iris
   { es: 0.105, ez: 1.0, bt: 1.2, nw: 1.0, lw: 1.0, lf: 0.8, age: 0, stub: 0.6, iris: '#4b2e1e' },
   { es: 0.11, ez: 0.9, bt: 1.5, nw: 1.2, lw: 1.1, lf: 1.0, age: 0.2, stub: 0, iris: '#2d1d14' },
-  { es: 0.1, ez: 1.05, bt: 1.0, nw: 0.9, lw: 0.9, lf: 0.7, age: 0, stub: 0, iris: '#3f6f9a' },
+  { es: 0.1, ez: 1.05, bt: 1.0, nw: 0.9, lw: 0.9, lf: 0.7, age: 0, stub: 0, iris: '#46596a' },
   { es: 0.112, ez: 0.95, bt: 1.3, nw: 1.25, lw: 1.15, lf: 1.2, age: 0.4, stub: 0.9, iris: '#2a1a10' },
-  { es: 0.104, ez: 0.85, bt: 1.4, nw: 1.05, lw: 1.0, lf: 0.8, age: 1, stub: 0.3, iris: '#556b3a' },
+  { es: 0.104, ez: 0.85, bt: 1.4, nw: 1.05, lw: 1.0, lf: 0.8, age: 1, stub: 0.3, iris: '#4a5232' },
   { es: 0.108, ez: 1.0, bt: 1.1, nw: 1.0, lw: 1.05, lf: 0.9, age: 0.6, stub: 0, iris: '#3b2a1d' },
   { es: 0.106, ez: 1.12, bt: 0.75, nw: 0.85, lw: 0.95, lf: 1.1, age: 0, stub: 0, iris: '#4a3020', fem: 1 },
   { es: 0.11, ez: 1.08, bt: 0.8, nw: 0.95, lw: 1.05, lf: 1.3, age: 0, stub: 0, iris: '#2b1b12', fem: 1 },
-  { es: 0.104, ez: 1.15, bt: 0.7, nw: 0.85, lw: 0.9, lf: 1.0, age: 0.1, stub: 0, iris: '#3c79a8', fem: 1 },
+  { es: 0.104, ez: 1.15, bt: 0.7, nw: 0.85, lw: 0.9, lf: 1.0, age: 0.1, stub: 0, iris: '#4a5d6e', fem: 1 },
   { es: 0.108, ez: 1.0, bt: 0.85, nw: 0.95, lw: 1.0, lf: 0.9, age: 0.8, stub: 0, iris: '#5a4a35', fem: 1 },
   // 10 teen boy (smooth, no stubble, a few freckles), 11 teen girl, 12 older man (lined, heavy brows), 13 woman with freckles
-  { es: 0.11, ez: 1.08, bt: 0.95, nw: 0.92, lw: 0.95, lf: 0.85, age: 0, stub: 0, iris: '#3f6f9a', teen: 1, freck: 0.5 },
+  { es: 0.11, ez: 1.08, bt: 0.95, nw: 0.92, lw: 0.95, lf: 0.85, age: 0, stub: 0, iris: '#46596a', teen: 1, freck: 0.5 },
   { es: 0.11, ez: 1.14, bt: 0.7, nw: 0.85, lw: 0.92, lf: 1.05, age: 0, stub: 0, iris: '#4b3524', fem: 1, teen: 1 },
-  { es: 0.112, ez: 0.88, bt: 1.6, nw: 1.15, lw: 1.05, lf: 0.75, age: 1.2, stub: 0.4, iris: '#5d7183' },
-  { es: 0.112, ez: 1.05, bt: 0.8, nw: 0.9, lw: 1.0, lf: 1.1, age: 0.15, stub: 0, iris: '#58703f', fem: 1, freck: 1 },
+  { es: 0.112, ez: 0.88, bt: 1.6, nw: 1.15, lw: 1.05, lf: 0.75, age: 1.2, stub: 0.4, iris: '#4f5a63' },
+  { es: 0.112, ez: 1.05, bt: 0.8, nw: 0.9, lw: 1.0, lf: 1.1, age: 0.15, stub: 0, iris: '#4d5a38', fem: 1, freck: 1 },
 ];
 for (const f of FACE) f.es = 0.112 + (f.es - 0.106) * 0.4; // eyes sit in the sculpted sockets (people.py)
 // face cell coordinates (u around the head, 0.5 = front; v up). Key heights:
 const EYE = 0.54, BROW = 0.6, NOSE = 0.45, MOUTH = 0.37, CHIN = 0.27;
-function faceBase() {
+function faceBase(f) {
   rect(K, 236, 0, 0, 1, 1);
-  noise(0.06, 1.5);
-  // gentle form shading: lighter forehead and cheeks, darker temples, under the jaw and the back
-  radial(0.5, 0.72, 0.28, 'rgba(255,255,255,0.18)');
-  radial(0.5, 0.46, 0.22, 'rgba(255,255,255,0.12)');
-  grad(0.5, 0, 0.5, 0.3, [[0, 'rgba(60,30,20,0.4)'], [1, 'rgba(0,0,0,0)']]);
-  for (const s of [-1, 1]) radial(0.5 + s * 0.2, 0.55, 0.08, 'rgba(70,40,30,0.18)');
+  noise(0.05, 1.5);
+  const k = f.fem ? 0.6 : 1; // women: the same painted shading, softer
+  // PS2-style baked light: lit forehead, nose bridge and cheekbones; shadow under the brow, beside the nose, under the
+  // cheekbones, along the jaw, under the chin and at the temples and the back of the head
+  radial(0.5, 0.7, 0.26, 'rgba(255,255,255,0.2)');
+  for (const s of [-1, 1]) radial(0.5 + s * 0.16, 0.48, 0.07, 'rgba(255,255,255,0.14)');
+  line(K, 250, [[0.5, 0.6], [0.5, 0.47]], 3);
+  shade((c) => { c.fillStyle = `rgba(70,35,25,${0.32 * k})`; c.beginPath(); c.ellipse(X(0.5), Y(0.575), 0.19 * S, 0.022 * S, 0, 0, 7); c.fill(); }); // under the brow
+  for (const s of [-1, 1]) radial(0.5 + s * 0.045, 0.49, 0.035, `rgba(70,35,25,${0.4 * k})`); // beside the nose
+  radial(0.5, 0.425, 0.035, `rgba(70,35,25,${0.35 * k})`); // under the nose
+  for (const s of [-1, 1]) radial(0.5 + s * 0.16, 0.405, 0.06, `rgba(70,35,25,${0.28 * k})`); // under the cheekbones
+  for (const s of [-1, 1]) radial(0.5 + s * 0.26, 0.58, 0.07, `rgba(70,40,30,${0.25 * k})`); // temples
+  grad(0.5, 0.2, 0.5, 0.34, [[0, `rgba(60,30,20,${0.5 * k})`], [1, 'rgba(0,0,0,0)']]); // jaw and under the chin
+  shade((c) => { const gr = c.createLinearGradient(X(0.2), 0, X(0.8), 0); for (const [o, a] of [[0, 0.3], [0.22, 0.12], [0.5, 0], [0.78, 0.12], [1, 0.3]]) gr.addColorStop(o, `rgba(60,30,20,${a * k})`); c.fillStyle = gr; c.fillRect(X(0.2), Y(0.45), X(0.8) - X(0.2), Y(0.2) - Y(0.45)); }); // jaw sides
+  radial(0.5, 0.31, 0.04, 'rgba(255,255,255,0.12)'); // chin
 }
-function eye(cu, v, f, scared, s) {
-  const w = 0.062 * f.ez * (scared ? 1.1 : 1), h = 0.032 * f.ez * (scared ? 1.45 : 1);
-  radial(cu, v + 0.004, 0.08, 'rgba(60,30,30,0.4)'); // socket shadow
-  if (f.fem) radial(cu, v + 0.012, 0.045, 'rgba(120,70,110,0.25)'); // eye shadow
-  ell(F, '#ece8e2', cu, v, w, h);
-  ell(F, f.iris, cu + s * 0.002, v - 0.001, h * 0.95, h * 0.95);
-  ell(F, '#0d0b0a', cu + s * 0.002, v - 0.001, h * 0.42, h * 0.42);
-  ell(F, '#ffffff', cu + s * 0.002 - 0.006, v + 0.006, h * 0.22, h * 0.22);
-  // upper lid + lashes, lower lid
-  line(F, f.fem ? '#120c0a' : '#2a1a14', [[cu - w, v - 0.002], [cu - w * 0.4, v + h * 0.95], [cu + w * 0.4, v + h * 0.95], [cu + w, v - 0.002]], f.fem ? 6 : 5);
-  if (f.fem) line(F, '#120c0a', [[cu + s * w, v + 0.002], [cu + s * (w + 0.012), v + 0.012]], 2);
-  line(K, 200, [[cu - w * 0.8, v - h * 0.9], [cu + w * 0.8, v - h * 0.9]], 1.4);
+function eye(cu, v, f, scared, s) { // small, dark and hooded: a lid shadow, a dull white and a dark iris
+  const w = 0.047 * f.ez * (scared ? 1.12 : 1), h = 0.019 * f.ez * (scared ? 1.6 : 1);
+  radial(cu, v + 0.012, 0.06, 'rgba(60,28,22,0.45)'); // lid shadow
+  if (f.fem) radial(cu, v + 0.016, 0.04, 'rgba(110,60,90,0.25)');
+  ell(F, '#cdc3b4', cu, v, w, h);
+  ell(F, f.iris, cu + s * 0.002, v - 0.002, h * 1.05, h * 1.05);
+  ell(F, '#0b0807', cu + s * 0.002, v - 0.002, h * 0.5, h * 0.5);
+  ell(F, 'rgba(255,255,255,0.5)', cu + s * 0.002 - 0.005, v + 0.004, h * 0.18, h * 0.18);
+  // a heavy upper lid line (lashes on women) and the crease above it
+  line(F, f.fem ? '#120c0a' : '#24160f', [[cu - w * 1.05, v - 0.002], [cu - w * 0.4, v + h * 1.1], [cu + w * 0.4, v + h * 1.1], [cu + w * 1.05, v - 0.002]], f.fem ? 6 : 5);
+  if (f.fem) line(F, '#120c0a', [[cu + s * w, v + 0.002], [cu + s * (w + 0.014), v + 0.014]], 3);
+  line(K, 175, [[cu - w * 0.8, v + h * 2.0], [cu + w * 0.8, v + h * 2.1]], 1.6);
+  line(K, 195, [[cu - w * 0.8, v - h * 1.1], [cu + w * 0.8, v - h * 1.1]], 1.4);
 }
 function brow(cu, v, f, scared, angry, s) {
-  const t = 10 * f.bt, w = 0.07;
+  const t = (f.fem ? 9 : 13) * f.bt, w = 0.074;
   const inner = scared ? 0.025 : angry ? -0.02 : 0, outer = scared ? -0.005 : angry ? 0.012 : 0.004;
   line(B, f.fem ? 95 : 70, [[cu - s * w, v + inner], [cu, v + 0.012 + (inner + outer) / 2], [cu + s * w, v + outer]], t);
 }
 function paintFace(i, scared) {
   const f = FACE[i];
-  faceBase();
+  faceBase(f);
   if (f.stub) { // stubble: a soft blue-grey shadow over the jaw and upper lip (PS2 style), with a fine grain
     shade((c) => { c.fillStyle = `rgba(45,45,60,${0.3 * f.stub})`; c.beginPath(); c.ellipse(X(0.5), Y(0.3), 0.21 * S, 0.12 * S, 0, 0, 7); c.fill(); c.beginPath(); c.ellipse(X(0.5), Y(0.4), 0.07 * S, 0.025 * S, 0, 0, 7); c.fill(); });
     shade((c) => { c.fillStyle = 'rgba(30,30,40,0.25)'; for (let k = 0; k < 2500 * f.stub; k++) { const u = 0.5 + (rnd() - 0.5) * 0.42, v = 0.2 + rnd() * 0.22, dx = (u - 0.5) / 0.21, dv = (v - 0.3) / 0.12; if (v < 0.4 && dx * dx + dv * dv > 1.2) continue; if (v > 0.4 && Math.abs(u - 0.5) > 0.07) continue; c.fillRect(X(u), Y(v), 1, 1); } });
@@ -199,8 +209,8 @@ const ARM_L = [0.6, 0.8], ARM_R = [0.8, 1.0];
 function topBase(lvl = A, col = 225, sleeve = 1) {
   rect(lvl, col, 0, 0, 0.6, 1);
   for (const [a0, a1] of [ARM_L, ARM_R]) { rect(lvl, col, a0, 1 - sleeve, a1, 1); if (sleeve < 1) rect(K, 232, a0, 0, a1, 1 - sleeve); }
-  noise(0.1);
-  folds(0.05, 0.55, 0.15, 0.9, 7, 0.17);
+  noise(0.035);
+  folds(0.08, 0.52, 0.2, 0.85, 4, 0.14); // a few broad baked folds; bold flat colour otherwise
   // baked PS2-style shading: lit chest, darker sides and armpits, the back a touch darker
   shade((c) => { const gr = c.createLinearGradient(X(0), 0, X(0.6), 0); for (const [o, a] of [[0, 0.22], [0.25, 0.3], [0.38, 0.05], [0.5, 0.0], [0.62, 0.05], [0.75, 0.3], [1, 0.22]]) gr.addColorStop(o, `rgba(0,0,0,${a})`); c.fillStyle = gr; c.fillRect(X(0), Y(1), X(0.6) - X(0), Y(0) - Y(1)); });
   radial(0.3, 0.72, 0.16, 'rgba(255,255,255,0.16)');
@@ -209,7 +219,7 @@ function topBase(lvl = A, col = 225, sleeve = 1) {
   for (const s of [0.15, 0.45]) stitch([[s, 0.02], [s, 0.95]]); // side seams
   darken(0, 0, 0.6, 0.04, 0.12); // hem
   // armpit / sleeve creases
-  for (const [a0, a1] of [ARM_L, ARM_R]) folds(a0 + 0.02, a1 - 0.02, 1 - sleeve + 0.05, 0.95, 3, 0.1, 0.8);
+  if (sleeve > 0.2) for (const [a0, a1] of [ARM_L, ARM_R]) folds(a0 + 0.03, a1 - 0.03, 1 - sleeve + 0.05, 0.95, 2, 0.12, 0.8); // (never on bare arms)
 }
 function collar(lvl = A, col = 200, depth = 0.05) { poly(lvl, col, [[0.25, 1], [0.3, 1 - depth], [0.35, 1]]); }
 function vneck(depth = 0.14, lvl = K, col = 232) { poly(lvl, col, [[0.26, 1], [0.3, 1 - depth], [0.34, 1]]); }
@@ -237,8 +247,8 @@ const TOP_PAINT = {
   zip: () => { topBase(A, 215, 1); rect(B, 230, 0.27, 0.0, 0.33, 0.98); line(F, '#9aa0a6', [[0.27, 0.98], [0.27, 0.02]], 2.2); shirtCollar(A, 200); cuffs(0, 0.06, A, 190); pocket(0.2, 0.35, 0.06, 0.12, A, 205); pocket(0.4, 0.35, 0.06, 0.12, A, 205); },
   suit: () => { topBase(A, 205, 1); poly(B, 245, [[0.24, 1], [0.36, 1], [0.32, 0.55], [0.3, 0.5], [0.28, 0.55]]); poly(F, '#6b1d24', [[0.293, 0.96], [0.307, 0.96], [0.314, 0.6], [0.3, 0.55], [0.286, 0.6]]); for (const s of [-1, 1]) line(A, 160, [[0.3 + s * 0.07, 1], [0.3 + s * 0.04, 0.55]], 3); buttons('#222', 2, 0.42, 0.3); pocket(0.2, 0.75, 0.05, 0.01, A, 170); cuffs(0, 0.03, B, 245); },
   sweater: () => { topBase(A, 220, 1); collar(K, 232, 0.03); line(A, 195, [[0.24, 1], [0.3, 0.96], [0.36, 1]], 6); rect(A, 190, 0, 0, 0.6, 0.08); cuffs(0, 0.08, A, 190); for (let k = 0; k < 60; k++) shade((c) => { c.fillStyle = 'rgba(0,0,0,0.06)'; c.fillRect(ox + rnd() * S, oy, 1, S); }); if (rnd() < 0.6) rect(B, 225, 0, 0.62, 0.6, 0.72); },
-  flannel: () => { topBase(A, 225, 1); for (let k = 0; k < 9; k++) { rect(B, 210, 0, k * 0.12, 1, k * 0.12 + 0.035); rect(B, 210, k * 0.11, 0, k * 0.11 + 0.03, 1); } shade((c) => { c.fillStyle = 'rgba(0,0,0,0.15)'; for (let k = 0; k < 30; k++) c.fillRect(ox + k * 9, oy, 1, S); }); shirtCollar(A, 210); placket(); buttons('#d8d0c0'); cuffs(0, 0.05); },
-  track: () => { topBase(A, 225, 1); line(F, '#a8adb2', [[0.3, 0.98], [0.3, 0.02]], 2); for (const [a0, a1] of [ARM_L, ARM_R]) { const c = (a0 + a1) / 2; rect(B, 240, c - 0.03, 0, c - 0.018, 1); rect(B, 240, c + 0.018, 0, c + 0.03, 1); } for (const s of [0.15, 0.45]) rect(B, 240, s - 0.012, 0, s + 0.012, 1); shirtCollar(A, 210); },
+  flannel: () => { topBase(A, 225, 1); for (let k = 0; k < 5; k++) { rect(B, 215, 0, 0.05 + k * 0.2, 1, 0.05 + k * 0.2 + 0.07); rect(B, 215, 0.04 + k * 0.2, 0, 0.04 + k * 0.2 + 0.06, 1); } shirtCollar(A, 210); placket(); buttons('#d8d0c0'); cuffs(0, 0.05); }, // big bold checks
+  track: () => { topBase(A, 225, 1); line(A, 190, [[0.3, 0.98], [0.3, 0.02]], 3); for (const [a0, a1] of [ARM_L, ARM_R]) { const c = (a0 + a1) / 2; rect(B, 240, c - 0.03, 0, c - 0.018, 1); rect(B, 240, c + 0.018, 0, c + 0.03, 1); } for (const s of [0.15, 0.45]) rect(B, 240, s - 0.012, 0, s + 0.012, 1); shirtCollar(A, 210); },
   blouse: () => { topBase(A, 238, 0.45); vneck(0.12); for (let k = 0; k < 4; k++) line(A, 250, [[0.22 + k * 0.01, 0.95 - k * 0.05], [0.38 - k * 0.01, 0.95 - k * 0.05]], 1.5); for (const [a0, a1] of [ARM_L, ARM_R]) line(A, 205, [[a0, 0.56], [a1, 0.56]], 3); },
   police: () => { topBase(F, '#1f2c4f', 0.3); shirtCollar(F, '#1a2442'); placket(); buttons('#c8c8c8', 6); pocket(0.22, 0.8, 0.06, 0.08, F, '#24325a'); pocket(0.38, 0.8, 0.06, 0.08, F, '#24325a'); paint(F, '#e3c25b', (c) => { c.beginPath(); for (let k = 0; k < 10; k++) { const a = (k / 10) * Math.PI * 2, r = (k % 2 ? 0.012 : 0.026) * S; c.lineTo(X(0.38) + Math.sin(a) * r, Y(0.86) - Math.cos(a) * r); } c.fill(); }); rect(F, '#cfd3d6', 0.18, 0.86, 0.26, 0.88); for (const [a0, a1] of [ARM_L, ARM_R]) { ell(F, '#2b3f78', (a0 + a1) / 2, 0.88, 0.04, 0.05); ell(F, '#e3c25b', (a0 + a1) / 2, 0.88, 0.025, 0.03); } rect(F, '#111', 0, 0, 0.6, 0.06); rect(F, '#c9a648', 0.28, 0.01, 0.32, 0.05); },
   medic: () => { topBase(F, '#f1f4f7', 0.3); shirtCollar(F, '#e2e6ea'); placket(); buttons('#bbb', 6); rect(F, '#2a5fae', 0, 0.62, 0.6, 0.66); for (const [a0, a1] of [ARM_L, ARM_R]) { ell(F, '#2a5fae', (a0 + a1) / 2, 0.86, 0.035, 0.05); text('+', (a0 + a1) / 2, 0.86, 0.07); } text('PARAMEDIC', 0.08, 0.84, 0.035, '#2a5fae'); text('PARAMEDIC', 0.52, 0.84, 0.035, '#2a5fae'); },
@@ -273,7 +283,7 @@ const KNEE = 0.376;
 function botBase(lvl = A, col = 220, to = 0) {
   rect(lvl, col, 0, 0.8, 1, 1);
   for (const l0 of [0, 0.5]) { rect(lvl, col, l0, to, l0 + 0.5, 0.8); if (to > 0) rect(K, 232, l0, 0, l0 + 0.5, to); }
-  noise(0.1);
+  noise(0.035);
   for (const l0 of [0, 0.5]) shade((c) => { const gr = c.createLinearGradient(X(l0), 0, X(l0 + 0.5), 0); gr.addColorStop(0, 'rgba(0,0,0,0.28)'); gr.addColorStop(0.5, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,0.28)'); c.fillStyle = gr; c.fillRect(X(l0), Y(0.8), X(l0 + 0.5) - X(l0), Y(to) - Y(0.8)); });
   for (const l0 of [0, 0.5]) { folds(l0 + 0.05, l0 + 0.45, to + 0.05, 0.78, 6, 0.17, 0.4); shade((c) => { c.fillStyle = 'rgba(0,0,0,0.12)'; for (let k = 0; k < 4; k++) c.fillRect(X(l0 + 0.15 + rnd() * 0.2), Y(KNEE + 0.02 * k), S * 0.12, 2); }); }
   // (no painted leg seams: at a distance they read as stray lines)
@@ -293,19 +303,18 @@ const BOT_PAINT = {
   scrubs: () => { botBase(A, 226); rect(A, 210, 0, 0.94, 1, 1); line(F, '#eee', [[0.5, 0.96], [0.49, 0.86]], 2); for (const l0 of [0, 0.5]) { pocket(l0 + 0.1, 0.6, 0.1, 0.1, A, 215); rect(A, 205, l0, 0, l0 + 0.5, 0.03); } },
 };
 // ---------------- shoes (left u 0..0.5, right 0.5..1; within a shoe u goes round from the sole; v heel..toe) ----------------
-function shoe(kind) {
+function shoe(kind) { // u goes round the shoe from the middle of the sole (sole: u < 2/9 and > 7/9); v heel (0) to toe (1)
   for (const l0 of [0, 0.5]) {
-    const U = (u) => l0 + u * 0.5;
-    rect(A, kind === 'dress' ? 200 : 230, l0, 0, l0 + 0.5, 1);
-    noise(kind === 'dress' ? 0.05 : 0.12);
-    // sole wraps the bottom of the loft (u near 0 and 1)
-    const soleH = kind === 'boot' ? 0.16 : 0.12;
-    rect(kind === 'sneaker' ? B : F, kind === 'sneaker' ? 240 : '#1c1715', U(0), 0, U(soleH), 1);
-    rect(kind === 'sneaker' ? B : F, kind === 'sneaker' ? 240 : '#1c1715', U(1 - soleH), 0, U(1), 1);
-    if (kind !== 'dress') for (let k = 0; k < 5; k++) line(F, kind === 'boot' ? '#c8b48a' : '#f2f2f2', [[U(0.44), 0.42 + k * 0.06], [U(0.56), 0.45 + k * 0.06]], 2.5);
-    if (kind === 'sneaker') line(B, 238, [[U(0.25), 0.2], [U(0.32), 0.55], [U(0.22), 0.75]], 4);
+    const U = (u) => l0 + u * 0.5, sole = 2 / 9;
+    rect(A, kind === 'dress' ? 200 : 232, l0, 0, l0 + 0.5, 1);
+    const soleCol = kind === 'sneaker' ? '#ecebe6' : '#1c1715'; // white rubber or dark leather
+    rect(F, soleCol, U(0), 0, U(sole), 1); rect(F, soleCol, U(1 - sole), 0, U(1), 1);
+    shade((c) => { c.fillStyle = 'rgba(0,0,0,0.35)'; c.fillRect(X(U(sole)), Y(1), 2, Y(0) - Y(1)); c.fillRect(X(U(1 - sole)) - 2, Y(1), 2, Y(0) - Y(1)); }); // where the sole meets the upper
+    if (kind === 'sneaker') { rect(B, 236, U(0.3), 0.68, U(0.7), 1); for (const u of [0.3, 0.7]) line(B, 236, [[U(u), 0.15], [U(u), 0.5]], 6); } // toe cap and side panels in the second colour
+    if (kind === 'boot') { rect(A, 205, U(0.25), 0.72, U(0.75), 1); }
+    if (kind !== 'dress') for (let k = 0; k < 4; k++) line(F, kind === 'boot' ? '#c8b48a' : '#f2f2f2', [[U(0.45), 0.4 + k * 0.07], [U(0.55), 0.42 + k * 0.07]], 3);
     if (kind === 'dress') radial(U(0.5), 0.8, 0.08, 'rgba(255,255,255,0.35)');
-    darken(l0, 0.0, l0 + 0.5, 0.05, 0.2);
+    grad(0, 0.5, 0, 0, [[0, 'rgba(0,0,0,0)'], [1, 'rgba(0,0,0,0.18)']]);
   }
 }
 

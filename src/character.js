@@ -84,6 +84,7 @@ export function makeCharacter(look, opts = {}) {
   p.rig.scale.setScalar((female ? 0.95 : 1.0) * (0.96 + (seed % 1) * 0.08));
   const B = p.bones;
   const ch = { g, body, rig: p.rig, mesh: p.body, acc: p.acc, mat: p.mat, bones: B, look: p.look, weapons: {}, held: null, heldName: null, props: {}, seed, roll: (Math.random() - 0.5) * 2, walk: 0, deadT: 0 };
+  ch.armOut = [3, 10, 0, 2, 8][p.look[1]] ?? 3; // arms clear of the hips and belly, by build
   return ch;
 }
 
