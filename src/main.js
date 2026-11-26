@@ -1145,6 +1145,11 @@ function freeSeat(v) {
   for (let i = 1; i <= passSeats(v.T); i++) if (!taken.has(i)) return i;
   return 0;
 }
+// Two players can grab the same seat in the same instant; the lower uid keeps it and the other moves to a free seat.
+function seatClash(v) {
+  for (const [uid, p] of Object.entries(net.players)) if (uid < net.uid && p && Array.isArray(p.s) && p.s[5] === v.id && p.s[20] === me.seat) return true;
+  return false;
+}
 // world spot of seat i (0 driver, 1 front passenger, then rear rows left/right): the model's seat empties, else from the car's size
 const SEAT_KEYS = ['D', 'P', 'RL', 'RR'], seatTmp = new THREE.Vector3();
 function seatPos(v, i) {
@@ -1157,6 +1162,7 @@ function seatPos(v, i) {
 function rideUpdate(dt) {
   const v = me.veh;
   if (!driverPlayer(v) || v.exploded) { ejectMe(); return; } // driver got out, left the game, or the car's wrecked
+  if (seatClash(v)) { const s = freeSeat(v); if (!s) { ejectMe(); ui.addFeed('No room in that car'); return; } me.seat = s; } // two of us took the same seat at once
   v.speed = Math.hypot(v.vx || 0, v.vz || 0); // for the speedo
   me.x = v.x; me.z = v.z; me.y = Math.max(W.SWIM_Y, v.y); me.h = v.h; me.vx = v.vx || 0; me.vz = v.vz || 0; me.moveSpeed = 0;
   const p = seatPos(v, me.seat);

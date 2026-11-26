@@ -7,7 +7,7 @@ const V = '10.12.2';
 export const ROOM = 'WORLD';
 export const net = {
   online: false, uid: 'me', offset: 0, room: ROOM, players: {}, admins: {}, error: '',
-  handlers: { player() {}, playerGone() {}, vehicle() {}, vehicleGone() {}, cops() {}, event() {}, chat() {} },
+  handlers: { player() {}, playerGone() {}, vehicle() {}, vehicleGone() {}, cops() {}, event() {}, chat() {}, world() {} },
   now() { return Date.now() + this.offset; },
 };
 let db, M, roomRef, meRef;
@@ -56,11 +56,12 @@ export async function joinWorld(name, look) {
   M.onChildChanged(vh, (s) => net.handlers.vehicle(s.key, s.val()));
   M.onChildRemoved(vh, (s) => net.handlers.vehicleGone(s.key));
   M.onValue(M.child(roomRef, 'cops'), (s) => net.handlers.cops(s.val() || {}));
+  M.onValue(M.child(roomRef, 'world'), (s) => net.handlers.world(s.val() || {}), () => {}); // admin time, weather, game speed
   const evq = M.query(M.child(roomRef, 'events'), M.orderByChild('t'), M.startAt(net.now() - 1000));
   M.onChildAdded(evq, (s) => { const e = s.val(); if (e && e.from !== net.uid) net.handlers.event(e); });
   M.onChildAdded(M.query(M.child(roomRef, 'chat'), M.limitToLast(30)), (s) => net.handlers.chat(s.val()));
-  pruneChat();
-  setInterval(() => { if (hostUid() === net.uid) pruneChat(); }, 600000);
+  pruneChat(); pruneEvents();
+  setInterval(() => { if (hostUid() === net.uid) { pruneChat(); pruneEvents(); } }, 600000);
 }
 // Chat keeps the newest 100 messages: anything older than those and over an hour old is deleted (the rules allow
 // deleting a message only once it's an hour old). shortcut: removes up to 500 per run, so a huge backlog takes a few runs.
@@ -75,6 +76,16 @@ async function pruneChat() {
     old.forEach((c) => { const t = c.child('t').val(); if (typeof t === 'number' && t < cut) del[c.key] = null; });
     if (Object.keys(del).length) await M.update(chat, del);
   } catch (e) { console.warn('chat prune failed', e); }
+}
+// Events delete themselves after 8 s, but not if the sender closed the tab first: anything over a minute old goes
+// (the rules allow deleting someone else's event once it's that old).
+async function pruneEvents() {
+  try {
+    const ev = M.child(roomRef, 'events');
+    const old = await M.get(M.query(ev, M.orderByChild('t'), M.endAt(net.now() - 70000), M.limitToFirst(500))), del = {};
+    old.forEach((c) => { del[c.key] = null; });
+    if (Object.keys(del).length) await M.update(ev, del);
+  } catch (e) { console.warn('event prune failed', e); }
 }
 // Story Mode pressed: j = when you started playing (the earliest player runs the police).
 export function startPlaying() {
@@ -92,6 +103,8 @@ export function sendState(arr) {
   if (net.online && meRef) M.set(M.child(meRef, 's'), arr);
   else if (net.players[net.uid]) net.players[net.uid].s = arr;
 }
+// shared time, weather and game speed (the rules let only admins write it)
+export function setWorld(w) { if (net.online && roomRef) M.set(M.child(roomRef, 'world'), w).catch((e) => console.warn('world write failed', e)); }
 export function setVehicle(id, rec) { if (net.online && roomRef) M.set(M.child(roomRef, 'vehicles/' + id), rec); }
 export function removeVehicle(id) { if (net.online && roomRef) M.remove(M.child(roomRef, 'vehicles/' + id)); }
 // each group host writes its own units to cops/{uid} (null clears them when it stops hosting)
