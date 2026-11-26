@@ -138,6 +138,9 @@ button { font: inherit; }
 #hpfill { height: 100%; width: 100%; background: #6aa56a; transition: width .2s; }
 #armorfill { height: 100%; width: 0; background: #3b9ac9; transition: width .2s; }
 #spfill { height: 100%; width: 0; background: #e8d33a; transition: width .2s; }
+.bar.armor.breath { background: #24505a; } .bar.armor.breath #armorfill { background: #9be6f4; transition: width .1s linear; }
+.bar.armor.breath.low #armorfill { animation: breathLow .5s steps(1) infinite; }
+@keyframes breathLow { 50% { background: #e8f8fb; } }
 
 /* bottom-right: vehicle name on entering, area + street fading in and out, a quiet speedo */
 #bottomright { position: absolute; right: 26px; bottom: 22px; display: grid; justify-items: end; gap: 4px; text-align: right; }

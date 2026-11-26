@@ -28,6 +28,7 @@ import { initPhysics, updateRagdolls, ragdoll, release, ragPos, syncPhysics, sta
 import * as anim from './anim.js';
 import * as combat from './combat.js';
 import * as cover from './cover.js';
+import * as swim from './swim.js';
 import { initNav, updateNav } from './nav.js';
 import { knock, flinch } from './npc.js';
 import * as police from './police.js';
@@ -339,7 +340,8 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyJ' && !toggleJob()) ui.flashPrompt('No side job for this ride'); // taxi, ambulance, fire truck, police car, scooter
   if (e.code === 'KeyH' && me.veh && !me.seat && !me.dead) { if (me.veh.T.ebike) ebikes.bell(); else modHorn(me.veh); } // horn (carmods.js: the car's own horn mod)
   else if (e.code === 'KeyG' || e.code === 'KeyH') talk(e.code === 'KeyG');
-  if (e.code === 'KeyC' && playing && !me.veh && !me.dead && !typing && !cover.active()) { me.crouch = !me.crouch; ui.flashPrompt(me.crouch ? 'Crouching (C to stand)' : 'Standing'); }
+  if (e.code === 'KeyC' && me.swim && !me.veh && !me.dead) swim.dive(me); // (held: swim down)
+  else if (e.code === 'KeyC' && playing && !me.veh && !me.dead && !typing && !cover.active()) { me.crouch = !me.crouch; ui.flashPrompt(me.crouch ? 'Crouching (C to stand)' : 'Standing'); }
   if (e.code === 'KeyF' && !me.veh && !me.dead && !me.swim && !me.enter && !me.move && !me.ch.rag && !me.rag && !anim.busy()) { if (cover.press(me, Math.sin(camYaw), Math.cos(camYaw))) me.crouch = false; } // take cover (src/cover.js)
 });
 addEventListener('keyup', (e) => { keys.delete(e.code); if ((e.code === 'Tab' || e.code === 'KeyQ') && wheelOpen) closeWheel(true); });
@@ -1105,7 +1107,7 @@ function respawn(first, sp) {
   interior.leave(); me.outside = null;
   me.x = sp.x; me.z = sp.z; me.h = sp.h; me.y = W.groundHeight(sp.x, sp.z); me.vy = 0;
   if (!first && eco.cash > 0) { const bill = Math.min(eco.cash, Math.max(50, Math.round(eco.cash * 0.1))); eco.cash -= bill; ui.addFeed(`Hospital bill: -$${bill}`); }
-  me.hp = 100; me.dead = false; resetWanted(); resetDrunk(); me.enter = null; me.exitT = 0; me.reloadT = 0; me.swim = false; deathSpin = 0; me.rag = null;
+  me.hp = 100; me.dead = false; resetWanted(); resetDrunk(); me.enter = null; me.exitT = 0; me.reloadT = 0; me.swim = false; swim.reset(); cover.leave(); deathSpin = 0; me.rag = null;
   release(me.ch);
   me.ch.body.rotation.set(0, 0, 0); me.ch.body.position.y = 0;
   camYaw = sp.h;
@@ -1294,6 +1296,12 @@ function finishEnter(v) {
 // Getting out: slow = step out through the door, fast = bail and tumble.
 function leaveVehicle() {
   const v = me.veh;
+  if (v.sinkT > 0 && !v.T.boat && !me.seat) { // a car in the river: out through the door and swim for it (under, if it's gone under)
+    const y = v.y + 0.4;
+    ejectMe(); me.swim = true; me.x = v.x + (me.x - v.x) * 0.6; me.z = v.z + (me.z - v.z) * 0.6;
+    swim.enter(me, 0, y < W.SWIM_Y - 0.6 ? y : null);
+    return;
+  }
   const sp = Math.hypot(v.vx, v.vz);
   if (sp > 9 && !v.T.bike) {
     const sg = me.seat & 1 ? -1 : 1, lx = Math.cos(v.h) * sg, lz = -Math.sin(v.h) * sg; // out of your own side
@@ -1793,7 +1801,7 @@ function updatePlayer(dt) {
   const still = adm.frozen ? 0 : 1; // frozen by an admin: no moving or shooting
   const fwd = still * ((keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0) - (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0));
   const side = still * ((keys.has('KeyD') || keys.has('ArrowRight') ? 1 : 0) - (keys.has('KeyA') || keys.has('ArrowLeft') ? 1 : 0));
-  if (me.seat) rideUpdate(dt); else if (me.veh) driveUpdate(dt, fwd, side); else if (adm.fly) flyUpdate(dt, fwd, side); else footUpdate(dt, fwd, side);
+  if (me.seat) rideUpdate(dt); else if (me.veh) driveUpdate(dt, fwd, side); else if (adm.fly) flyUpdate(dt, fwd, side); else if (me.swim && !me.move && !anim.busy()) swimStep(dt, fwd, side); else footUpdate(dt, fwd, side);
   if (!me.veh) { me.vx = (me.x - px) / dt; me.vz = (me.z - pz) / dt; }
   const w = WEAPONS[me.weapon];
   const wantFire = locked && still && (w.auto ? mouseDown : clicked);
@@ -1801,6 +1809,8 @@ function updatePlayer(dt) {
   if (wantFire && w.melee && cover.active()) cover.leave(); // a punch from cover: step out and throw it
   if (wantFire && (me.cd <= 0 || w.melee) && !me.dead && !me.swim && !(me.veh && w.melee)) fire(w);
   if (me.veh || me.swim || me.dead || !w.melee) combat.meleeCancel();
+  if (me.veh && me.swim) { me.swim = false; swim.reset(); } // climbed into a boat from the water
+  if (!me.swim && !(me.veh && me.veh.sinkT > 0)) swim.state.breath = Math.min(1, swim.state.breath + dt / 3.5); // air again
 }
 let lastDt = 1 / 60;
 
@@ -1954,7 +1964,7 @@ function footUpdate(dt, fwd, side) {
     if (me.y <= gh + 0.05 && me.vy <= 0) { me.y = gh; me.vy = 0; me.grounded = true; } else me.grounded = false;
     if (me.grounded && keys.has('Space') && !me.move) { if (!tryClimb()) { me.vy = 6.5 * adm.jump; me.grounded = false; me.crouch = false; } }
   } else {
-    if (me.y <= W.SWIM_Y) { me.y = W.SWIM_Y; me.vy = 0; me.swim = true; }
+    if (me.y <= W.SWIM_Y) { const vy = me.vy; me.y = W.SWIM_Y; me.vy = 0; me.swim = true; me.crouch = false; cover.leave(); swim.enter(me, vy); } // in: src/swim.js takes over
     me.grounded = false;
   }
   me.moveSpeed = ml > 0 ? speed : 0;
@@ -2010,6 +2020,41 @@ function coverStep(dt, fwd, side) {
   animateCharacter(me.ch, dt, { ...anim.poseFields(myAct), ...r.pose, speed: r.speed, aim: aimPose, aimYaw: aimPose ? angDiff(me.h, camYaw) : 0,
     weapon: wk, wmodel: wpn.model, rifle: wpn.long, recoil: me.recoil, reload: me.reloadT > 0 ? 1 - me.reloadT / combat.reloadTime(wpn) : 0, pitch: aimPose ? -camPitch * 57 : 0 });
   return true;
+}
+// In the water (src/swim.js does the strokes, diving, breath and climbing out).
+function swimStep(dt, fwd, side) {
+  cover.leave(); me.crouch = false; aiming = false; me.lockOn = null;
+  const r = swim.update(dt, me, { fwd, side, camYaw, camPitch: camPitch - 0.22, sprint: keys.has('ShiftLeft') || keys.has('ShiftRight'), up: keys.has('Space'), down: keys.has('KeyC') });
+  me.x = r.x; me.y = r.y; me.z = r.z; me.h = r.h; me.vy = 0; me.grounded = false; me.moveSpeed = r.speed;
+  if (r.drown) drownMe(r.drown);
+  me.netPose = 0; me.netK = 0; me.netPitch = 0;
+  me.ch.g.visible = true; me.ch.g.position.set(me.x, me.y, me.z); me.ch.g.rotation.set(0, me.h, 0);
+  if (myAct && !anim.busy()) { anim.stop(); myAct = null; }
+  anim.holdProps(me.ch, null);
+  if (r.out) { me.swim = false; me.grounded = true; animateCharacter(me.ch, dt, { speed: 0, weapon: 'none', wmodel: null }); return; }
+  if (r.climb !== undefined) { me.netPose = 8; me.netK = Math.round(r.climb * 100) / 100; animateCharacter(me.ch, dt, { climb: r.climb }); return; }
+  animateCharacter(me.ch, dt, { ...r.pose, speed: r.speed, weapon: 'none', wmodel: null });
+}
+// out of breath underwater: armor doesn't help
+function drownMe(d) {
+  if (me.dead || adm.god) return;
+  me.hp -= d; me.lastBy = 'drowning'; me.lastByUid = '';
+  if (Math.random() < 0.08) ui.flashHurt();
+  if (me.hp <= 0) die();
+}
+// the view under the water: murky green-brown, short sight, no sky, sound muffled
+const UNDER_COL = new THREE.Color(0x335a4c);
+let riverBed = null; // a muddy floor under you while diving (the map has no mesh under open water)
+function waterView() {
+  const c = camera.position, uw = playing && c.y < W.WATER_Y - 0.05 && !W.isLand(c.x, c.z) && !interior.room;
+  scene.userData.sky.visible = !uw;
+  if (uw) {
+    scene.fog.color.copy(UNDER_COL); scene.background.copy(UNDER_COL); scene.fog.near = 0.5; scene.fog.far = 26;
+    if (!riverBed) { riverBed = new THREE.Mesh(new THREE.PlaneGeometry(90, 90).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x5a5638 })); riverBed.receiveShadow = false; scene.add(riverBed); }
+    riverBed.position.set(c.x, W.terrainHeight(c.x, c.z) - 0.03, c.z);
+  }
+  if (riverBed) riverBed.visible = uw;
+  fx.setUnderwater(uw);
 }
 // admin noclip: fly where the camera looks, through everything. Space up, Shift down, Ctrl fast.
 function flyUpdate(dt, fwd, side) {
@@ -2096,10 +2141,10 @@ function driveUpdate(dt, fwd, side) {
       r.hitCd = now + 1000;
     }
   }
-  if (v.sinkT > 2.5 && !v.exploded) {
-    v.exploded = true; v.hp = 0; v.burnAt = net.now(); writeVeh(v, true);
-    ejectMe(); me.y = W.SWIM_Y; me.swim = true;
-    return;
+  // in the river: it sinks (vehicles.js); once the cabin's under you're holding your breath, and when that runs out you
+  // bail out (still under, a long way from air). E gets you out any time.
+  if (v.sinkT > 0 && !v.T.boat && !v.T.plane) {
+    if (W.WATER_Y - (v.y + v.T.hgt * 0.75) > 0 && swim.holdBreath(dt)) { leaveVehicle(); drownMe(9 * dt); return; }
   }
   me.x = v.x; me.z = v.z; me.y = Math.max(W.SWIM_Y, v.y); me.h = v.h; me.vx = v.vx; me.vz = v.vz; me.moveSpeed = 0;
   writeVeh(v);
@@ -2172,7 +2217,8 @@ function updateRemotes(dt) {
       else {
         const cv = ra && ra.n.startsWith('cover') ? ra : null; // in cover: k = how far they've popped out
         r.coverLow = !!cv && !cv.n.endsWith('High') && cv.k < 0.5;
-        animateCharacter(r.ch, dt, { ...anim.poseFields(ra), ...combat.remoteFields(r, ra, dt), moveRel: wk === 'gun' && r.speed > 0.5 ? angDiff(r.h, Math.atan2(r.vx, r.vz)) : 0, speed: r.speed, aim: wk === 'gun' && (cv ? cv.k > 0.55 : !(bits & 2)), swim: sw, dead: r.dead, crouch: !!(bits & 1), cover: !!(bits & 2) && !cv, reload: bits & 4 ? (performance.now() / 1300) % 1 : 0, pitch: +s[18] || 0, carry: !!wr?.long && wk !== 'gun', weapon: sw ? 'none' : wk, wmodel: sw ? null : wr?.model ?? null, rifle: !!wr?.long });
+        const pf = anim.poseFields(ra);
+        animateCharacter(r.ch, dt, { ...pf, ...combat.remoteFields(r, ra, dt), moveRel: wk === 'gun' && r.speed > 0.5 ? angDiff(r.h, Math.atan2(r.vx, r.vz)) : 0, speed: r.speed, aim: wk === 'gun' && !sw && (cv ? cv.k > 0.55 : !(bits & 2)), swim: pf.swim || sw, dead: r.dead, crouch: !!(bits & 1), cover: !!(bits & 2) && !cv, reload: bits & 4 ? (performance.now() / 1300) % 1 : 0, pitch: +s[18] || 0, carry: !!wr?.long && wk !== 'gun', weapon: sw ? 'none' : wk, wmodel: sw ? null : wr?.model ?? null, rifle: !!wr?.long });
       }
     }
     r.tagT = (r.tagT || 0) - dt;
@@ -2522,7 +2568,8 @@ function updateCamera(dt) {
   if (me.dead) { deathSpin += dt; camYaw += dt * 0.35; camPitch += (1.0 - camPitch) * Math.min(1, dt * 1.2); }
   // the chase cam trails the car a little (springy), so turns and speed read clearly
   let tx = me.veh ? me.veh.x : me.x, tz = me.veh ? me.veh.z : me.z;
-  const ty = me.veh ? me.veh.y + 1.7 : me.swim ? W.WATER_Y - 0.15 : me.y + 1.6 + 0.08 * ab;
+  const diving = me.swim && swim.under() && !me.veh;
+  const ty = me.veh ? me.veh.y + 1.7 : diving ? me.y + swim.BODY + 0.35 : me.swim ? W.WATER_Y - 0.15 : me.y + 1.6 + 0.08 * ab;
   if (me.veh && !me.veh.T.heli) {
     if (!camLag || Math.hypot(camLag.x - tx, camLag.z - tz) > 20) camLag = { x: tx, z: tz };
     const k = 1 - Math.exp(-dt * 9);
@@ -2547,8 +2594,8 @@ function updateCamera(dt) {
   camDist = camDist === null || want < camDist ? want : camDist + (want - camDist) * Math.min(1, dt * 4);
   const d = camDist;
   const camX = ax - dx * d, camZ = az - dz * d;
-  const floorY = interior.room ? interior.room.y + 0.35 : W.isLand(camX, camZ) ? W.groundHeight(camX, camZ) + 0.35 : W.WATER_Y + 0.2;
-  camera.position.set(camX, Math.max(floorY, ty - dy * d), camZ);
+  const floorY = interior.room ? interior.room.y + 0.35 : W.isLand(camX, camZ) ? W.groundHeight(camX, camZ) + 0.35 : diving ? W.terrainHeight(camX, camZ) + 0.3 : W.WATER_Y + 0.2;
+  camera.position.set(camX, Math.max(floorY, diving ? Math.min(W.WATER_Y - 0.12, ty - dy * d) : ty - dy * d), camZ); // diving: the camera stays under with you
   // recoil kicks the view (not the camera's orbit) up and a little sideways, then springs back
   const lp_ = camPitch - combat.recoilPitch(), ly_ = camYaw + combat.recoilYaw(), lc = Math.cos(lp_);
   camera.lookAt(ax + Math.sin(ly_) * lc * 20, ty - Math.sin(lp_) * 20, az + Math.cos(ly_) * lc * 20);
@@ -2602,6 +2649,12 @@ cover.initCover({
   vehicles: () => { const L = vehicles.slice(); for (const u of police.cops.values()) if (u.kind < 2 && u.v) L.push(u.v); return L; },
   myVeh: () => me.veh,
   sound: (kind) => fx.footstep(kind === 'veh' ? 'metal' : 'concrete', 1.6),
+});
+swim.initSwim({
+  splash: (x, z, size, big) => { fx.waterSplash(x, z, size); fx.soundSplash(big ? size : size * 0.5, distCam(x, z)); },
+  stroke: (x, z, size) => { fx.waterSplash(x, z, size * 0.45); fx.soundStroke(size); },
+  bubbles: (x, y, z, n) => { fx.bubbles(x, y, z, n); if (n > 1 && Math.random() < 0.5) fx.soundBubble(); },
+  gasp: () => fx.soundGasp(),
 });
 setNpcContext({
   focus: () => (playing ? { x: me.veh ? me.veh.x : me.x, z: me.veh ? me.veh.z : me.z } : W.places.menu),
@@ -2711,7 +2764,8 @@ function updateHud(dt, t) {
     ui.setHealth(me.hp);
     ui.setCash(eco.cash);
     ui.setArmor(me.armor);
-    ui.setSpecial(me.veh ? me.veh.nitro ?? 1 : drunk.lvl); // yellow bar: nitro while driving, drunkenness on foot
+    ui.setBreath((me.swim && swim.under() && !me.dead) || swim.breath() < 1 ? swim.breath() : null); // underwater: the breath meter takes the armor bar
+    ui.setSpecial(me.veh ? me.veh.nitro ?? 1 : me.swim ? swim.stamina() : drunk.lvl); // yellow bar: nitro while driving, swimming stamina, drunkenness on foot
     // drunk driving where a cop can see it: 1 star (same rule as assault: only counts if seen)
     if (me.veh && !me.seat && drunk.lvl > 0.6 && Math.abs(me.veh.speed) > 5 && wanted.stars === 0 && Math.random() < 0.1) crime('assault', me.veh.x, me.veh.y, me.veh.z);
     if (wanted.stars >= 5 && !me.dead) { survive5 += 0.2; if (survive5 >= 60) goalDone('survive5'); } else survive5 = 0;
@@ -2833,7 +2887,7 @@ function update(dt, t) {
   dt *= adm.slowmo;
   { // combat feel (combat.js): aim blend, recoil, crosshair spread and shake run on real time; a hit pause slows the rest
     const w = WEAPONS[me.weapon], gun = w.kind === 'gun' && !w.rocket;
-    combat.tick(dt, { aiming: aiming && !me.dead && w.kind === 'gun', weapon: w, firing: mouseDown && gun && me.cd > -0.1, moving: (me.moveSpeed || 0) > 0.5 || !!me.veh });
+    combat.tick(dt, { aiming: aiming && !me.dead && !me.swim && w.kind === 'gun', weapon: w, firing: mouseDown && gun && me.cd > -0.1, moving: (me.moveSpeed || 0) > 0.5 || !!me.veh });
     combat.tickPushes(dt, (x, z) => W.pushOutCircle(x, z, 0.4));
     combat.crosshair(gun && !w.scope && !me.dead ? combat.spreadPx(w.spread * (w.pellets ? 1 : 1.6) * combat.spreadMul(aiming, me.crouch), camera.fov, innerHeight) + 3 : 0);
     dt *= combat.timeScale();
@@ -2883,6 +2937,7 @@ function update(dt, t) {
   updateRagdolls(dt);
   updateCamera(dt);
   updateWorldLife(dt, nowMs, t);
+  waterView();
   updateEconomy(dt, me, t);
   ebikes.updateEbikes(dt, me.veh ? me.veh.x : me.x, me.veh ? me.veh.z : me.z);
   { const talk = updateRadio(!!me.veh && !me.veh.T.bike && !me.dead, dt); if (talk) ui.flashPrompt('📻 ' + talk); }
@@ -2900,7 +2955,7 @@ function update(dt, t) {
 }
 
 // the player's action for other players: [code (negative = mirrored), progress] in s[21], s[22] (src/anim.js)
-function actNet() { if (!myAct) { const cv = cover.netAct(); if (cv) return [anim.codeOf(cv.n) * cv.side, cv.k]; const c = combat.netAct(me.ch); return c ? [anim.codeOf(c.n), Math.round(c.k * 100) / 100] : [0, 0]; } const c = anim.codeOf(myAct.n); return [c * (myAct.side < 0 ? -1 : 1), Math.round((myAct.k || 0) * 100) / 100]; }
+function actNet() { if (!myAct) { const sw = me.swim && !me.veh && me.netPose !== 8 && swim.netAct(); if (sw) return [anim.codeOf(sw.n), sw.k]; const cv = cover.netAct(); if (cv) return [anim.codeOf(cv.n) * cv.side, cv.k]; const c = combat.netAct(me.ch); return c ? [anim.codeOf(c.n), Math.round(c.k * 100) / 100] : [0, 0]; } const c = anim.codeOf(myAct.n); return [c * (myAct.side < 0 ? -1 : 1), Math.round((myAct.k || 0) * 100) / 100]; }
 // Slow pan over the riverfront while the menu is open.
 let menuFocus = null; // once you press Play the (hidden) menu camera streams around your spawn instead
 function menuCamera(t) {

@@ -379,6 +379,74 @@ function meleePose(P, n, k, still) {
   keys(P, k, list.map(([kk, fn]) => [kk, (Q) => { copyPose(Q, MB); if (still) stance(Q); fn(Q); }]));
 }
 
+// ---------- swimming (src/swim.js): s = { style: tread | breast | crawl | under | dive, k (dive progress), pitch } ----------
+// The body lies along the water by turning the hips (the whole skeleton) PRONE degrees; limbs are posed as if
+// standing, so "arms overhead" is "arms reaching forward" once prone. Exaggerated San Andreas strokes.
+const PRONE = 84;
+const SWIM_RATE = { tread: 1.1, breast: 0.85, crawl: 1.25, under: 0.75, dive: 0 };
+function swimPose(P, ch, s, t, dt, sp) {
+  const style = s.style || (sp < 0.3 ? 'tread' : 'breast');
+  if (style !== 'dive') ch.swimPh = ((ch.swimPh || 0) + dt * SWIM_RATE[style] * (style === 'tread' || sp > 0.2 ? 1 : 0.35)) % 1;
+  const p = ch.swimPh || 0, w = p * Math.PI * 2;
+  if (style === 'tread') { // upright, head out, legs eggbeating, hands sculling flat
+    P.root[1] = -0.78 + Math.sin(w * 2) * 0.03;
+    set(P, 'hips', 8); set(P, 'spine', 6); set(P, 'chest', 2); set(P, 'head', -6, Math.sin(t * 0.7) * 10);
+    set(P, 'thighL', -38 + Math.sin(w) * 22, 0, 16 + Math.cos(w) * 10); set(P, 'shinL', 75 + Math.sin(w + 1.2) * 30);
+    set(P, 'thighR', -38 - Math.sin(w) * 22, 0, -16 + Math.cos(w) * 10); set(P, 'shinR', 75 - Math.sin(w + 1.2) * 30);
+    set(P, 'footL', 20); set(P, 'footR', 20);
+    const sc = Math.sin(w * 2);
+    armsUp(P, 'L', -38, 0, 52 + sc * 22, -28); armsUp(P, 'R', -38, 0, 52 - sc * 22, -28);
+    set(P, 'handL', 0, 0, -20 * sc); set(P, 'handR', 0, 0, -20 * sc);
+    return 16;
+  }
+  if (style === 'crawl') { // freestyle: alternating arms, body roll, flutter kick, a breath to the side every stroke
+    P.root[1] = -0.04; P.root[2] = 0; // (the back just breaking the surface)
+    const arm = (side, q) => {
+      if (q < 0.5) { const u = q / 0.5; armsUp(P, side, -180 + 175 * u, 0, 10, -15 - 70 * Math.sin(u * Math.PI)); } // the pull, under the body
+      else { const u = (q - 0.5) / 0.5; armsUp(P, side, -5 + 185 * u, 0, 14 + 55 * Math.sin(u * Math.PI), -20 - 95 * Math.sin(u * Math.PI)); } // high-elbow recovery over the water
+    };
+    arm('L', p); arm('R', (p + 0.5) % 1);
+    const roll = Math.sin(w) * 28;
+    set(P, 'hips', PRONE, roll * 0.6); set(P, 'spine', 0, roll * 0.4); set(P, 'chest', 0, roll * 0.2);
+    set(P, 'head', -38, -roll * 0.3 + 45 * Math.pow(Math.max(0, Math.sin(w)), 4), 0); set(P, 'neck', -12);
+    const f = Math.sin(w * 3);
+    set(P, 'thighL', -22 + f * 14, 0, 3); set(P, 'thighR', -22 - f * 14, 0, -3); set(P, 'shinL', 8 + Math.max(0, f) * 14); set(P, 'shinR', 8 + Math.max(0, -f) * 14); set(P, 'footL', 45); set(P, 'footR', 45);
+    return 22;
+  }
+  if (style === 'dive') { // duck dive: tuck the head, reach down, kick the legs up
+    const k = clamp01(s.k ?? 1);
+    P.root[1] = -0.42 - 0.3 * k;
+    set(P, 'hips', PRONE * sm(Math.min(1, k * 1.6)) + 40 * k); set(P, 'head', -10 - 20 * (1 - k));
+    armsUp(P, 'L', -175, 0, 8, -6); armsUp(P, 'R', -175, 0, 8, -6);
+    set(P, 'thighL', -40 * Math.sin(k * Math.PI)); set(P, 'thighR', -40 * Math.sin(k * Math.PI)); set(P, 'shinL', 60 * Math.sin(k * Math.PI)); set(P, 'shinR', 60 * Math.sin(k * Math.PI)); set(P, 'footL', 50); set(P, 'footR', 50);
+    return 14;
+  }
+  // breaststroke (surface: head up for the breath on the pull; underwater: a long pull to the thighs, pitched to where you're heading)
+  const under = style === 'under', pitch = under ? Math.max(-70, Math.min(70, s.pitch || 0)) : 0;
+  const B = (Q, ax, az, el, th, sh, tz, hd) => {
+    Q.root[1] = under ? -0.42 : -0.1; set(Q, 'hips', PRONE - (under ? 0 : 14) + pitch); set(Q, 'head', hd); set(Q, 'neck', -10);
+    armsUp(Q, 'L', ax, 0, az, el); armsUp(Q, 'R', ax, 0, az, el);
+    set(Q, 'thighL', th, 0, tz); set(Q, 'thighR', th, 0, -tz); set(Q, 'shinL', sh); set(Q, 'shinR', sh); set(Q, 'footL', 40 - sh * 0.3); set(Q, 'footR', 40 - sh * 0.3);
+  };
+  const hd = under ? -30 : -48, up = under ? -34 : -68;
+  keys(P, p, under ? [
+    [0, (Q) => B(Q, -178, 6, -4, 4, 6, 3, hd)],
+    [0.3, (Q) => B(Q, -120, 75, -15, 4, 6, 3, hd)],
+    [0.5, (Q) => B(Q, -15, 22, -10, -40, 105, 22, up)], // the long pull, hands to the thighs, legs drawn up
+    [0.68, (Q) => B(Q, -95, 14, -125, -50, 115, 26, hd)],
+    [0.82, (Q) => B(Q, -178, 6, -6, 6, 4, 2, hd)], // shoot forward, kick
+    [1, (Q) => B(Q, -178, 6, -4, 4, 6, 3, hd)],
+  ] : [
+    [0, (Q) => B(Q, -176, 8, -6, 4, 8, 3, hd)],
+    [0.3, (Q) => B(Q, -122, 72, -18, 4, 8, 3, (hd + up) / 2)], // out-sweep
+    [0.48, (Q) => B(Q, -72, 26, -118, -48, 112, 24, up)], // in-sweep, head up for air, knees drawn up and out
+    [0.66, (Q) => B(Q, -150, 10, -60, -30, 70, 32, hd)], // hands forward, the frog kick
+    [0.8, (Q) => B(Q, -176, 8, -6, 6, 6, 4, hd)], // glide
+    [1, (Q) => B(Q, -176, 8, -6, 4, 8, 3, hd)],
+  ]);
+  return 18;
+}
+
 // ---------- cover (src/cover.js): cv = { high, wall (+1: the cover is on the body's left), peek 0..1, blind, hit, edge } ----------
 // Low: a deep crouch, shoulder and head tucked in toward the cover, rising to a half crouch to aim over it.
 // High: upright with the back turned into the wall and the head looking along it; leaning out to aim.
@@ -483,11 +551,7 @@ export function animate(ch, dt, st) {
     set(P, 'spine', 10); armsUp(P, 'L', -60, -18, -95); armsUp(P, 'R', -60, -18, -95);
     add(P, 'upper_armL', Math.sin(t * 6) * 6); add(P, 'upper_armR', Math.sin(t * 6) * 6); set(P, 'head', -8);
   } else if (st.swim) {
-    const p = t * 3.2;
-    P.root[1] = -1.15; set(P, 'hips', -70); set(P, 'head', -55);
-    armsUp(P, 'L', -150 + Math.sin(p) * 70, 0, 20 + Math.cos(p) * 30); armsUp(P, 'R', -150 + Math.sin(p) * 70, 0, 20 + Math.cos(p) * 30);
-    set(P, 'thighL', Math.sin(p * 2) * 25); set(P, 'thighR', -Math.sin(p * 2) * 25); set(P, 'shinL', 10); set(P, 'shinR', 10);
-    if (sp < 0.3) { set(P, 'hips', -10); set(P, 'head', -5); armsUp(P, 'L', -30 + Math.sin(p) * 20, 40, -40); armsUp(P, 'R', -30 - Math.sin(p) * 20, 40, -40); P.root[1] = -1.25; }
+    rate = swimPose(P, ch, st.swim === true ? {} : st.swim, t, dt, sp);
   } else if (st.climb !== undefined) {
     // 0..1 up a wall: jump and reach, hang on the ledge, haul the chest over, knee up, stand
     keys(P, st.climb, [

@@ -47,7 +47,7 @@ python3 tools/serve.py 8765
   - **NPCs and traffic:** `npc.js` (pedestrians), `traffic.js`
   - **Police and crime:** `police.js`, `wanted.js`, `gangs.js`, `carjack.js` (locked cars, window smash, hotwire, alarms, jacked drivers' reactions, gunpoint holdups of drivers, shot tyres / windows / fuel tank; its state rides in the vehicle record's `l` bits from 256 up)
   - **World:** `daynight.js`, `planes.js`, `breakables.js`, `interiors.js`, `venues.js` (bars and casino), `landmarks.js` (lazy-loaded GLB landmarks)
-  - **Player features:** `phone.js`, `radio.js`, `drunk.js`, `economy.js`
+  - **Player features:** `phone.js`, `radio.js`, `drunk.js`, `economy.js`, `cover.js` (take cover; also finds cover for NPC gunmen), `swim.js` (swimming, diving, breath, climbing out)
   - **Effects and sound:** `fx.js` holds both the visual effects and all sound (see below)
 - `src/ui.js`: HUD, minimap and big map (zoom levels, blip tiers, legend), feed, player list.
 - `src/events.js` + `src/events/*.js`: street events (47 types). `src/events/kit.js` is the toolkit: markers, scripted people and cars, the mission banner, win/fail. Story mode reuses it.
@@ -135,6 +135,9 @@ python3 tools/serve.py 8765
 - **Also done:**
   - Carjacking and street mechanics (`src/carjack.js`).
   - Combat feel (`src/combat.js`).
+  - Take cover on F (`src/cover.js`): faces of the city's wall boxes, parked cars and solid street props; low = crouch, high = flat against it; slide, pop out to aim, blind fire, swap cover, vault. Shots from the far side are stopped by the cover (`cover.blocks`, checked in main.js `coverSaves` for NPC, police and player shots). Gang gunmen use `cover.spotFor` and duck / pop up; cops already crouch behind cruisers.
+  - NPC melee (`npc.js` `brawl`): the player's combo moves and timing (combat.js MOVES) with a stretched wind-up (TELE), damage on the contact frame only if still in reach and in front, a hit during the wind-up staggers and cancels it (`flinch` -> `interrupt`), one attacker per target at a time while the rest circle.
+  - Swimming (`src/swim.js`): breaststroke / freestyle (Shift, stamina) / treading water, C to dive, 3D swimming underwater, a breath meter in the armor bar's place and drowning, climbing out over low banks and walls, wading out on beaches, plunging under from a fall, cars sinking to the river bed (E gets you out underwater), splashes, bubbles, CC0 water sounds, murky underwater view and muffled sound. Pose and sync through `anim.js` state codes (`swim*`, `cover*`, appended to LIST).
   - Online fixes: shared admin time/weather/slowmo, passenger-seat clash, stale event cleanup.
   - GTA V-style top-right HUD with new weapon icons (`src/weapon-icons.js`).
 - **People and animations** (`src/anim.js`, `src/people/pose.js`):
@@ -142,8 +145,9 @@ python3 tools/serve.py 8765
   - Confirmed headless: car in/out, get-up, doors, counters, sitting (bar seats and street benches), phone, pool, slots, e-bike pedalling.
   - Sync between players checked only with a simulated remote player (`s[21]`/`s[22]`).
 - **Not done / loose ends:**
-  - A take-cover key.
-  - NPC melee damage still lands at the start of their swing (`npc.js`).
+  - Cover, NPC melee and swimming were tested headless (with a simulated remote player for the pose sync), not with two real browsers.
+  - The map's river banks are smooth slopes, so swimming out is mostly wading out; the climb-out animation needs a quay wall, a dock or a low wall at the water (tested with a test wall box).
+  - Cops still only shoot (no cop melee).
   - Two players breaking into the same parked car each run their own copy.
   - Alarm timing on remote screens is local.
   - A stolen station cruiser's spot can get a new cruiser.

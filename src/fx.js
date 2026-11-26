@@ -1,6 +1,6 @@
 // Visual + sound effects: blood, tracers, explosions, fire. All local-only.
 import * as THREE from 'three';
-import { isLand, groundHeight, pushOutCircle } from './world.js';
+import { isLand, groundHeight, pushOutCircle, WATER_Y } from './world.js';
 
 let scene;
 const parts = [];     // flying particles
@@ -64,6 +64,25 @@ export function splash(x, y, z, vx, vz, n = 4) {
     const m = new THREE.Mesh(box, dropMat); m.scale.setScalar(0.06 + Math.random() * 0.06);
     m.position.set(x, y + 0.1, z); scene.add(m);
     parts.push({ m, vx: vx * 0.3 + (Math.random() - 0.5) * 3, vy: 1.5 + Math.random() * 2.5, vz: vz * 0.3 + (Math.random() - 0.5) * 3, life: 0.6, kind: 'spark' });
+  }
+}
+// Water thrown up where something hits it or a swimmer's arm comes over (size 0..1); drops fall back to the surface
+export function waterSplash(x, z, size = 0.5) {
+  const n = Math.round(3 + size * 14), y = WATER_Y;
+  for (let i = 0; i < n && parts.length < 300; i++) {
+    const m = new THREE.Mesh(box, dropMat); m.scale.setScalar(0.05 + Math.random() * (0.05 + size * 0.08));
+    const a = Math.random() * Math.PI * 2, r = Math.random() * (0.2 + size * 0.5);
+    m.position.set(x + Math.cos(a) * r, y + 0.05, z + Math.sin(a) * r); scene.add(m);
+    parts.push({ m, vx: Math.cos(a) * (0.5 + size * 2.5) * Math.random(), vy: 1.5 + size * 5 * Math.random(), vz: Math.sin(a) * (0.5 + size * 2.5) * Math.random(), life: 0.9, kind: 'drop' });
+  }
+}
+const bubbleMat = new THREE.MeshBasicMaterial({ color: 0xe8f4f2, transparent: true, opacity: 0.6, depthWrite: false });
+// air bubbles rising from a swimmer underwater; they pop at the surface
+export function bubbles(x, y, z, n = 3) {
+  for (let i = 0; i < n && parts.length < 300; i++) {
+    const m = new THREE.Mesh(sphere, bubbleMat); m.scale.setScalar(0.03 + Math.random() * 0.05);
+    m.position.set(x + (Math.random() - 0.5) * 0.2, y + Math.random() * 0.2, z + (Math.random() - 0.5) * 0.2); scene.add(m);
+    parts.push({ m, vx: (Math.random() - 0.5) * 0.2, vy: 0.8 + Math.random() * 0.8, vz: (Math.random() - 0.5) * 0.2, life: 6, kind: 'bubble', ph: Math.random() * 6 });
   }
 }
 export function glass(x, y, z, n = 12) {
@@ -220,11 +239,15 @@ export function updateFx(dt) {
     const p = parts[i];
     p.life -= dt;
     if (p.kind === 'smoke') { p.m.position.x += p.vx * dt; p.m.position.y += p.vy * dt; p.m.position.z += p.vz * dt; p.m.scale.multiplyScalar(1 + dt * 0.6); }
+    else if (p.kind === 'bubble') { // wobble up and pop at the surface
+      p.ph += dt * 9; p.m.position.x += (p.vx + Math.sin(p.ph) * 0.15) * dt; p.m.position.y += p.vy * dt; p.m.position.z += (p.vz + Math.cos(p.ph) * 0.15) * dt;
+      if (p.m.position.y > WATER_Y - 0.03) p.life = 0;
+    }
     else {
       p.vy -= 18 * dt;
       if (p.spin) { p.m.rotation.x += p.spin * dt; p.m.rotation.z += p.spin * 0.7 * dt; }
       p.m.position.x += p.vx * dt; p.m.position.y += p.vy * dt; p.m.position.z += p.vz * dt;
-      if (p.gy === undefined) p.gy = groundHeight(p.m.position.x, p.m.position.z);
+      if (p.gy === undefined) p.gy = isLand(p.m.position.x, p.m.position.z) ? groundHeight(p.m.position.x, p.m.position.z) : WATER_Y; // (over water: the surface)
       if (p.m.position.y < p.gy + 0.05) {
         if (p.kind === 'blood' && Math.random() < 0.5) addDecal(p.m.position.x, p.m.position.z, 0.15 + Math.random() * 0.25, 0);
         if (p.kind === 'glass') { p.m.position.y = p.gy + 0.06; p.vx = p.vy = p.vz = 0; }
@@ -275,7 +298,14 @@ export function updateFx(dt) {
 // ---------- sound: recorded CC0 samples where we have them, synthesized for the rest ----------
 let ac = null, noise = null, master = null, volume = 1;
 // everything plays through one master volume
-function out() { if (!master) { master = ac.createGain(); master.gain.value = volume; master.connect(ac.destination); } return master; }
+let muffle = null, muffled = false;
+function out() { if (!master) { master = ac.createGain(); master.gain.value = volume; muffle = ac.createBiquadFilter(); muffle.type = 'lowpass'; muffle.frequency.value = 22000; master.connect(muffle); muffle.connect(ac.destination); } return master; }
+// underwater: everything goes dull and distant
+export function setUnderwater(on) {
+  if (on === muffled || !ac || !master) return;
+  muffled = on;
+  muffle.frequency.setTargetAtTime(on ? 520 : 22000, ac.currentTime, 0.08);
+}
 export function setVolume(v) { volume = v; if (master) master.gain.value = v; if (musicOn) fadeMusic(); }
 export function unlockAudio() {
   if (ac) { ac.resume(); return; }
@@ -289,7 +319,8 @@ export function unlockAudio() {
 }
 // ---------- recorded sounds (CC0 packs, see credits) in assets/sfx/<name>_<n>.mp3; the synth stands in until they load ----------
 const SFX = { gun_pistol: 4, gunfar_pistol: 2, gun_smg: 4, gunfar_smg: 2, gun_shotgun: 4, gunfar_shotgun: 2, gun_rifle: 4, gunfar_rifle: 2, gun_sniper: 4, gunfar_sniper: 2,
-  metal: 4, crash: 3, glass: 5, punch: 6, step: 6, stepsoft: 6, click: 2, back: 1, confirm: 1, error: 1, boom: 1 };
+  metal: 4, crash: 3, glass: 5, punch: 6, step: 6, stepsoft: 6, click: 2, back: 1, confirm: 1, error: 1, boom: 1,
+  splash: 3, swim: 5, bubble: 3 }; // water: rubberduck's 40 CC0 water / splash SFX (OpenGameArt)
 const sfx = {};
 function loadSfx() {
   for (const [k, n] of Object.entries(SFX)) for (let i = 1; i <= n; i++)
@@ -534,6 +565,18 @@ export function footstep(kind, loud = 1) {
   else if (kind === 'water') burst(0.12, 1800, v * 0.9);
   else if (kind === 'snow') burst(0.09, 600, v * 0.8);
   else burst(0.035, 2600 + Math.random() * 600, v * 0.75);
+}
+// water: hitting it (big: a jump or a fall), a swimming stroke, bubbles, and a gasp for air when you come up
+export function soundSplash(size = 1, dist = 0) { const v = (0.25 + 0.55 * size) * fall(dist); if (!sample('splash', v, { rate: 1.15 - size * 0.25 })) burst(0.35 + size * 0.3, 1500, v * 0.6); }
+export function soundStroke(vol = 0.4) { if (!sample('swim', 0.18 * vol + 0.06)) burst(0.12, 1800, 0.05 * vol); }
+export function soundBubble() { if (!sample('bubble', 0.22, { rate: 0.9 + Math.random() * 0.3 })) tone('sine', 500 + Math.random() * 400, 0.06, 0.04); }
+export function soundGasp() {
+  if (!ac) return;
+  const t = ac.currentTime, s = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain();
+  s.buffer = noise; f.type = 'bandpass'; f.Q.value = 1.4;
+  f.frequency.setValueAtTime(900, t); f.frequency.linearRampToValueAtTime(1700, t + 0.35);
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.32, t + 0.06); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
+  s.connect(f); f.connect(g); g.connect(out()); s.start(t); s.stop(t + 0.55);
 }
 // WASTED: a low boom with a falling, detuned chord over it.
 export function soundWasted() {

@@ -710,8 +710,11 @@ export function stepVehicle(v, inp, dt) {
   impact = Math.max(impact, hitWalls(v));
   v.landed = 0;
   if (!W.isLand(v.x, v.z) && v.y < 0.3) {
+    // in the river: it floats a moment, settles to the windows, then goes down to the bottom
     v.sinkT += dt; v.vx *= Math.exp(-2.5 * dt); v.vz *= Math.exp(-2.5 * dt);
-    v.y = -Math.min(2.2, v.sinkT * 0.8); v.vy = 0; v.air = 0;
+    const bed = Math.min(W.WATER_Y - 0.6, W.terrainHeight(v.x, v.z) + 0.1);
+    v.y = Math.max(bed, v.sinkT < 1.2 ? Math.min(v.y, W.WATER_Y - 0.45 * v.sinkT) : v.y - dt * Math.min(0.9, 0.2 + (v.sinkT - 1.2) * 0.25));
+    v.vy = 0; v.air = 0;
   } else {
     v.sinkT = 0;
     const floor = W.isLand(v.x, v.z) ? gh : -5;

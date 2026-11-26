@@ -79,7 +79,15 @@ export function setPrompt(t, bar = null) {
   if (t && bar !== null) { const b = document.createElement('i'); b.className = 'pbar'; const f = document.createElement('b'); f.style.width = Math.round(bar * 100) + '%'; b.append(f); el.prompt.append(b); }
 }
 export function flashPrompt(t) { el.prompt.textContent = t; el.prompt.hidden = false; promptHold = performance.now() + 1500; }
-export function setArmor(a) { el.armorfill.style.width = Math.max(0, Math.min(100, a)) + '%'; }
+let breathOn = false, armorW = '0%';
+export function setArmor(a) { armorW = Math.max(0, Math.min(100, a)) + '%'; if (!breathOn) el.armorfill.style.width = armorW; }
+// the breath meter (src/swim.js): while it's draining or refilling it takes over the armor bar, in pale blue, and
+// flashes when it's nearly gone; null hands the bar back to the armor
+export function setBreath(f) {
+  const on = f !== null && f !== undefined;
+  if (on !== breathOn) { breathOn = on; el.armorfill.parentElement.classList.toggle('breath', on); if (!on) { el.armorfill.style.width = armorW; el.armorfill.parentElement.classList.remove('low'); } }
+  if (on) { el.armorfill.style.width = Math.round(Math.max(0, Math.min(1, f)) * 100) + '%'; el.armorfill.parentElement.classList.toggle('low', f < 0.25); }
+}
 // yellow bar under the minimap (GTA's special ability slot): nitro in a car, how drunk you are on foot (0..1)
 export function setSpecial(f) { el.spfill.style.width = Math.round(Math.max(0, Math.min(1, f)) * 100) + '%'; }
 let shownCash = -1, deltaSum = 0, deltaUntil = 0;
