@@ -5,7 +5,7 @@
 # Headless only:  Blender -b --factory-startup -P build.py -- kahl unionstation freighthouse dillon
 # References: docs/regions/davenport-downtown.md.
 import sys
-ROOT_ = '/Users/dainmoens/Documents/Tim Arnett Town/'
+ROOT_ = __import__('os').environ.get('TAT_ROOT', '/Users/dainmoens/Documents/Tim Arnett Town/') + ''
 exec(open(ROOT_ + 'assets/src/landmarks.py').read(), globals())
 SRC = ROOT + 'assets/src/regions/davenport-downtown/'
 LOUT = OUT + 'regions/davenport-downtown/'

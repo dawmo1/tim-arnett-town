@@ -4,7 +4,7 @@
 # Headless only:  Blender -b --factory-startup -P coal_valley.py -- niabi_entrance cv_municipal   (no names = all)
 # References: docs/regions/coal-valley.md.
 import sys, math
-exec(open('/Users/dainmoens/Documents/Tim Arnett Town/assets/src/landmarks.py').read(), globals())
+exec(open(__import__('os').environ.get('TAT_ROOT', '/Users/dainmoens/Documents/Tim Arnett Town/') + 'assets/src/landmarks.py').read(), globals())
 SRC = ROOT + 'assets/src/regions/coal-valley/'
 LOUT = OUT + 'regions/coal-valley/'
 

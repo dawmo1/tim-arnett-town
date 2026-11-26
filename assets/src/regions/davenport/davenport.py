@@ -4,7 +4,7 @@
 # References: docs/regions/davenport.md. Origin = the anchor in src/regions/davenport.js (ground: true), no heading:
 # Blender X = game x, Blender Y = -game z.
 import sys, math
-exec(open('/Users/dainmoens/Documents/Tim Arnett Town/assets/src/landmarks.py').read(), globals())
+exec(open(__import__('os').environ.get('TAT_ROOT', '/Users/dainmoens/Documents/Tim Arnett Town/') + 'assets/src/landmarks.py').read(), globals())
 LOUT = OUT + 'regions/davenport/'
 SRC = ROOT + 'assets/src/regions/davenport/'
 D = {}

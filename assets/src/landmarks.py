@@ -14,7 +14,7 @@
 #   lm_body (walls/trim), lm_glass (dark windows), lm_lit (windows that glow at night), lm_neon (signs:
 #   glow in their own vertex colour at night). No normals are exported (the game shades flat).
 import math, random, os
-exec(open('/Users/dainmoens/Documents/Tim Arnett Town/assets/src/tat.py').read(), globals())
+exec(open(__import__('os').environ.get('TAT_ROOT', '/Users/dainmoens/Documents/Tim Arnett Town/') + 'assets/src/tat.py').read(), globals())
 import bmesh
 from mathutils import Vector, Matrix
 

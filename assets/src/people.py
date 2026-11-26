@@ -9,7 +9,7 @@
 #   4 shoes   5 hair   6 hat / accent   7 fixed-colour bits (glasses, badges)
 # Blender axes: Z up, the character faces -Y, its left side is +X.
 import math
-exec(open('/Users/dainmoens/Documents/Tim Arnett Town/assets/src/tat.py').read(), globals())
+exec(open(__import__('os').environ.get('TAT_ROOT', '/Users/dainmoens/Documents/Tim Arnett Town/') + 'assets/src/tat.py').read(), globals())
 from mathutils import Vector
 
 # ---------------- skeleton (rest pose: A-pose) ----------------

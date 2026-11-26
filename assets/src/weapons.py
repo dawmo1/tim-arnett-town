@@ -2,7 +2,7 @@
 # the barrel pointing forward (-Y) and up = +Z, plus an empty child "muzzle_<name>" at the barrel tip.
 # Run in Blender:  exec(open(ROOT + 'assets/src/weapons.py').read())
 import math
-exec(open('/Users/dainmoens/Documents/Tim Arnett Town/assets/src/tat.py').read(), globals())
+exec(open(__import__('os').environ.get('TAT_ROOT', '/Users/dainmoens/Documents/Tim Arnett Town/') + 'assets/src/tat.py').read(), globals())
 from mathutils import Vector
 
 reset()

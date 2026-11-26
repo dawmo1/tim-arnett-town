@@ -3,7 +3,7 @@
 # Reuses the landmark kit (assets/src/landmarks.py) and writes GLBs to assets/models/regions/silvis/,
 # sources to assets/src/regions/silvis/. References: docs/regions/silvis.md.
 import sys, math
-exec(open('/Users/dainmoens/Documents/Tim Arnett Town/assets/src/landmarks.py').read(), globals())
+exec(open(__import__('os').environ.get('TAT_ROOT', '/Users/dainmoens/Documents/Tim Arnett Town/') + 'assets/src/landmarks.py').read(), globals())
 LOUT = OUT + 'regions/silvis/'
 SRC = ROOT + 'assets/src/regions/silvis/'
 bpy.context.scene.name = LM_SCENE

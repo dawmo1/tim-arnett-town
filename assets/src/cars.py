@@ -6,7 +6,7 @@
 # Material names the game recognises: paint, paint2 (second colour), glass, trim, chrome, lamp_head,
 # lamp_tail, interior, tire, rim, plate, decal.
 import math
-exec(open('/Users/dainmoens/Documents/Tim Arnett Town/assets/src/tat.py').read(), globals())
+exec(open(__import__('os').environ.get('TAT_ROOT', '/Users/dainmoens/Documents/Tim Arnett Town/') + 'assets/src/tat.py').read(), globals())
 from mathutils import Vector
 
 MAT = {}

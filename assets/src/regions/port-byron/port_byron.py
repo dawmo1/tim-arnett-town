@@ -4,7 +4,7 @@
 # Each file: <name>_lod0 + <name>_lod1, origin = the anchor in the JS module at ground level (ground: true).
 # Sources and what is guessed: docs/regions/port-byron.md.
 import sys, math
-exec(open('/Users/dainmoens/Documents/Tim Arnett Town/assets/src/landmarks.py').read(), globals())
+exec(open(__import__('os').environ.get('TAT_ROOT', '/Users/dainmoens/Documents/Tim Arnett Town/') + 'assets/src/landmarks.py').read(), globals())
 LOUT = ROOT + 'assets/models/regions/port-byron/'
 SRC = ROOT + 'assets/src/regions/port-byron/'
 R = {}

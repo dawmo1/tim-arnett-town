@@ -4,7 +4,7 @@
 # References: docs/regions/rock-island.md. Conventions as landmarks.py (Blender X = game x, Blender -Y = game +z,
 # origin = the model's anchor at its base height, <name>_lod0 / <name>_lod1, colours baked into 'Col').
 import sys, math
-ROOT = '/Users/dainmoens/Documents/Tim Arnett Town/'
+ROOT = __import__('os').environ.get('TAT_ROOT', '/Users/dainmoens/Documents/Tim Arnett Town/') + ''
 exec(open(ROOT + 'assets/src/landmarks.py').read(), globals())
 SRC = ROOT + 'assets/src/regions/rock-island/'
 LOUT = ROOT + 'assets/models/regions/rock-island/'

@@ -3,7 +3,7 @@
 # vertex colour layer so the game can draw every copy of a prop in one instanced call.
 # Run in Blender:  exec(open(ROOT + 'assets/src/props.py').read())
 import math, random
-exec(open('/Users/dainmoens/Documents/Tim Arnett Town/assets/src/tat.py').read(), globals())
+exec(open(__import__('os').environ.get('TAT_ROOT', '/Users/dainmoens/Documents/Tim Arnett Town/') + 'assets/src/tat.py').read(), globals())
 from mathutils import Vector, noise
 
 reset()

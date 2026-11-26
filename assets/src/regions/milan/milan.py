@@ -3,7 +3,7 @@
 # Background Blender only:  Blender -b --factory-startup -P milan.py -- muni camden shelter
 # References and guesses: docs/regions/milan.md. Footprints are the OSM / Microsoft outlines from the tile data.
 import sys
-exec(open('/Users/dainmoens/Documents/Tim Arnett Town/assets/src/landmarks.py').read(), globals())
+exec(open(__import__('os').environ.get('TAT_ROOT', '/Users/dainmoens/Documents/Tim Arnett Town/') + 'assets/src/landmarks.py').read(), globals())
 SRC = ROOT + 'assets/src/regions/milan/'
 LOUT = OUT + 'regions/milan/'
 

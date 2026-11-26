@@ -8,7 +8,7 @@
 # The two IL 84 bridges follow the deck profile the game draws from data/roads (edge node heights + e.rise), so if the
 # map build changes the bridge heights, re-run this script and the piers/girders follow.
 import bpy, sys, json, glob, math
-ROOT = '/Users/dainmoens/Documents/Tim Arnett Town/'
+ROOT = __import__('os').environ.get('TAT_ROOT', '/Users/dainmoens/Documents/Tim Arnett Town/') + ''
 exec(open(ROOT + 'assets/src/landmarks.py').read(), globals())
 from mathutils import Vector
 

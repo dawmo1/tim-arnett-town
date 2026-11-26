@@ -3,7 +3,7 @@
 # Headless:  Blender -b --factory-startup -P assets/src/regions/moline/moline.py -- leclaire wharton deerewiman
 # References: docs/regions/moline.md.
 import sys
-exec(open('/Users/dainmoens/Documents/Tim Arnett Town/assets/src/landmarks.py').read(), globals())
+exec(open(__import__('os').environ.get('TAT_ROOT', '/Users/dainmoens/Documents/Tim Arnett Town/') + 'assets/src/landmarks.py').read(), globals())
 LOUT = OUT + 'regions/moline/'
 SRC = ROOT + 'assets/src/regions/moline/'
 

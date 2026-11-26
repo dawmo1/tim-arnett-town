@@ -4,7 +4,7 @@
 # Footprints are OSM (ids in docs/regions/geneseo.md); anchors are game x/z (tools/map-config.mjs project()).
 # Blender X = game x - anchor x, Blender Y = -(game z - anchor z), Z up, base at 0 (the game sits it on the terrain).
 import sys, math
-ROOT = '/Users/dainmoens/Documents/Tim Arnett Town/'
+ROOT = __import__('os').environ.get('TAT_ROOT', '/Users/dainmoens/Documents/Tim Arnett Town/') + ''
 exec(open(ROOT + 'assets/src/landmarks.py').read(), globals())
 SRC = ROOT + 'assets/src/regions/geneseo/'
 LOUT = OUT + 'regions/geneseo/'

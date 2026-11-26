@@ -6,7 +6,7 @@
 # Conventions as landmarks.py: Blender X = game x, Blender -Y = game +z, origin = the model's anchor (game x/z) at
 # its base height. Sign models: traffic drives toward game +z (Blender -Y); faces look at Blender +Y.
 import sys, math
-ROOT = '/Users/dainmoens/Documents/Tim Arnett Town/'
+ROOT = __import__('os').environ.get('TAT_ROOT', '/Users/dainmoens/Documents/Tim Arnett Town/') + ''
 exec(open(ROOT + 'assets/src/landmarks.py').read(), globals())
 SRC = ROOT + 'assets/src/regions/countryside/'
 LOUT = OUT + 'regions/countryside/'

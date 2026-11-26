@@ -3,7 +3,7 @@
 # Headless only:  Blender -b --factory-startup -P le_claire.py -- distillery bard twilight freedomrock
 # References: docs/regions/le-claire.md. [G] = guess (no photo source could be read).
 import sys, math
-ROOT = '/Users/dainmoens/Documents/Tim Arnett Town/'
+ROOT = __import__('os').environ.get('TAT_ROOT', '/Users/dainmoens/Documents/Tim Arnett Town/') + ''
 exec(open(ROOT + 'assets/src/landmarks.py').read(), globals())
 SRC = ROOT + 'assets/src/regions/le-claire/'
 LOUT = ROOT + 'assets/models/regions/le-claire/'
