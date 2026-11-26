@@ -128,17 +128,29 @@ python3 tools/serve.py 8765
 - Shadow-pass shaders and the tracer material aren't prewarmed.
 - Licence plate and taxi-sign text use the same fix as the bus sign, which reads correctly in-game ("12 ARNETT AVE"); the plates and taxi sign weren't checked in-game themselves.
 
-## Session status (2026-11-26, paused for the night)
+## Session status (2026-11-27)
 
-- Working branch `claude/modest-mayer-aphv17` (pushed, NOT merged into `main` yet; the live site is unchanged).
-- Merged into it: e-bikes and Arnett Bike docks, detailed car models with LODs, landmark interiors (arena, NorthPark, airport, Deere display building, Circa '21, Old Main, Clock Tower, Watch Tower Lodge; Riverdale HS skipped, outside the map).
-- San Andreas-style people + interaction animations (`src/anim.js`, `src/people/pose.js`):
-  - Confirmed in-game (headless, daylight): getting in and out of cars, getting up after a fall, doors, counters (give/take), sitting (bar seats and street benches, E), phone, pool, slots, e-bike pedalling.
-  - Animation sync between players checked with a simulated remote player: actions, melee moves and flinches all come through `s[21]`/`s[22]`.
-  - The people texture seams are fixed (the tint mask is read from the nearest texel, so no coloured lines along painted edges).
-- Combat (`src/combat.js`): smooth aim camera, recoil, spread crosshair, frame-rate independent fire rates, sticky lock-on, smooth shake, hit pause; melee combos with contact frames (fists, knife, bat/crowbar, stomp on the downed); directional hit reactions. Not done: a take-cover key (Q is the weapon wheel; crouching by a wall is still the cover), NPC melee damage still lands at the start of their swing (npc.js).
-- To do before pushing to `main`:
-  - Online fixes are done (2026-11-27). Dain must publish the new `database.rules.json`, which adds the `world` node and old-event deletion.
-  - Dain must run `cd tools && npm run checks` on the Mac (check-roads needs `tools/cache`).
-  - The dark-blue box in the top-left of headless screenshots is not in the page or the 3D scene: the box is the page background showing through the 3D canvas, exactly where the minimap would be if flipped top to bottom. Likely a quirk of headless software rendering; ask Dain whether he sees it in a real browser.
-- Blender 5.2.5 was installed in the cloud container at `/opt/blender-dl`; scripts read the repo root from `TAT_ROOT` (`TAT_ROOT=$PWD/ blender -b -P assets/src/<script>.py`).
+- Everything below is merged into `main` and live.
+- **Roadmap items done:** 1 e-bikes, 2 car models, 3 animations, 4 character models, 5 enterable landmarks (Riverdale HS skipped: outside the map).
+- **Also done:**
+  - Carjacking and street mechanics (`src/carjack.js`).
+  - Combat feel (`src/combat.js`).
+  - Online fixes: shared admin time/weather/slowmo, passenger-seat clash, stale event cleanup.
+  - GTA V-style top-right HUD with new weapon icons (`src/weapon-icons.js`).
+- **People and animations** (`src/anim.js`, `src/people/pose.js`):
+  - San Andreas style.
+  - Confirmed headless: car in/out, get-up, doors, counters, sitting (bar seats and street benches), phone, pool, slots, e-bike pedalling.
+  - Sync between players checked only with a simulated remote player (`s[21]`/`s[22]`).
+- **Not done / loose ends:**
+  - A take-cover key.
+  - NPC melee damage still lands at the start of their swing (`npc.js`).
+  - Two players breaking into the same parked car each run their own copy.
+  - Alarm timing on remote screens is local.
+  - A stolen station cruiser's spot can get a new cruiser.
+  - The window-smash pose reads as a forearm more than an elbow.
+  - Nothing new has been tested with two real browsers.
+- **Dain:**
+  - Publish the new `database.rules.json` (adds the `world` node and old-event deletion; backward compatible).
+  - Run `cd tools && npm run checks` on the Mac (check-roads needs `tools/cache`).
+- The dark-blue box in headless screenshots is a quirk of headless software rendering (Dain doesn't see it).
+- Blender 5.2.5 is installed in the cloud container at `/opt/blender-dl`; scripts read the repo root from `TAT_ROOT` (`TAT_ROOT=$PWD/ blender -b -P assets/src/<script>.py`).
