@@ -555,4 +555,14 @@ export function viewers() {
   }
   return out;
 }
+// A parked cruiser outside a station within r of (x, z) leaves the roster and is handed back as a plain car (a
+// player is breaking into it: carjack.js). Host only: the host's roster is the one everybody sees.
+export function takeParked(x, z, r) {
+  for (const u of cops.values()) {
+    if (!u.parked || u.kind !== 0 || isDown(u) || u.id[0] === 's' || Math.hypot(u.v.x - x, u.v.z - z) > r) continue;
+    cops.delete(u.id); fx.stopFire(u.fire);
+    return u.v;
+  }
+  return null;
+}
 export function clearAll() { for (const id of [...cops.keys()]) remove(id); }

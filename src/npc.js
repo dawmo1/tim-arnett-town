@@ -353,7 +353,7 @@ export function scare(x, z, radius, kind = 'gunfire') {
 const reactT = (w) => w.react + (w.texting || w.chatty || (w.fixed && (w.fixed.pose === 'phone' || w.fixed.pose === 'chat')) ? 0.45 : 0);
 export const panicNear = (x, z, radius) => scare(x, z, radius, 'gunfire');
 // A crash, a fistfight or someone down (no shooting): people stop, gather round and film it.
-const WATCH_LINES = { crash: ['Whoa!', 'Did you see that?!', 'Is everyone OK?', "I'm calling 911!", 'Oh my god!'], fight: ['Fight! Fight!', 'Break it up!', 'Ooooh!', 'Somebody stop them!', 'Get him!'], down: ['Is he OK?!', 'Call an ambulance!', 'Oh no...', 'Somebody help!'] };
+const WATCH_LINES = { alarm: ['Hey! Is that your car?!', "Somebody's stealing a car!", 'Ugh, that alarm...', "I'm calling the cops!", 'Hey! Stop!'], crash: ['Whoa!', 'Did you see that?!', 'Is everyone OK?', "I'm calling 911!", 'Oh my god!'], fight: ['Fight! Fight!', 'Break it up!', 'Ooooh!', 'Somebody stop them!', 'Get him!'], down: ['Is he OK?!', 'Call an ambulance!', 'Oh no...', 'Somebody help!'] };
 export function incident(x, z, kind = 'crash') {
   let n = 0;
   for (const w of walkers) {
@@ -802,6 +802,35 @@ export function spawnFleeing(x, z, h, down = 0, angry = false) {
   const f = { ch, x, z, h, t: (angry ? 16 : 8) + down, angry };
   if (!angry && down > 0) ragdoll(ch, { x: Math.sin(h) * 4, y: 2.5, z: Math.cos(h) * 4 }, { getUp: down, onUp: (p, hh) => { f.x = p.x; f.z = p.z; f.h = hh; } });
   fleeing.push(f);
+}
+// A driver dragged out of (or bailing from) their car (carjack.js): a real townsperson who can be shot or chased.
+// fall = an impulse {x, y, z} to throw them to the ground first (they get up after o.down seconds); then they react:
+//   'flee' run off · 'fight' come at you with fists · 'gun' pull a gun · 'call' stand there phoning the cops (o.onCall(w))
+//   'surrender' hands up and back away (held up at gunpoint), then run
+const JACK_LINES = { fight: ['My car!', 'Get out of my car!', "You're dead!", 'Oh, hell no!'], gun: ['Big mistake!', "That's my ride!", 'You picked the wrong car!'],
+  call: ['Police? My car just got stolen!', 'Hello, 911? Someone took my car!', "I'm calling the cops!"], flee: ['My car!', 'Take it! Take it!', 'Help!', 'Thief!'], surrender: ["Don't shoot!", "OK, OK! It's yours!", 'Easy! Easy!'] };
+export function spawnJacked(x, z, h, react, o = {}) {
+  const w = newWalker(o.gang ? 'gang:' + o.gang : o.role || 'walk', x, z, h, null);
+  if (o.gang) w.gang = o.gang;
+  w.temper = react === 'gun' ? 'gunman' : react === 'fight' ? 'brawler' : 'normal';
+  w.texting = false; w.jacked = true;
+  w.ch.g.position.set(x, w.y, z); w.ch.g.rotation.set(0, h, 0); w.ch.g.updateMatrixWorld(true); // (a ragdoll starts from the body's matrix)
+  w.mode = 'flee'; w.modeT = 99; w.fh = h; w.fleeSp = 0.01; // (held still while on the ground)
+  const from = () => { const t = ctx.target(); return t ? { x: t.x, z: t.z } : { x: x - Math.sin(h), z: z - Math.cos(h) }; };
+  const go = () => {
+    if (w.dead) return;
+    const f = from();
+    w.fleeSp = 0; w.h = Math.atan2(f.x - w.x, f.z - w.z);
+    if (react !== 'call') say(w, pick(JACK_LINES[react] || JACK_LINES.flee), 2.4);
+    if (react === 'fight') { w.enemy = null; goHostile(w, 'melee', false); w.modeT = 14; }
+    else if (react === 'gun') { w.enemy = null; goHostile(w, 'gun', false); w.modeT = 16; w.cd = 0.5; }
+    else if (react === 'call') { calmDown(w); say(w, pick(JACK_LINES.call), 3.5); o.onCall?.(w); }
+    else if (react === 'surrender') { w.mode = 'surrender'; w.modeT = 1.6 + Math.random(); w.heldUp = 0; w.giveUp = null; }
+    else startFlee(w, f.x, f.z);
+  };
+  if (o.fall) ragdoll(w.ch, o.fall, { getUp: o.down || 1.4, onUp: (p, hh) => { w.x = p.x; w.z = p.z; w.h = hh; go(); } }) || go();
+  else go();
+  return w;
 }
 // a food cart near (x, z), for buying a snack
 export function cartNear(x, z, r) { for (const g of groups) if (g.cart && Math.hypot(g.cart.x - x, g.cart.z - z) < r) return g.cart; return null; }

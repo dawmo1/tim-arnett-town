@@ -274,10 +274,54 @@ function actPose(P, ch, a, t, st) {
         [1, S((Q) => stand(Q, t, ch))],
       ]);
       rate = 18; break;
+    case 'carTry': case 'carSmash': case 'carReach': case 'hotwire': case 'carHandsUp': rate = mechPose(P, ch, n, k, t); break;
     default: stand(P, t, ch);
   }
   if (a.side < 0) mirror(P);
   return rate;
+}
+
+// Breaking into cars (src/carjack.js), facing the driver's door like carOpen: rattle the locked handle, wind up and
+// drive an elbow through the window, reach in for the lock; then hunched under the dash pulling wires (seated).
+function mechPose(P, ch, n, k, t) {
+  const reach = (Q) => { stand(Q, t, ch); armsUp(Q, 'R', -80, 0, 4, -25); set(Q, 'spine', 10, 8); set(Q, 'head', 8); };
+  const yank = (Q) => { stand(Q, t, ch); armsUp(Q, 'R', -62, 0, 8, -55); set(Q, 'spine', -6, 16); set(Q, 'chest', -4); set(Q, 'thighL', -14); set(Q, 'thighR', 10); Q.root[2] -= 0.08; };
+  switch (n) {
+    case 'carTry': // grab the handle, haul on it twice; it won't give
+      keys(P, k, [[0, (Q) => stand(Q, t, ch)], [0.25, reach], [0.42, yank], [0.58, reach], [0.74, yank], [1, (Q) => { stand(Q, t, ch); set(Q, 'head', 4, 20); }]]);
+      return 20;
+    case 'carSmash': // look about, cock the elbow back and up, drive it through the glass, shake the arm off
+      keys(P, k, [
+        [0, (Q) => { stand(Q, t, ch); set(Q, 'head', 4, 20); }],
+        [0.38, (Q) => { stand(Q, t, ch); armsUp(Q, 'R', -45, 25, 60, -150); set(Q, 'handR', 0, 0, 30); set(Q, 'spine', -4, -32); set(Q, 'chest', 0, -14); set(Q, 'head', 0, 18); set(Q, 'thighR', 12); set(Q, 'thighL', -6); Q.root[2] -= 0.06; }],
+        [0.5, (Q) => { stand(Q, t, ch); armsUp(Q, 'R', -88, -10, 12, -150); set(Q, 'handR', 0, 0, 30); set(Q, 'spine', 14, 30); set(Q, 'chest', 6, 12); set(Q, 'head', 6, -6); set(Q, 'thighL', -26); set(Q, 'shinL', 16); set(Q, 'thighR', 14); Q.root[2] += 0.1; }],
+        [0.68, (Q) => { stand(Q, t, ch); armsUp(Q, 'R', -80, -6, 18, -140); set(Q, 'spine', 12, 24); set(Q, 'head', 10); set(Q, 'thighL', -22); set(Q, 'shinL', 14); Q.root[2] += 0.08; }],
+        [1, (Q) => { stand(Q, t, ch); armsUp(Q, 'R', -30, 0, 22, -40); set(Q, 'spine', 4, 6); }],
+      ]);
+      return 26;
+    case 'carReach': // lean in through the broken window, feel for the lock, pop it
+      keys(P, k, [
+        [0, (Q) => { stand(Q, t, ch); armsUp(Q, 'R', -30, 0, 22, -40); }],
+        [0.4, (Q) => { stand(Q, t, ch); armsUp(Q, 'R', -100, 0, 6, -20); set(Q, 'handR', 0, 0, 25); set(Q, 'spine', 24, 10); set(Q, 'chest', 8); set(Q, 'head', 14); set(Q, 'thighL', -18); set(Q, 'shinL', 12); Q.root[2] += 0.12; Q.root[1] -= 0.04; }],
+        [0.65, (Q) => { stand(Q, t, ch); armsUp(Q, 'R', -112, 0, 2, -45); set(Q, 'handR', 30, 0, 25); set(Q, 'spine', 28, 6); set(Q, 'chest', 8); set(Q, 'head', 16); set(Q, 'thighL', -18); set(Q, 'shinL', 12); Q.root[2] += 0.14; Q.root[1] -= 0.05; }],
+        [1, (Q) => stand(Q, t, ch)],
+      ]);
+      return 18;
+    case 'hotwire': { // sat low, head under the steering column, both hands twisting wires (k loops)
+      const a = Math.sin(t * 13), b = Math.sin(t * 9 + 1.3), spark = Math.max(0, Math.sin(k * Math.PI * 6)) ** 8;
+      seated(P, t, ch, false);
+      set(P, 'spine', 30); set(P, 'chest', 14, -8); set(P, 'neck', 10); set(P, 'head', 22 - spark * 14, -10);
+      armsUp(P, 'L', -62 + a * 6, -10, 14, -85 + b * 10); armsUp(P, 'R', -58 - a * 6, 10, 10, -80 - b * 12);
+      set(P, 'handL', b * 25, 0, -10); set(P, 'handR', -a * 25, 0, 10);
+      return 22;
+    }
+    case 'carHandsUp': // a driver held up at gunpoint: sat in the seat, both hands high off the wheel
+      seated(P, t, ch, false);
+      armsUp(P, 'L', -160, 0, 30, -40); armsUp(P, 'R', -160, 0, 30, -40); set(P, 'spine', -8); set(P, 'head', -6 + Math.sin(t * 20) * 2);
+      return 16;
+  }
+  stand(P, t, ch);
+  return 14;
 }
 
 // ---------- the state machine ----------

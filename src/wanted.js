@@ -22,8 +22,8 @@ export function copSees(x, y, z) { return police.viewers().some((c) => sees(c, x
 const copNear = (x, z, r) => police.viewers().some((c) => Math.hypot(c.x - x, c.z - z) < r);
 
 // A townsperson who saw it pulls out a phone; if they finish the call, the cops come.
-function civilianCall(x, z, lvl, nowMs) {
-  let best = null, bd = 45;
+function civilianCall(x, z, lvl, nowMs, r = 45) {
+  let best = null, bd = r;
   for (const w of walkers) {
     if (w.dead || w.call) continue;
     const d = Math.hypot(w.x - x, w.z - z);
@@ -48,6 +48,10 @@ export function crime(type, x, y, z) {
   switch (type) {
     case 'assault': case 'steal': if (seen) raise(1, x, z, true); break;
     case 'carjack': if (seen) raise(1, x, z, true); else civilianCall(x, z, 1); break;
+    // smashing into a parked car (carjack.js): a screaming alarm gets someone dialling, a quiet one only if they're close
+    case 'breakin': if (seen) raise(1, x, z, true); else civilianCall(x, z, 1); break;
+    case 'breakinQuiet': if (seen) raise(1, x, z, true); else if (Math.random() < 0.5) civilianCall(x, z, 1, 0, 18); break;
+    case 'copcar': raise(1, x, z, seen); break; // a cruiser's break-in is logged at once
     case 'gunfire': if (copNear(x, z, 35)) raise(2, x, z, true); else if (seen || copNear(x, z, 80)) raise(1, x, z, seen); else if (Math.random() < 0.5) civilianCall(x, z, 1); break;
     case 'bumpcop': raise(1, x, z, true); break; // a tap on a cop car: they light up and chase
     case 'ramcop': raise(2, x, z, true); break; // a real ram
@@ -64,6 +68,13 @@ export function crime(type, x, y, z) {
     }
     case 'killheli': raise(5, x, z, true); break;
   }
+}
+
+// Someone (a carjacked driver) phones it in themselves: lvl stars when they finish the call, unless they're stopped.
+export function callCops(w, lvl, x, z) {
+  if (!w || w.dead || w.call) return;
+  w.call = { t: 4 + Math.random() * 2, lvl, x, z };
+  wanted.callers.push(w);
 }
 
 // Returns 'lost' the frame the stars clear.

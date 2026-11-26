@@ -383,6 +383,18 @@ function tone(type, freq, dur, vol, t0 = 0) {
   o.start(ac.currentTime + t0); o.stop(ac.currentTime + t0 + dur);
 }
 export function soundHorn(dist = 0) { const v = 0.18 * fall(dist * 1.5); tone('square', 392, 0.35, v); tone('square', 494, 0.35, v * 0.8); }
+// ---- break-ins and hotwiring (carjack.js) ----
+// a side window going in: recorded glass, plus a crunchy noise hit so it still reads before the samples load
+export function soundGlass(dist = 0, vol = 0.75) { const v = vol * fall(dist); if (!sample('glass', v, { rate: 1.05 + Math.random() * 0.15 })) burst(0.3, 5200, 0.45 * v); band(0, 0.08, 900, 1.5, 0.35 * v); }
+// a locked handle rattling: n dull clunks
+export function soundLatch(dist = 0, n = 2) { const v = fall(dist); for (let i = 0; i < n; i++) { band(i * 0.17, 0.06, 1300, 4, 0.4 * v); band(i * 0.17 + 0.02, 0.04, 3400, 6, 0.12 * v); } }
+// the lock popping up from inside
+export function soundUnlock(dist = 0) { const v = fall(dist); band(0, 0.04, 2200, 5, 0.35 * v); band(0.06, 0.05, 1500, 5, 0.3 * v); }
+// hotwiring: wires sparking and the starter motor cranking (len seconds of cranking)
+export function soundSpark(dist = 0) { const v = fall(dist); band(0, 0.05, 6000, 2, 0.25 * v); band(0.05, 0.03, 4200, 3, 0.15 * v); }
+export function soundCrank(dist = 0, len = 0.6) { const v = fall(dist); for (let t = 0; t < len; t += 0.11) band(t, 0.09, 140 + Math.random() * 30, 2, 0.5 * v, 'lowpass'); }
+// it catches: a rough crank, then the engine roars into life
+export function soundCatch(dist = 0) { soundCrank(dist, 0.35); const v = fall(dist); band(0.35, 0.5, 120, 1, 0.6 * v, 'lowpass'); band(0.4, 0.25, 600, 2, 0.25 * v); }
 let lastCrunch = 0, lastScrape = 0, lastSqueal = 0;
 // filtered noise hit starting t0 seconds from now
 function band(t0, dur, freq, q, vol, type = 'bandpass') {
