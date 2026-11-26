@@ -35,7 +35,8 @@ import * as fx from './fx.js';
 import * as ui from './ui.js';
 import { net, connect, joinWorld, startPlaying, sendState, setVehicle, removeVehicle, setCops, sendEvent, sendChat, hostUid, setLook as netSetLook, setName as netSetName, setArea, loadProfile, saveProfile } from './net.js';
 import { clamp, angDiff, rayOBB, raySphere, fmtDist } from './util.js';
-import { wanted, crime, updateWanted as tickWanted, resetWanted, cones, initWanted } from './wanted.js';
+import { wanted, crime, updateWanted as tickWanted, resetWanted, cones, initWanted, callCops } from './wanted.js';
+import * as cj from './carjack.js';
 import { eco, initEconomy, addCash, spend, goalDone, checkCountGoals, GOALS, storeNear, dropCash, updateEconomy, stores } from './economy.js';
 import { updateRadio, nextStation, currentStation } from './radio.js';
 import { drunk, drunkPass, drinkItems, resetDrunk, updateDrunk, wobble, drunkSteer, swayCamera, blackedOut } from './drunk.js';
@@ -782,7 +783,7 @@ net.handlers.vehicle = (id, rec) => {
       applyMods(v);
     }
   }
-  if (typeof rec.l === 'number') { const l = rec.l; v.sirenOn = !!(l & 1); v.netBrake = !!(l & 2); v.netRev = !!(l & 4); v.doorOpen = l & 8 ? 1 : 0; v.flat = !!(l & 16); v.brokenHead = !!(l & 32); v.brokenTail = !!(l & 64); v.netPedal = !!(l & 128); }
+  if (typeof rec.l === 'number') { const l = rec.l; v.sirenOn = !!(l & 1); v.netBrake = !!(l & 2); v.netRev = !!(l & 4); v.doorOpen = l & 8 ? 1 : 0; v.flat = !!(l & 16); v.brokenHead = !!(l & 32); v.brokenTail = !!(l & 64); v.netPedal = !!(l & 128); cj.applyBits(v, l); }
   if (Array.isArray(rec.dz)) { const [f, b, l, r] = rec.dz; if (f !== Math.round(v.dz.f) || b !== Math.round(v.dz.b) || l !== Math.round(v.dz.l) || r !== Math.round(v.dz.r)) { if (f + b + l + r === 0) { repair(v); applyMods(v); } else { v.dz = { f, b, l, r }; applyDamageVisual(v); } } } // all zero = repaired at Arnett Auto
 };
 net.handlers.vehicleGone = (id) => { const v = vehById.get(id); if (!v) return; if (me.veh === v && me.seat) ejectMe(); resetVehicle(v); };
@@ -844,7 +845,7 @@ function updateCrowd(dt) {
 function vehBits(v) {
   const mine = v === me.veh, fwd = keys.has('KeyS') || keys.has('ArrowDown');
   const braking = mine ? (fwd && v.speed > 0.5) || keys.has('Space') : false, reversing = mine && v.speed < -0.4;
-  return (v.sirenOn ? 1 : 0) | (braking ? 2 : 0) | (reversing ? 4 : 0) | (v.doorOpen ? 8 : 0) | (v.flat ? 16 : 0) | (v.brokenHead ? 32 : 0) | (v.brokenTail ? 64 : 0) | (mine && v.T.ebike && (keys.has('KeyW') || keys.has('ArrowUp')) ? 128 : 0); // 128: pedalling
+  return (v.sirenOn ? 1 : 0) | (braking ? 2 : 0) | (reversing ? 4 : 0) | (v.doorOpen ? 8 : 0) | (v.flat ? 16 : 0) | (v.brokenHead ? 32 : 0) | (v.brokenTail ? 64 : 0) | (mine && v.T.ebike && (keys.has('KeyW') || keys.has('ArrowUp')) ? 128 : 0) | cj.bits(v); // 128: pedalling; 256 up: carjack.js
 }
 function resetVehicle(v) {
   if (me.veh === v) return;
@@ -1127,7 +1128,7 @@ function toggleVehicle() {
   if (me.dead || me.rag) return;
   if (me.enter) { cancelEnter(); return; }
   if (me.veh) { leaveVehicle(); return; }
-  const v = nearestVehicle(1.3);
+  const v = nearestVehicle(1.3) || cj.cruiserNear(); // (a parked cruiser outside a station: break into it)
   if (!v) return;
   if (Math.hypot(v.vx || 0, v.vz || 0) > 3.5) { ui.flashPrompt("It's moving too fast to grab"); return; }
   if (!ebikes.beforeEnter(v)) return; // a docked Arnett Bike: pay to unlock it
@@ -1187,7 +1188,7 @@ function enterUpdate(dt) {
   let pose = { speed: 0 };
   if (e.phase === 'walk') {
     const d = doorSpot(v, e.seat), dx = d.x - me.x, dz = d.z - me.z, dist = Math.hypot(dx, dz);
-    if (dist < 0.6 || e.t > 1.8) { e.phase = v.T.bike ? 'in' : 'open'; e.t = 0; }
+    if (dist < 0.6 || e.t > 1.8) { e.phase = v.T.bike ? 'in' : cj.firstPhase(v, e.seat); e.t = 0; } // locked: try the handle first (carjack.js)
     else {
       const sp = Math.min(dist / dt, 5.5);
       me.x += (dx / dist) * sp * dt; me.z += (dz / dist) * sp * dt;
@@ -1196,7 +1197,9 @@ function enterUpdate(dt) {
     }
   } else {
     if (e.phase !== 'in') me.h += angDiff(me.h, v.h - sg * Math.PI / 2) * Math.min(1, dt * 10); // face the car
-    if (e.phase === 'open') { // reach for the handle and swing the door open (the animated door is the driver's)
+    const brk = cj.enterStep(e, v, dt, sg); // try the handle, smash the window, reach in for the lock
+    if (brk) pose = brk;
+    else if (e.phase === 'open') { // reach for the handle and swing the door open (the animated door is the driver's)
       const k = Math.min(1, e.t / 0.55);
       if (!e.seat && k > 0.45) v.doorOpen = 1;
       pose = { act: { n: 'carOpen', k, side: sg } };
@@ -1238,12 +1241,7 @@ function engineSound(v, fwd, dt) {
   offT -= dt; lastGear = g;
 }
 function yankDriver(v) {
-  const d = doorSpot(v);
-  if (v.mode === 'traffic' || v.npcDriver) {
-    freeTraffic(v, true); v.npcDriver = false; spawnFleeing(d.x, d.z, v.h + Math.PI / 2, v.ko ? 4 : 1.2); // a knocked-out driver stays down longer
-    const n = emptyCar(v), lx = Math.cos(v.h), lz = -Math.sin(v.h);
-    for (let i = 1; i < n; i++) spawnFleeing(v.x - lx * 1.6 + Math.sin(v.h) * (i - 1.5), v.z - lz * 1.6 + Math.cos(v.h) * (i - 1.5), v.h - Math.PI / 2, 0.8 + i * 0.3);
-  }
+  if (v.mode === 'traffic' || v.npcDriver) cj.yank(v); // thrown down, then they run, fight, pull a gun or call the cops; passengers bail
   else if (v.driver && v.driver !== net.uid) { sendEvent('jack', { to: v.driver, id: v.id }); ui.announce('CARJACKED', nameOf(v.driver)); }
   if (v.patrol || v.T.police) report('hitcop', v.x, v.z); // dragging a cop out of a squad car
   eco.jacked++; checkCountGoals();
@@ -1263,7 +1261,7 @@ function finishEnter(v) {
   const wasParked = v.mode === 'parked' || (!v.driver && v.mode !== 'traffic');
   me.enter = null;
   v.jackHold = false;
-  if (!v.T.bike) { v.doorOpen = 1; v.doorCloseAt = performance.now() + 330; anim.play('carShut', 0.6, { lock: false }); } else v.doorOpen = 0;
+  if (!v.T.bike) { v.doorOpen = 1; v.doorCloseAt = performance.now() + 330; cj.afterEnter(v, anim.play('carShut', 0.6, { lock: false })); } else { v.doorOpen = 0; cj.afterEnter(v); } // (a broken-into car still needs hotwiring)
   me.veh = v; v.driver = net.uid; v.mode = 'free'; v.localSim = false; v.tgt = null; v.vx = v.vx || 0; v.vz = v.vz || 0;
   me.ch.g.visible = true; // you can see yourself at the wheel
   writeVeh(v, true);
@@ -1356,7 +1354,7 @@ function applyHit(hit, w, d) {
   else if (hit.kind === 'player') {
     sendEvent('hit', { to: hit.ref.uid, dmg: r1(w.dmg * (hit.head ? 2 : 1)), by: me.name });
     fx.blood(hit.p.x, hit.p.y, hit.p.z, d.x, d.z); fx.soundHit(); ui.hitMarker(false);
-  } else if (hit.kind === 'veh') { damageVehicle(hit.ref, w.dmg * 0.45 * (hit.ref.mods?.bp ? 0.4 : 1)); if (hit.ref.patrol) report('hitcop', hit.ref.x, hit.ref.z); }
+  } else if (hit.kind === 'veh') { cj.bulletHit(hit.ref, hit.p); damageVehicle(hit.ref, w.dmg * 0.45 * (hit.ref.mods?.bp ? 0.4 : 1)); if (hit.ref.patrol) report('hitcop', hit.ref.x, hit.ref.z); }
   else if (hit.kind === 'cop') damageCopUnit(hit.ref, w.dmg * (hit.ref.kind === 2 ? (hit.head ? 2.5 : 1) : 0.6));
 }
 function handPos() {
@@ -1937,8 +1935,8 @@ function driveUpdate(dt, fwd, side) {
   const shift = keys.has('ShiftLeft') || keys.has('ShiftRight');
   // gas and brake read separately so holding both does a burnout
   const gas = keys.has('KeyW') || keys.has('ArrowUp'), brk = keys.has('KeyS') || keys.has('ArrowDown');
-  const imp = stepVehicle(v, { throttle: gas ? 1 : 0, brake: brk ? 1 : 0, steer: drunkSteer(dt, -side), handbrake: !v.T.heli && !v.T.plane && keys.has('Space'), nitro: shift && !v.T.heli && !v.T.plane, up: keys.has('Space'), down: shift }, dt);
-  engineSound(v, v.burnout ? 1 : fwd, dt);
+  const imp = stepVehicle(v, { throttle: gas ? cj.gas(v) : 0, brake: brk ? 1 : 0, steer: drunkSteer(dt, -side), handbrake: !v.T.heli && !v.T.plane && keys.has('Space'), nitro: shift && !v.T.heli && !v.T.plane, up: keys.has('Space'), down: shift }, dt);
+  if (!cj.engine(v, dt, gas)) engineSound(v, v.burnout ? 1 : fwd, dt); // (hotwiring: cranking and sparks instead)
   // police spike strip: tyres burst (bulletproof tyres shrug it off)
   if (!v.flat && !v.mods?.bp && !v.T.boat && !v.T.heli && police.spikesHit(v)) { v.flat = true; fx.sparks(v.x, v.y + 0.3, v.z, 14); fx.soundBoom(30); ui.flashPrompt('Tyres blown!'); }
   if (v.flat && Math.abs(v.speed) > 4 && Math.random() < dt * 8) fx.sparks(v.x - Math.sin(v.h) * v.T.len * 0.35, v.y + 0.1, v.z - Math.cos(v.h) * v.T.len * 0.35, 2);
@@ -2517,6 +2515,14 @@ initTraffic(scene, {
   remove: (v) => resetVehicle(v),
   honk: (v) => fx.soundHorn(distCam(v.x, v.z)),
 });
+cj.initCarjack({
+  me: () => me, uid: () => net.uid, netNow: () => net.now(), isHost: () => isHost, vehicles, anim,
+  aiming: () => aiming, camYaw: () => camYaw, weapon: () => (playing ? WEAPONS[me.weapon] : null),
+  report: (type, x, z) => report(type, x, z), writeVeh: (v, f) => writeVeh(v, f), distCam,
+  freeTraffic: (v, noFlee) => freeTraffic(v, noFlee), emptyCar: (v) => emptyCar(v), doorSpot: (v, seat) => doorSpot(v, seat), newId,
+  addVehicle: (v) => { scene.add(v.mesh); vehicles.push(v); vehById.set(v.id, v); },
+  callCops: (w) => callCops(w, 1, w.x, w.z), shake: (k) => { shake = Math.max(shake, k); },
+});
 initEmergency(scene, {
   newId,
   vehicles: () => vehicles,
@@ -2746,6 +2752,7 @@ function update(dt, t) {
   police.render(dt, isHost, t, camera.position, farCarDist());
   farCarsEnd();
   updateGrenades(dt);
+  cj.update(dt);
   seatPeople(dt);
   updateWantedLevel(dt);
   updateRagdolls(dt);

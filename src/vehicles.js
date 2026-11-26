@@ -411,6 +411,7 @@ export function animateDamage(v, dt) {
 // (carmods' applyMods can be called after it to put the window tint back.)
 export function repair(v) {
   v.dz = { f: 0, b: 0, l: 0, r: 0 }; v.brokenHead = v.brokenTail = false;
+  v.win = 0; v.flats = 0; v.fuelHit = 0; // new side glass and tyres (carjack.js)
   v.fr = v.fp = v.frV = v.fpV = 0;
   const P = v.mesh.userData.parts; if (!P) return;
   for (const L of P.lost || []) { fx.undebris(L.m); L.parent.add(L.m); P[L.key] = L.m; }
@@ -649,7 +650,9 @@ export function stepVehicle(v, inp, dt) {
     if (thr > 0) vf += T.acc * tn.acc * (1 + 0.15 * v.spool) * thr * dt * (vf < 0 ? 2.5 : 1) * (boosting ? 1.6 : 1);
     if (brk > 0) { if (vf > 0.5) vf -= T.acc * 2.4 * (T.brakeMul || 1) * tn.brake * dt; else if (!thr) vf = Math.max(-T.max * 0.35, vf - T.acc * 0.7 * dt); }
   }
-  if (v.flat) { vf = Math.min(vf, T.max * 0.45); vr *= 1 + dt * 0.8; }
+  // flat tyres: spikes burst all four (v.flat alone); shot ones are v.flats bits FL 1, FR 2, RL 4, RR 8 (carjack.js)
+  const nFlat = v.flats ? ((v.flats & 1) + ((v.flats >> 1) & 1) + ((v.flats >> 2) & 1) + ((v.flats >> 3) & 1)) : v.flat ? 4 : 0;
+  if (nFlat) { vf = Math.min(vf, T.max * (1 - 0.14 * nFlat)); vr *= 1 + dt * 0.2 * nFlat; }
   // grass, dirt and sand: extra drag and a much lower top speed than pavement
   const cls = grounded ? W.classAt(v.x, v.z) : -1;
   v.rough = cls === W.C.lawn || cls === W.C.park || cls === W.C.wood || cls === W.C.cemetery || cls === W.C.sand || cls === W.C.pitch;
@@ -677,6 +680,8 @@ export function stepVehicle(v, inp, dt) {
     // steering gets calmer with speed; countersteer assist pulls the nose back toward where the car is going
     yaw = (inp.steer || 0) * T.turn * clamp(vf / 5, -1, 1) * (1 - 0.45 * Math.min(1, sp / T.max)) * (inp.handbrake ? 1.6 : 1);
     if (vf > 3) yaw -= slipA * (inp.handbrake ? 0.3 : 1.8);
+    // a flat on one side drags the car toward it (+ yaw turns left; the fronts tug harder)
+    if (v.flats && Math.abs(vf) > 1.5) { const f = v.flats, pull = ((f & 1) - ((f >> 1) & 1)) * 0.22 + (((f >> 2) & 1) - ((f >> 3) & 1)) * 0.12; yaw += pull * clamp(vf / 10, -1, 1.4); }
   }
   // spin: tires pull the turn rate toward what the steering asks for (heavy vehicles answer slower); a crash can overpower that
   if (grounded || v.burnout) {

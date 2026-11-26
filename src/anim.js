@@ -8,6 +8,7 @@ import { setProp } from './character.js';
 // codes are sent over the network: only ever append
 const LIST = ['', 'carOpen', 'carIn', 'carShut', 'carOut', 'shutStand', 'door', 'give', 'take', 'eat', 'pool', 'darts', 'table', 'slots', 'sit', 'stool',
   'phone', 'call', 'getUpFront', 'getUpBack', 'fillBag'];
+LIST.push('carTry', 'carSmash', 'carReach', 'hotwire', 'carHandsUp'); // vehicle mechanics (carjack.js)
 const CODE = new Map(LIST.map((n, i) => [n, i]));
 export const codeOf = (n) => CODE.get(n) || 0;
 // props held during an action (character.js PROP_AT)

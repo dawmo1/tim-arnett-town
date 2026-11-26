@@ -57,6 +57,7 @@ export function updateOccupants(cars, cam, dt) {
     used += list.length;
     const ko = v.ko && v.npcDriver; // knocked out in a crash: slumped over toward the door
     for (const o of list) {
+      if (v.handsUp > 0) { animateCharacter(o.ch, dt, { act: { n: 'carHandsUp', k: 0, side: 1 } }); o.ch.g.rotation.set(0, 0, 0); continue; } // held up at gunpoint (carjack.js)
       animateCharacter(o.ch, dt, o.seat === 'D' ? (ko ? { sit: true } : { drive: !v.T.bike, sit: !!v.T.bike, steer: v.steerVis || 0, look: 0 }) : { sit: true, chat: o.seat === 'P' && Math.random() < 0.002 ? true : undefined });
       if (o.seat === 'D') o.ch.g.rotation.set(ko ? 0.3 : 0, 0, ko ? -0.45 : 0);
     }
