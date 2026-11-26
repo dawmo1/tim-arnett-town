@@ -1,10 +1,11 @@
+import { ICONS } from './weapon-icons.js';
 import * as W from './world.js';
 import { FT, fmtSpeed, fmtDist } from './util.js';
 
 const $ = (id) => document.getElementById(id);
 export const el = {
   hud: $('hud'), menu: $('menu'), stars: $('stars'), feed: $('feed'), chatLog: $('chatLog'), chatInput: $('chatInput'),
-  weapon: $('weapon'), weaponIcon: $('weaponIcon'), hpfill: $('hpfill'), prompt: $('prompt'), dead: $('dead'),
+  weapon: $('weapon'), weaponIcon: $('weaponIcon'), weaponBox: $('weaponBox'), hpfill: $('hpfill'), prompt: $('prompt'), dead: $('dead'),
   ammo: $('ammo'), armorfill: $('armorfill'), cash: $('cash'), helpbox: $('helpbox'), area: $('area'), areaName: $('areaName'), streetName: $('streetName'),
   pause: $('pause'), bigmap: $('bigmap'), pauseTabs: $('pauseTabs'), resumeBtn: $('resumeBtn'), deadSub: $('deadSub'), shareHint: $('shareHint'),
   roomInfo: $('roomInfo'), playerList: $('playerList'), help: $('help'), minimap: $('minimap'), hurt: $('hurt'),
@@ -20,30 +21,25 @@ function replay(node, cls) { node.classList.remove(cls); void node.offsetWidth; 
 for (const n of [el.cashDelta, el.vehName]) n.addEventListener('animationend', () => n.classList.remove('on'));
 
 // Simple weapon silhouettes (viewBox 0 0 48 24).
-export const ICONS = {
-  Fists: '<path d="M10 8h22a4 4 0 0 1 4 4v4a6 6 0 0 1-6 6H16a6 6 0 0 1-6-6z"/><path d="M14 8v-3h4v3M19 8v-4h4v4M24 8v-4h4v4M29 8v-3h4v3" stroke="currentColor" stroke-width="2" fill="none"/>',
-  Bat: '<path d="M4 18 L36 4 Q44 1 45 5 Q46 9 38 11 L6 21z"/>',
-  Pistol: '<path d="M6 6h32v6H22l-2 3h-4l-2 7H8l3-10H6z"/>',
-  SMG: '<path d="M4 7h34v6H30v9h-5v-9h-6l-3 6h-5l2-6H4zM38 8h6v3h-6z"/>',
-  Shotgun: '<path d="M2 8h34v4H24l-3 3H10l-6 5H1l3-7H2zM36 8h10v3H36z"/>',
-  Rifle: '<path d="M2 9h36v5H28v8h-4v-8h-6l-6 6H6l4-6H2zM14 5h12v3H14zM38 10h8v2h-8z"/>',
-  Grenade: '<circle cx="24" cy="14" r="8"/><path d="M21 4h6v4h-6zM27 5l7-2v3l-7 1z"/>',
-  Knife: '<path d="M4 14 L30 9 L44 12 L30 15z"/><path d="M4 12h9v6H4z"/>',
-  Crowbar: '<path d="M6 19 L38 7 Q44 5 44 10 L42 11 Q41 8 38 10 L8 21z"/>',
-  Sniper: '<path d="M2 11h40v3H30v7h-4v-7h-6l-5 5H8l4-5H2zM16 6h12v4H16zM42 11h4v2h-4z"/>',
-  Molotov: '<path d="M20 8h8v4l3 4v8H17v-8l3-4z"/><path d="M22 2h4v6h-4z" fill="#ff9800"/>',
-  RPG: '<path d="M2 11h34v4H2zM36 9l10 4-10 4zM12 15h4v6h-4z"/>',
-};
+export { ICONS }; // (src/weapon-icons.js)
 
 export function setHealth(hp) {
   el.hpfill.style.width = Math.max(0, hp) + '%';
   el.hpfill.style.background = hp > 50 ? '#5bb85b' : hp > 25 ? '#d9a63a' : '#d23c30';
 }
 export function flashHurt() { el.hurt.classList.remove('on'); void el.hurt.offsetWidth; el.hurt.classList.add('on'); }
+// GTA V style: the weapon's silhouette with the ammo beside it (all you're carrying in white, the clip in grey);
+// nothing at all with bare fists. The name shows for a moment when you switch.
+let shownWeapon = '';
 export function setWeapon(name, ammo = '') {
-  el.weapon.textContent = name;
-  const m = /^(\d+) \/ (\d+)$/.exec(ammo); // "clip / reserve" -> GTA-style reserve + clip
-  if (m) el.ammo.innerHTML = `<span>${m[2]}</span><b>${m[1]}</b>`; else el.ammo.textContent = ammo;
+  el.weaponBox.classList.toggle('none', name === 'Fists');
+  const m = /^(\d+) \/ (\d+)$/.exec(ammo); // "clip / reserve"
+  if (m) el.ammo.innerHTML = `<b>${(+m[1] + +m[2]).toLocaleString('en-US')}</b><span>${m[1]}</span>`;
+  else el.ammo.innerHTML = ammo ? `<b>${ammo.replace(/^× /, '')}</b>` : '';
+  el.ammo.classList.toggle('busy', /…$/.test(ammo));
+  if (name === shownWeapon) return;
+  shownWeapon = name;
+  el.weapon.textContent = name; replay(el.weapon, 'on');
   el.weaponIcon.innerHTML = `<svg viewBox="0 0 48 24" fill="currentColor" aria-hidden="true">${ICONS[name] || ''}</svg>`;
 }
 // Hidden until wanted. Cops see you: solid stars, red/blue siren glow (and on the minimap frame).

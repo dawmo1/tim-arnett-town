@@ -77,22 +77,29 @@ button { font: inherit; }
 @keyframes helpIn { from { opacity: 0; } }
 
 /* top-right: cash, +/- delta, weapon + ammo, wanted stars */
-#topright { position: absolute; top: 16px; right: 24px; display: grid; justify-items: end; gap: 2px; }
-#cash { font: 400 42px/1 var(--display); color: var(--cashc); letter-spacing: 1px; -webkit-text-stroke: 2.2px var(--out); paint-order: stroke fill; text-shadow: 0 2px 4px rgba(0,0,0,.6); font-variant-numeric: tabular-nums; }
+#topright { position: absolute; top: 18px; right: 26px; display: grid; justify-items: end; gap: 3px; }
+/* cash: GTA V white Pricedown with a hard black outline; changes pop up underneath in green or red */
+#cash { font: 400 40px/1 var(--display); color: #f2f2f2; letter-spacing: 1.5px; -webkit-text-stroke: 4px #000; paint-order: stroke fill; text-shadow: 0 2px 3px rgba(0,0,0,.55); font-variant-numeric: tabular-nums; }
 #cash.bump { animation: bump .4s; }
-@keyframes bump { 30% { transform: scale(1.08); } }
-#cashDelta { display: none; font: 400 28px/1 var(--display); color: var(--cashc); -webkit-text-stroke: 1.8px var(--out); paint-order: stroke fill; }
-#cashDelta.down { color: var(--red); }
+@keyframes bump { 30% { transform: scale(1.06); } }
+#cashDelta { display: none; font: 400 28px/1 var(--display); color: #8fe38a; letter-spacing: 1px; -webkit-text-stroke: 3.2px #000; paint-order: stroke fill; }
+#cashDelta.down { color: #ff6259; }
 #cashDelta.on { display: block; animation: delta 3s ease-out forwards; }
 @keyframes delta { 0% { opacity: 0; transform: translateY(-8px); } 8% { opacity: 1; transform: none; } 72% { opacity: 1; } 100% { opacity: 0; } }
-#weaponBox { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
-#weaponIcon svg { width: 78px; height: 38px; display: block; color: #fff; filter: drop-shadow(0 0 1px #000) drop-shadow(0 1px 2px rgba(0,0,0,.8)); }
-#weapon { font-size: 15px; font-weight: 600; text-transform: uppercase; text-align: right; color: rgba(255,255,255,.85); text-shadow: 0 0 2px #000, 0 1px 2px #000; }
-#ammo { display: flex; justify-content: flex-end; align-items: baseline; gap: 8px; font-size: 18px; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; text-shadow: 0 0 2px #000, 0 1px 2px #000; }
-#ammo span { color: rgba(255,255,255,.75); }
-#ammo b { font-size: 26px; font-weight: 600; color: #fff; }
+/* weapon: one strip, darker towards the right edge, ammo then the silhouette; the name flashes underneath on a switch */
+#weaponBox { position: relative; display: flex; align-items: center; gap: 12px; margin-top: 8px; padding: 4px 2px 4px 34px; background: linear-gradient(90deg, rgba(0,0,0,0), rgba(0,0,0,.5) 40%); }
+#weaponBox.none { visibility: hidden; }
+#weaponIcon svg { width: 84px; height: 42px; display: block; color: #fff; filter: drop-shadow(0 0 1px #000) drop-shadow(0 1px 2px rgba(0,0,0,.7)); }
+#ammo { display: flex; align-items: baseline; gap: 9px; font-variant-numeric: tabular-nums; text-shadow: 0 0 2px #000, 0 1px 2px #000; line-height: 1; }
+#ammo:empty { display: none; }
+#ammo b { font-size: 30px; font-weight: 600; color: #fff; }
+#ammo span { font-size: 22px; font-weight: 600; color: rgba(255,255,255,.55); }
+#ammo.busy b { font-size: 20px; color: rgba(255,255,255,.8); }
+#weapon { position: absolute; right: 2px; top: 100%; margin-top: 3px; font-size: 16px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; color: #fff; text-shadow: 0 0 2px #000, 0 1px 2px #000; opacity: 0; white-space: nowrap; }
+#weapon.on { animation: wname 2s ease-out forwards; }
+@keyframes wname { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
 /* stars: hidden until wanted; big white with a soft shadow; red/blue siren glow while seen; blinking grey while the cops search */
-#stars { display: flex; gap: 4px; margin-top: 4px; filter: drop-shadow(0 2px 3px rgba(0,0,0,.75)); }
+#stars { display: flex; gap: 4px; margin-bottom: 4px; filter: drop-shadow(0 2px 3px rgba(0,0,0,.75)); }
 #stars.none { display: none; }
 #stars i { width: 34px; height: 33px; background: rgba(150,150,150,.5); clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%); }
 #stars i.on { background: #fff; }
@@ -338,10 +345,12 @@ button { font: inherit; }
   #chat { left: calc(14px + var(--mmw) + 28px); bottom: 14px; }
   #topright { top: 10px; right: 14px; }
   #stars i { width: 24px; height: 23px; }
-  #cash { font-size: 28px; }
-  #cashDelta { font-size: 20px; }
-  #weaponIcon svg { width: 52px; height: 26px; }
-  #ammo b { font-size: 20px; }
+  #cash { font-size: 28px; -webkit-text-stroke-width: 3px; }
+  #cashDelta { font-size: 20px; -webkit-text-stroke-width: 2.4px; }
+  #weaponBox { padding-left: 22px; gap: 8px; }
+  #weaponIcon svg { width: 56px; height: 28px; }
+  #ammo b { font-size: 21px; }
+  #ammo span { font-size: 16px; }
   #bottomright { right: 14px; bottom: 14px; }
   #speedo b { font-size: 24px; }
   #areaName { font-size: 24px; }
