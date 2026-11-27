@@ -104,7 +104,7 @@ export function adoptCar(v, target) { const u = spawnCar('c' + nextId++, v.x, v.
 // Attacked at (x, z) by player uid (rammed, shot at): parked cruisers, idle officers and cars heading home nearby
 // take the call, and the radio skips the usual wait so backup rolls out of the station right away. Host only.
 export function alert(x, z, uid) {
-  since[uid] = ctx.now() - 2500;
+  since[uid] = ctx.now() - 10000; nextAt[uid] = 0;
   for (const u of cops.values()) {
     if (isDown(u) || u.kind > 2) continue;
     const P = posOf(u);
@@ -116,10 +116,37 @@ export function alert(x, z, uid) {
 // ---------- stations & dispatch ----------
 // The OSM police stations. Units roll out from them and drive the streets to the suspect.
 const NAMES = { 'Davenport Police Department': 'Davenport Police HQ', 'Scott County Sheriffs Office': 'Scott County Sheriff' };
+// Real stations the OSM index misses (they're tagged on buildings, not as police points), at those buildings' centres:
+// East Moline PD is in City Hall (915 16th Ave), Milan PD in the Municipal Building (405 1st St E), Coal Valley's in
+// the village hall, and the Rock Island County Sheriff at the county jail (1317 3rd Ave).
+const EXTRA = [
+  { name: 'East Moline Police Department', x: 11440, z: 887, town: 'East Moline' },
+  { name: 'Rock Island County Sheriff', x: -275, z: 1601, town: 'Rock Island' },
+  { name: 'Milan Police Department', x: 962, z: 8189, town: 'Milan' },
+  { name: 'Coal Valley Police Department', x: 9665, z: 8884, town: 'Coal Valley' },
+];
 let ST = null, P = [];
 export function stations() {
-  if (!ST && W.places.police) ST = W.places.police.map((p) => { p.name = NAMES[p.name] || p.name; return { name: p.name, x: p.x, z: p.z, lot: null }; });
+  if (!ST && W.places.police) {
+    // added to the shared list too, so the map blips and the street-event cops (emergency.js, events/kit.js) agree
+    for (const e of EXTRA) if (!W.places.police.some((p) => p.name === e.name)) W.places.police.push({ kind: 'police', ...e });
+    ST = W.places.police.map((p) => { p.name = NAMES[p.name] || p.name; return { name: p.name, x: p.x, z: p.z, lot: null }; });
+  }
   return ST || [];
+}
+// Response by stars: units on the call, the radio delay before the first one rolls, then seconds between units.
+const WANT = [0, 2, 2, 3, 4, 6], DELAY = [0, 6000, 4500, 3000, 2000, 1500], GAP = [0, 10, 7, 4, 2.5, 1.5];
+const nextAt = {}, adoptAt = {}, bustCd = {};
+// Is suspect uid's response short of units right now? A patrol car already out on the streets nearby can take the
+// call (main.js adopts it), sooner than a station could, but only one every few seconds. Host only.
+export function wantsUnit(uid) {
+  const p = P.find((q) => q.uid === uid), now = ctx.now();
+  if (!p || !p.alive || p.stars <= 0 || since[uid] === undefined) return false;
+  if (now - since[uid] < DELAY[p.stars] * 0.4 || now < (adoptAt[uid] || 0)) return false;
+  let have = 0; for (const u of cops.values()) if (u.target === uid && u.kind === 0 && !isDown(u)) have++;
+  if (have >= WANT[p.stars]) return false;
+  adoptAt[uid] = now + 3000;
+  return true;
 }
 const byDist = (x, z) => stations().map((s) => [Math.hypot(s.x - x, s.z - z), s]).sort((a, b) => a[0] - b[0]);
 // nobody can see (x, z): every player is far off or has a building in the way
@@ -139,26 +166,54 @@ function stockStations() {
     if (near > 650) { for (const u of [...cops.values()]) if (u.parked === s) remove(u.id); continue; }
     if (near > 450) continue;
     lotOf(s).forEach((q, k) => {
-      if ([...cops.values()].some((u) => u.parked === s && u.slot === k) || !unseen(q.x, q.z, 90)) return;
+      // (a cruiser that just took the call may still be pulling out of this spot)
+      if ([...cops.values()].some((u) => (u.parked === s && u.slot === k) || (u.kind < 2 && Math.hypot(u.v.x - q.x, u.v.z - q.z) < 6)) || !unseen(q.x, q.z, 90)) return;
       const u = spawnCar('c' + nextId++, q.x, q.z, q.h, 0, null); u.parked = s; u.slot = k;
     });
   }
 }
 // The next unit for suspect p (pre 'c' cruiser, 's' SWAT van): a parked cruiser at the nearest station,
 // else a fresh car pulling out of that station. Response time is the drive over.
+const FAR_STATION = 900; // beyond this the unit is already on its way when it comes into the world (see below)
 function dispatch(pre, p, cx, cz) {
-  const near = byDist(cx, cz).filter(([d]) => d < 1500);
+  const all = byDist(cx, cz), near = all.filter(([d]) => d < FAR_STATION);
+  const laneFree = (q) => ![...cops.values()].some((o) => o.kind < 2 && Math.hypot(o.v.x - q.x, o.v.z - q.z) < 8);
+  let busy = false;
   for (const [, s] of near) {
-    const u = pre === 'c' && [...cops.values()].find((o) => o.parked === s && !isDown(o));
+    // a parked cruiser takes the call, but only the one at the front of the line (nobody parked just ahead of it):
+    // the others are boxed in nose to tail and would only shunt back and forth at the curb
+    const lot = [...cops.values()].filter((o) => o.parked === s && !isDown(o));
+    const u = pre === 'c' && lot.find((o) => !lot.some((b) => { if (b === o) return false; const dx = b.v.x - o.v.x, dz = b.v.z - o.v.z, al = dx * Math.sin(o.v.h) + dz * Math.cos(o.v.h); return al > 0 && al < 10 && Math.abs(dx * Math.cos(o.v.h) - dz * Math.sin(o.v.h)) < 3; }));
     if (u) { u.parked = null; u.target = p.uid; u.aimT = 0; return u; }
     const q = W.roadNear(s.x, s.z, cx, cz);
-    if (q && !P.some((o) => Math.hypot(o.x - q.x, o.z - q.z) < 30) && ![...cops.values()].some((o) => o.kind < 2 && Math.hypot(o.v.x - q.x, o.v.z - q.z) < 8)) { const c = spawnCar(pre + nextId++, q.x, q.z, q.h, 0, p.uid); c.aimT = 0; return c; }
+    busy ||= !!q;
+    if (q && !P.some((o) => Math.hypot(o.x - q.x, o.z - q.z) < 45) && laneFree(q)) { const c = spawnCar(pre + nextId++, q.x, q.z, q.h, 0, p.uid); c.aimT = 0; c.from = s.name; return c; }
   }
-  if (near.length) return null; // station's driveway is busy: try again next second
-  // shortcut: every station is over 1.5 km away, so the unit is one already out on the far streets. It appears
-  // on a road 240-340 m off that no player can see (never pops in on screen); a real patrol grid would replace this.
-  const q = W.roadSpot(cx, cz, 240, 340);
-  if (!q || !unseen(q.x, q.z, 200)) return null;
+  if (busy) return null; // the station's driveway is busy (or you're stood in it): try again in a second
+  // The nearest station is far off (or its street isn't loaded): the unit set off from there a while ago and is
+  // part-way along the drive. It appears on that route 420-700 m short of the call, where no player can see it
+  // (never pops in on screen or next to you), then drives the rest.
+  const st = all[0] && all[0][1];
+  if (st) {
+    const d = all[0][0], k = Math.min(1, 1600 / Math.max(1, d)); // route from at most 1.6 km out, along the line to the station
+    const path = W.route(cx + (st.x - cx) * k, cz + (st.z - cz) * k, cx, cz, { any: true });
+    if (path && path.length > 1) {
+      let run = 0;
+      for (let i = path.length - 1; i > 0; i--) {
+        const [x1, z1] = path[i], [x0, z0] = path[i - 1];
+        run += Math.hypot(x1 - x0, z1 - z0);
+        if (run < 420) continue;
+        if (run > 900) break;
+        if (Math.hypot(x0 - cx, z0 - cz) < 300 || !unseen(x0, z0, 220)) continue;
+        const q = { x: x0, z: z0, h: Math.atan2(x1 - x0, z1 - z0) };
+        if (!laneFree(q)) continue;
+        const c = spawnCar(pre + nextId++, q.x, q.z, q.h, 0, p.uid); c.aimT = 0; c.from = st.name; return c;
+      }
+    }
+  }
+  // no route yet (roads still loading): a road 380-480 m off that nobody can see
+  const q = W.roadSpot(cx, cz, 380, 480);
+  if (!q || !unseen(q.x, q.z, 220) || !laneFree(q)) return null;
   const c = spawnCar(pre + nextId++, q.x, q.z, q.h, 0, p.uid); c.aimT = 0; return c;
 }
 function shoot(u, from, p, acc, dmg) {
@@ -180,10 +235,10 @@ export function hostUpdate(dt, players) {
     spawnT = 1;
     stockStations();
     for (const p of players) {
-      if (!p.alive || p.stars <= 0) { delete since[p.uid]; continue; }
+      if (!p.alive || p.stars <= 0) { delete since[p.uid]; delete nextAt[p.uid]; continue; }
       since[p.uid] ??= now;
       // 1-2 stars: a couple of cruisers; 3: + roadblocks; 4: + SWAT van and helicopter; 5: everything, more of it
-      const want = [0, 2, 2, 3, 4, 6][p.stars];
+      const want = WANT[p.stars];
       let have = 0, heli = false, swat = 0;
       for (const u of cops.values()) {
         if (u.target !== p.uid) continue;
@@ -191,8 +246,9 @@ export function hostUpdate(dt, players) {
         if (u.kind === 3 && !u.dead) heli = true;
       }
       const cx = p.search ? p.lkx : p.x, cz = p.search ? p.lkz : p.z;
-      // patrol cars already on the streets nearby get adopted first (main.js); the station rolls out 2.5 s later
-      if (have < want && now - since[p.uid] > 2500) dispatch('c', p, cx, cz);
+      // the radio takes a moment, then units roll out of the station one after another (more, faster, at more stars);
+      // patrol cars already on the streets nearby take the call first (wantsUnit, main.js)
+      if (have < want && now - since[p.uid] > DELAY[p.stars] && now >= (nextAt[p.uid] || 0) && dispatch('c', p, cx, cz)) nextAt[p.uid] = now + GAP[p.stars] * 1000;
       if (p.stars >= 4 && !heli) {
         // lifts off the nearest station's roof and flies over (speed-capped in heliStep), or comes in high from out of sight
         const st = byDist(cx, cz)[0], a = Math.random() * Math.PI * 2, home = st && st[0] < 3000;
@@ -293,7 +349,7 @@ export function hostUpdate(dt, players) {
       gx = u.path[u.pi][0]; gz = u.path[u.pi][1];
     }
     // chasing a car up close: go for its rear quarter to spin it out (PIT)
-    if (p.inVeh && dist < 16 && p.speed > 6) {
+    if (p.inVeh && p.stars >= 2 && dist < 16 && p.speed > 6) {
       const sp = p.speed || 1, fx_ = (p.vx || 0) / sp, fz_ = (p.vz || 0) / sp, side = ((v.x - p.x) * fz_ - (v.z - p.z) * fx_) > 0 ? 1 : -1;
       gx = p.x - fx_ * 1.2 + fz_ * side * 1.3; gz = p.z - fz_ * 1.2 - fx_ * side * 1.3;
     }
@@ -325,11 +381,12 @@ export function hostUpdate(dt, players) {
     // shoot from the side window only (no shooting through the windshield)
     u.cd -= dt;
     const side = Math.abs(angDiff(v.h, Math.atan2(dx, dz)));
-    const canShoot = !p.sweeping && !p.home && dist < 30 && (side > 0.9 || Math.abs(v.speed) < 3) && W.lineOfSight(v.x, v.y + 1.4, v.z, p.x, (p.y || 0) + 1.2, p.z);
+    // at 1 star they want you in cuffs, not dead: nobody fires
+    const canShoot = p.stars >= 2 && !p.sweeping && !p.home && dist < 30 && (side > 0.9 || Math.abs(v.speed) < 3) && W.lineOfSight(v.x, v.y + 1.4, v.z, p.x, (p.y || 0) + 1.2, p.z);
     u.aimT = canShoot ? (u.aimT || 0) + dt : 0; // they need a moment to line up a shot
-    if (u.cd <= 0 && canShoot && u.aimT > 1.2) {
-      u.cd = 1.8 - p.stars * 0.12;
-      let acc = 0.1 + p.stars * 0.03;
+    if (u.cd <= 0 && canShoot && u.aimT > 1.6) {
+      u.cd = 2.1 - p.stars * 0.12;
+      let acc = (0.06 + p.stars * 0.025) * clamp(1.3 - dist / 30, 0.5, 1);
       if (p.speed > 10) acc *= 0.5;
       if (Math.abs(v.speed) > 5) acc *= 0.6;
       shoot(u, { x: v.x, y: v.y + 1.5, z: v.z }, p, acc, 6 + Math.random() * 3);
@@ -361,9 +418,17 @@ function officerStep(u, dt, now, p) {
   let dx = tx - u.x, dz = tz - u.z, dist = Math.hypot(dx, dz);
   const tdist = dist, tdx = dx, tdz = dz;
   if (goCar && dist < 2.4) { remove(u.id); return; } // got back in
+  // 1 star, suspect on foot: no shooting, walk up and cuff them. Stand still (or dawdle) next to an officer for a
+  // couple of seconds and you're BUSTED; keep moving and they keep following.
+  const arrest = !goCar && p && p.stars === 1 && !p.inVeh && !p.sweeping;
+  if (arrest) {
+    const close = tdist < 2.2 && (p.speed || 0) < 2.5;
+    u.arrestT = close ? (u.arrestT || 0) + dt : Math.max(0, (u.arrestT || 0) - dt * 2);
+    if (u.arrestT > 2 && now > (bustCd[p.uid] || 0)) { bustCd[p.uid] = now + 10000; u.arrestT = 0; ctx.arrest?.(p.uid); }
+  } else u.arrestT = 0;
   // in a gunfight: get to cover (a car between you and the suspect) or work round their flank
   u.coverT = (u.coverT || 0) - dt;
-  if (!goCar && p && !p.sweeping && dist < 34) {
+  if (!goCar && p && !arrest && !p.sweeping && dist < 34) {
     if (u.coverT <= 0) {
       u.coverT = 3 + Math.random() * 2; u.coverAt = null;
       let best = 15;
@@ -381,6 +446,7 @@ function officerStep(u, dt, now, p) {
   let move = 0;
   if (goCar) move = 5.5;
   else if (u.coverAt) move = cdist > 0.8 ? 5.5 : 0;
+  else if (arrest) move = dist > 1.5 ? (dist > 6 ? 5.2 : 2.4) : 0;
   else if (dist > (p.sweeping ? 3 : 11)) move = p.sweeping ? 3.5 : 5.2;
   else if (dist < 5) move = -2;
   u.inCover = !!(u.coverAt && !u.coverAt.flank && cdist < 1.2);
@@ -409,11 +475,11 @@ function officerStep(u, dt, now, p) {
   }
   u.y = W.groundHeight(u.x, u.z);
   u.cd -= dt;
-  const canShoot = !goCar && p && !p.sweeping && tdist < 32 && W.lineOfSight(u.x, u.y + 1.4, u.z, p.x, (p.y || 0) + 1.2, p.z);
+  const canShoot = !goCar && p && !arrest && !p.sweeping && tdist < 32 && W.lineOfSight(u.x, u.y + 1.4, u.z, p.x, (p.y || 0) + 1.2, p.z);
   u.aimT = canShoot ? (u.aimT || 0) + dt : 0;
-  if (canShoot && u.cd <= 0 && u.aimT > 0.9) {
-    u.cd = 1.2 + Math.random() * 0.8;
-    let acc = (u.swat ? 0.22 : 0.15) + p.stars * 0.035;
+  if (canShoot && u.cd <= 0 && u.aimT > 1.3) {
+    u.cd = 1.5 + Math.random() * 1;
+    let acc = ((u.swat ? 0.17 : 0.11) + p.stars * 0.025) * clamp(1.25 - tdist / 36, 0.45, 1); // worse the further off
     if (u.inCover) acc *= 0.85;
     if (p.inVeh) acc *= 0.6;
     if (p.speed > 6) acc *= 0.6;
@@ -444,8 +510,8 @@ function heliStep(u, dt, now, p) {
   const canShoot = !p.sweeping && W.lineOfSight(u.x, u.y - 1.5, u.z, p.x, (p.y || 0) + 1.2, p.z);
   u.aimT = canShoot ? (u.aimT || 0) + dt : 0;
   if (u.cd <= 0 && canShoot && u.aimT > 1.5) {
-    u.cd = 1.1;
-    shoot(u, { x: u.x, y: u.y - 1.2, z: u.z }, p, p.inVeh ? 0.07 : 0.12, 7);
+    u.cd = 1.4;
+    shoot(u, { x: u.x, y: u.y - 1.2, z: u.z }, p, p.inVeh ? 0.05 : 0.09, 7);
   }
 }
 
