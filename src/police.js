@@ -12,6 +12,7 @@ import * as nav from './nav.js';
 import * as fx from './fx.js';
 import { clamp, angDiff } from './util.js';
 import { hitByCar } from './breakables.js';
+import { moveInfo, MOVE_NAMES } from './combat.js';
 
 export const cops = new Map();
 // ids start at a random offset: several group hosts run cops at once and hit/bump events name units by id
@@ -163,11 +164,12 @@ function lotOf(s) {
 function stockStations() {
   for (const s of stations()) {
     const near = Math.min(...P.map((o) => Math.hypot(o.x - s.x, o.z - s.z)));
-    if (near > 650) { for (const u of [...cops.values()]) if (u.parked === s) remove(u.id); continue; }
+    if (near > 650) { for (const u of [...cops.values()]) if (u.parked === s) remove(u.id); s.gone = null; continue; }
     if (near > 450) continue;
     lotOf(s).forEach((q, k) => {
       // (a cruiser that just took the call may still be pulling out of this spot)
-      if ([...cops.values()].some((u) => (u.parked === s && u.slot === k) || (u.kind < 2 && Math.hypot(u.v.x - q.x, u.v.z - q.z) < 6)) || !unseen(q.x, q.z, 90)) return;
+      // (a cruiser a player broke into leaves its spot empty until everyone has left the area: s.gone)
+      if (s.gone?.has(k) || [...cops.values()].some((u) => (u.parked === s && u.slot === k) || (u.kind < 2 && Math.hypot(u.v.x - q.x, u.v.z - q.z) < 6)) || !unseen(q.x, q.z, 90)) return;
       const u = spawnCar('c' + nextId++, q.x, q.z, q.h, 0, null); u.parked = s; u.slot = k;
     });
   }
@@ -400,7 +402,7 @@ export function hostUpdate(dt, players) {
     for (const u of cops.values()) {
       const P = posOf(u), y = u.kind < 2 ? u.v.y : u.y;
       const dead = u.kind < 2 ? (u.v.exploded ? 1 : 0) : u.dead ? 1 : 0;
-      obj[u.id] = [r1(P.x), r1(P.z), r2(P.h), Math.round(u.kind < 2 ? u.v.hp : u.hp), u.seq, r1(u.shot[0]), r1(u.shot[1]), r1(u.shot[2]), u.kind, dead, u.target || '', (u.kind < 2 ? u.v.burnAt : 0) || 0, r1(y || 0), r1(u.spd || 0), u.parked ? 1 : 0];
+      obj[u.id] = [r1(P.x), r1(P.z), r2(P.h), Math.round(u.kind < 2 ? u.v.hp : u.hp), u.seq, r1(u.shot[0]), r1(u.shot[1]), r1(u.shot[2]), u.kind, dead, u.target || '', (u.kind < 2 ? u.v.burnAt : 0) || 0, r1(y || 0), r1(u.spd || 0), u.parked ? 1 : 0, u.mv ? MOVE_NAMES.indexOf(u.mv.n) + 1 : 0, u.mvSeq || 0];
     }
     ctx.sync(obj);
   }
@@ -422,10 +424,36 @@ function officerStep(u, dt, now, p) {
   // couple of seconds and you're BUSTED; keep moving and they keep following.
   const arrest = !goCar && p && p.stars === 1 && !p.inVeh && !p.sweeping;
   if (arrest) {
-    const close = tdist < 2.2 && (p.speed || 0) < 2.5;
-    u.arrestT = close ? (u.arrestT || 0) + dt : Math.max(0, (u.arrestT || 0) - dt * 2);
+    const close = p.down ? tdist < 3 : tdist < 2.2 && (p.speed || 0) < 2.5; // (knocked flat: cuffed where you lie, quicker)
+    u.arrestT = close ? (u.arrestT || 0) + dt * (p.down ? 1.6 : 1) : Math.max(0, (u.arrestT || 0) - dt * 2);
     if (u.arrestT > 2 && now > (bustCd[p.uid] || 0)) { bustCd[p.uid] = now + 10000; u.arrestT = 0; ctx.arrest?.(p.uid); }
   } else u.arrestT = 0;
+  // close quarters: within arm's reach an officer swings instead of shooting. At 1 star, a suspect who won't stand
+  // still gets a shove to the ground (then the cuffs); from 2 stars up it's a pistol-whip
+  u.mcd = (u.mcd || 0) - dt;
+  if (u.mv) {
+    const info = moveInfo(u.mv.n), dur = info.dur * 1.35;
+    u.mv.t += dt;
+    u.h += angDiff(u.h, Math.atan2(tdx, tdz)) * Math.min(1, dt * (u.mv.t < dur * info.hit * 0.6 ? 10 : 1.5));
+    if (!u.mv.done && u.mv.t >= dur * info.hit) {
+      u.mv.done = true;
+      const fx_ = Math.sin(u.h), fz_ = Math.cos(u.h);
+      if (p && !p.inVeh && tdist < info.range + 0.25 && (tdx * fx_ + tdz * fz_) / (tdist || 1) > 0.5) {
+        const down = u.mv.down, k = down ? 7 : 2.5;
+        ctx.copMelee?.(p.uid, down ? 5 : 9 + Math.random() * 4, fx_ * k, fz_ * k);
+      }
+    }
+    if (u.mv.t >= dur) u.mv = null;
+    u.spd = 0; u.aimT = 0;
+    if (u.agent) u.agent.resetMoveTarget();
+    u.y = W.groundHeight(u.x, u.z);
+    return;
+  }
+  if (!goCar && p && !p.inVeh && !p.down && !p.sweeping && tdist < 1.45 && u.mcd <= 0 && (!arrest || (p.speed || 0) >= 2.5)) {
+    u.mcd = 1.6 + Math.random() * 1.2;
+    u.mv = arrest ? { n: 'cross', t: 0, down: true } : { n: Math.random() < 0.5 ? 'cross' : 'hook', t: 0 };
+    u.mvSeq = (u.mvSeq || 0) + 1;
+  }
   // in a gunfight: get to cover (a car between you and the suspect) or work round their flank
   u.coverT = (u.coverT || 0) - dt;
   if (!goCar && p && !arrest && !p.sweeping && dist < 34) {
@@ -446,7 +474,7 @@ function officerStep(u, dt, now, p) {
   let move = 0;
   if (goCar) move = 5.5;
   else if (u.coverAt) move = cdist > 0.8 ? 5.5 : 0;
-  else if (arrest) move = dist > 1.5 ? (dist > 6 ? 5.2 : 2.4) : 0;
+  else if (arrest) move = dist > 1.2 ? (dist > 6 || (p.speed || 0) > 2.5 ? 5.8 : 2.4) : 0; // (a suspect walking off gets run down; a sprint gets away)
   else if (dist > (p.sweeping ? 3 : 11)) move = p.sweeping ? 3.5 : 5.2;
   else if (dist < 5) move = -2;
   u.inCover = !!(u.coverAt && !u.coverAt.flank && cdist < 1.2);
@@ -537,6 +565,7 @@ export function applyRemote(obj) {
     } else {
       u.tgt = { x: a[0], z: a[1], h: a[2], y: a[12] };
       u.hp = a[3]; u.spd = a[13];
+      if (a[15] && a[16] !== u.mvSeq) { u.mvSeq = a[16]; u.mv = { n: MOVE_NAMES[a[15] - 1], t: 0, done: true }; } // (swings: host side; this just shows it)
       if (a[9] && !u.dead) { u.dead = true; u.deadAt = ctx.now(); if (kind === 2) fx.bloodPool(a[0], a[1], 1.4); }
     }
     if (a[4] !== u.seq) {
@@ -597,7 +626,9 @@ export function render(dt, isHost, t, cam = null, farDist = 1e9) {
       if (u.dead && !u.ragged) { u.ragged = true; const k = u.hitDir || { x: 0, z: 0 }; ragdoll(u.ch, { x: k.x * 4, y: 2, z: k.z * 4 }, { dead: true }); }
       if (u.ch.rag) { const rp = ragPos(u.ch); if (!isHost) { u.x = rp.x; u.z = rp.z; } continue; }
       placeCharacter(u.ch, u.x, u.y ?? W.groundHeight(u.x, u.z), u.z, u.h);
-      animateCharacter(u.ch, dt, { speed: u.spd || 0, aim: !u.dead && !(u.inCover && (u.aimT || 0) < 0.5), dead: u.dead, weapon: 'gun', wmodel: u.swat ? 'rifle' : 'pistol', rifle: u.swat, cover: u.inCover && (u.aimT || 0) < 0.5 });
+      if (u.mv && !isHost) { u.mv.t += dt; if (u.mv.t >= moveInfo(u.mv.n).dur * 1.35) u.mv = null; }
+      if (u.mv && !u.dead) animateCharacter(u.ch, dt, { speed: 0, melee: { n: u.mv.n, k: Math.min(1, u.mv.t / (moveInfo(u.mv.n).dur * 1.35)) }, weapon: 'none' });
+      else animateCharacter(u.ch, dt, { speed: u.spd || 0, aim: !u.dead && !(u.inCover && (u.aimT || 0) < 0.5), dead: u.dead, weapon: 'gun', wmodel: u.swat ? 'rifle' : 'pistol', rifle: u.swat, cover: u.inCover && (u.aimT || 0) < 0.5 });
     } else {
       u.mesh.position.set(u.x, u.y, u.z);
       u.mesh.rotation.y = u.h;
@@ -627,6 +658,7 @@ export function takeParked(x, z, r) {
   for (const u of cops.values()) {
     if (!u.parked || u.kind !== 0 || isDown(u) || u.id[0] === 's' || Math.hypot(u.v.x - x, u.v.z - z) > r) continue;
     cops.delete(u.id); fx.stopFire(u.fire);
+    (u.parked.gone ||= new Set()).add(u.slot); // no fresh cruiser on its spot while players are about
     return u.v;
   }
   return null;

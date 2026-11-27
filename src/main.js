@@ -2298,7 +2298,7 @@ function updateRemotes(dt) {
     r.x += (s[0] - r.x) * k; r.y += (s[1] - r.y) * k; r.z += (s[2] - r.z) * k; r.h += angDiff(r.h, s[3]) * k;
     r.vx = snapRemotes ? 0 : (r.x - ox) / dt; r.vz = snapRemotes ? 0 : (r.z - oz) / dt;
     r.speed = s[4]; r.veh = s[5] || ''; r.hp = s[6]; r.dead = s[6] <= 0; r.stars = s[7] || 0; r.weapon = s[8] || 0;
-    r.search = !!s[13]; r.lkx = s[14] ?? r.x; r.lkz = s[15] ?? r.z;
+    r.search = !!s[13]; r.lkx = s[14] ?? r.x; r.lkz = s[15] ?? r.z; r.down = !!s[16];
     if (s[9] !== r.seq) {
       r.seq = s[9]; r.lastShot = performance.now();
       fx.tracer({ x: r.x + Math.sin(r.h) * 0.6, y: r.y + 1.35, z: r.z + Math.cos(r.h) * 0.6 }, { x: s[10], y: s[11], z: s[12] });
@@ -2737,8 +2737,8 @@ function updateCamera(dt) {
 }
 
 function policePlayers() {
-  const arr = [{ uid: net.uid, x: me.x, y: me.y, z: me.z, vx: me.vx, vz: me.vz, speed: Math.hypot(me.vx, me.vz), stars: wanted.stars, alive: !me.dead, inVeh: !!me.veh, search: wanted.search, lkx: wanted.lk.x, lkz: wanted.lk.z }];
-  for (const r of remotes.values()) if (net.group.has(r.uid)) arr.push({ uid: r.uid, x: r.x, y: r.y, z: r.z, vx: r.vx, vz: r.vz, speed: Math.hypot(r.vx, r.vz), stars: r.stars, alive: !r.dead, inVeh: !!r.veh, search: r.search, lkx: r.lkx, lkz: r.lkz });
+  const arr = [{ uid: net.uid, x: me.x, y: me.y, z: me.z, vx: me.vx, vz: me.vz, speed: Math.hypot(me.vx, me.vz), stars: wanted.stars, alive: !me.dead, inVeh: !!me.veh, down: !!me.ch.rag, search: wanted.search, lkx: wanted.lk.x, lkz: wanted.lk.z }];
+  for (const r of remotes.values()) if (net.group.has(r.uid)) arr.push({ uid: r.uid, x: r.x, y: r.y, z: r.z, vx: r.vx, vz: r.vz, speed: Math.hypot(r.vx, r.vz), stars: r.stars, alive: !r.dead, inVeh: !!r.veh, down: !!r.down, search: r.search, lkx: r.lkx, lkz: r.lkz });
   return arr;
 }
 // What townspeople see: is the player armed, and who (if anyone) is the gun pointed at?
@@ -2868,6 +2868,11 @@ police.initPolice(scene, {
   copShot: (from, s) => { fx.tracer(from, { x: s[0], y: s[1], z: s[2] }); fx.muzzleFlash(from); fx.soundShot('pistol', distCam(from.x, from.z)); },
   announce: (uid, text) => { if (uid === net.uid) ui.announce(text, '', '#ff5e5b'); },
   sync: (obj) => setCops(net.group.size > 1 ? obj : null), // nobody else in our group: nobody to send them to
+  copMelee: (uid, dmg, ix, iz) => { // an officer's swing landed (police.js): a knock to the ground at 1 star, a pistol-whip after
+    fx.soundHit();
+    if (uid === net.uid) { if (cover.active()) cover.leave(); damageMe(dmg, 'the police', 'police', { x: ix, y: 3.5, z: iz }); }
+    else sendEvent('hit', { to: uid, dmg: r1(dmg), by: 'the police', ix: r1(ix), iz: r1(iz) });
+  },
   arrest: (uid) => { if (uid === net.uid) bustMe(); else sendEvent('bust', { to: uid }); },
 });
 
