@@ -78,7 +78,7 @@ export function joinTraffic(v) {
   const dir = dirs.includes(fwd) ? fwd : dirs[0], lane = lanesOf(e, dir) - 1;
   const sAlong = dir > 0 ? q.s : e.len - q.s, off = laneOffset(e, dir, lane);
   v.mode = 'traffic'; v.npcDriver = false; v.localSim = false;
-  v.ag = { e, dir, lane, s: Math.max(1, Math.min(e.len - 1, sAlong)), off: off * 1.6, offT: off, speed: 0, phase: 'edge', temper: 0.9, next: null, blockT: 0.6, honkT: 0, drunk: false };
+  v.ag = { e, dir, lane, s: Math.max(1, Math.min(e.len - 1, sAlong)), off: off * 1.6, offT: off, speed: 0, phase: 'edge', temper: 0.9, next: null, blockT: 0.6, honkT: 0, drunk: false, ...AG_LATE };
   traffic.push(v);
   return true;
 }
@@ -101,7 +101,7 @@ function trySpawn(fx, fz, R, cam, night, patrol = false) {
     const r = Math.random(), ti = patrol ? V.POLICE : chooseType(p.x, p.z, night, r, e);
     const v = makeVehicle(ctx.newId ? ctx.newId('t') : 't' + nextId++, ti, patrol ? 0xffffff : colorFor(ti, Math.random()), { x: p.x, z: p.z, h: p.h });
     v.mode = 'traffic'; v.patrol = patrol;
-    v.ag = { e, dir, lane, s, off, offT: off, speed: e.speed * 0.6, phase: 'edge', temper: 0.85 + Math.random() * 0.25, next: null, blockT: 0, honkT: 0, drunk: night && Math.random() < 0.05 };
+    v.ag = { e, dir, lane, s, off, offT: off, speed: e.speed * 0.6, phase: 'edge', temper: 0.85 + Math.random() * 0.25, next: null, blockT: 0, honkT: 0, drunk: night && Math.random() < 0.05, ...AG_LATE };
     ctx.add(v);
     traffic.push(v);
     return true;
@@ -141,6 +141,8 @@ function makeTurn(ag, k) {
   ag.turn = { P, len: Math.max(0.5, len), u: 0, node: k, lane, s2, off2, t0: ++turnSeq };
   ag.phase = 'turn';
 }
+// a driver's later fields, declared up front (undefined: reads unchanged) so every agent keeps one hidden class
+const AG_LATE = { light: undefined, turn: undefined, panicT: undefined, yieldT: undefined, passT: undefined, passShift: undefined, stuckT: undefined, ghostT: undefined, stopDone: undefined, waitT: undefined };
 function bez(P, t) { const u = 1 - t, a = u * u * u, b = 3 * u * u * t, c = 3 * u * t * t, d = t * t * t; return [a * P[0][0] + b * P[1][0] + c * P[2][0] + d * P[3][0], a * P[0][1] + b * P[1][1] + c * P[2][1] + d * P[3][1]]; }
 
 // ---------- per frame ----------
@@ -186,8 +188,12 @@ export function updateTraffic(dt, focus, cam, obs, sirens, tSec, opts) {
       const g = a - T.len / 2 - (c * hl + sn * hw);
       if (g < gap) { gap = g; lead = spd; person = isPerson; blockerStill = ref && spd < 0.5 ? ref : null; }
     };
+    // (the cheap "is it within 55 m ahead of me at all" test runs inline: most things fail it, and a call to look()
+    // with its six number arguments for each of them cost ~4000 calls and ~300 KB of garbage a frame)
     for (const o of others) {
-      if (o === v || o.sinkT > 0 || Math.abs(o.x - v.x) > 55 || Math.abs(o.z - v.z) > 55) continue;
+      if (o === v || o.sinkT > 0) continue;
+      const ax = o.x - v.x, az = o.z - v.z, aa = ax * fx + az * fz;
+      if (aa <= 0 || aa > 55 || Math.abs(ax) > 55 || Math.abs(az) > 55) continue; // (look() would drop it the same way)
       const sp = o.ag ? o.ag.speed : Math.hypot(o.vx || 0, o.vz || 0);
       // other traffic coming the other way in its own lane doesn't count
       if (o.ag && Math.sin(o.h) * fx + Math.cos(o.h) * fz < -0.5) continue;
@@ -196,7 +202,11 @@ export function updateTraffic(dt, focus, cam, obs, sirens, tSec, opts) {
       if (o.ag && ag.ghostT > 0) continue;
       look(o.x, o.z, o.T.len / 2, o.T.wid / 2, o.h, sp, false, o.mode !== 'traffic' ? o : null);
     }
-    for (const o of obs) look(o.x, o.z, o.hl ?? o.r, o.r, o.h ?? v.h, o.speed || 0, o.person, null);
+    for (const o of obs) {
+      const ax = o.x - v.x, az = o.z - v.z, aa = ax * fx + az * fz;
+      if (aa <= 0 || aa > 55 || Math.abs(ax * fz - az * fx) > T.wid / 2 + (o.hl ?? o.r) + o.r + 0.35) continue; // (look() would drop it the same way)
+      look(o.x, o.z, o.hl ?? o.r, o.r, o.h ?? v.h, o.speed || 0, o.person, null);
+    }
     // ---- desired speed ----
     let v0 = (ag.phase === 'turn' ? Math.min(7, ag.e.speed) : ag.e.speed) * ag.temper;
     if (T.bus || T.cabbed || T.truck) v0 *= 0.85;

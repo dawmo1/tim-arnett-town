@@ -144,13 +144,18 @@ function hidden(x, z, cam) {
   return d > 140 || (dx * cam.fx + dz * cam.fz) / d < 0.3;
 }
 let groups = []; // {props: [Object3D], members: [walker], x, z}
+// fields set later, declared up front as undefined (reads are unchanged): a walker that grows new fields one by one
+// takes on a new hidden class each time, which kept updateWalkers deoptimizing back to slow baseline code
+const W_LATE = Object.fromEntries(('modeT watch enemy cd s link leaveNow goal freezeT fleeSp fh wary spd pending limp heldUp giveUp gang fz fx fpose ' +
+  'farCol dir coverAt carT warnT wait up texting stagger shoveT runT runH popT onRoad look fixed ducked covT cov commentCd clutch chain burnT ' +
+  'bumpCd bubble animDt animPh warned skate side scripted script saidAt pose mv e dog chatty cane call aimT').split(' ').map((k) => [k, undefined]));
 function newWalker(role, x, z, h, grp) {
   const ch = makeCharacter(lookFor(role));
   if (role.startsWith('gang:') || role === 'crook') ch.style = 'gang'; else if (role === 'elderly') ch.style = 'old'; // walk styles (people/pose.js)
   scene.add(ch.g);
   const w = { ch, role, x, z, y: W.groundHeight(x, z), h, hp: 40, dead: null, panic: 0, mode: 'walk', grp,
     temper: Math.random() < 0.18 ? 'brawler' : Math.random() < 0.027 ? 'gunman' : 'normal', speed: 1.15 + Math.random() * 0.5, lat: (Math.random() - 0.5) * 0.9, shirt: ch.shirtColor,
-    react: 0.25 + Math.random() ** 2 * 0.75 }; // seconds to notice danger: most are quickish, a few are slow
+    react: 0.25 + Math.random() ** 2 * 0.75, ...W_LATE }; // seconds to notice danger: most are quickish, a few are slow
   if (role === 'office') w.speed += 0.2;
   if ((role === 'walk' || role === 'office' || role === 'student' || role === 'shopper') && Math.random() < 0.15) w.texting = true; // eyes on the phone
   if (role === 'elderly') w.react += 0.3;
@@ -489,7 +494,7 @@ export function updateWalkers(dt, tSec, nowMs, cam) {
     }
   }
   const target = ctx.target(), th = ctx.threat();
-  farN = 0;
+  farN = 0; animFrame++;
   for (const w of walkers) {
     let speed = 0, pose = {};
     if (w.ch.rag) {
@@ -704,7 +709,7 @@ export function updateWalkers(dt, tSec, nowMs, cam) {
   updateFleeing(dt);
 }
 
-let farN = 0;
+let farN = 0, animFrame = 0, animSeq = 0;
 // one person on screen: full body up close, an instanced stand-in farther away
 function drawWalker(w, cam, speed, pose, dt, nearR) {
     // far away: a simple instanced figure instead of the full body
@@ -727,7 +732,13 @@ function drawWalker(w, cam, speed, pose, dt, nearR) {
     if (w.limp > 0) w.limp -= dt; if (w.clutch > 0) w.clutch -= dt;
     const anim = { speed, dead: !!w.dead, phone: !!w.call || pose.phone, look: w.mode === 'walk' || w.mode === 'fixed' ? w.look || 0 : 0, limp: w.limp > 0, clutch: w.clutch > 0, ...pose };
     if (w.pose === 'bike' && !w.dead && !freeModes.has(w.mode)) { anim.sit = true; anim.speed = 0; }
-    animateCharacter(w.ch, dt, anim);
+    // animation level of detail: past 30 m the pose updates every other frame, behind the camera every fourth
+    // (each with the time it skipped); a calm walker that far off looks the same, and it halves the bone work
+    w.animDt = (w.animDt || 0) + dt;
+    const behind = cam && dcam > 6 && ((w.x - cam.x) * cam.fx + (w.z - cam.z) * cam.fz) < -0.2 * dcam;
+    const every = w.dead || freeModes.has(w.mode) || w.mode === 'script' ? 1 : behind ? 4 : dcam > 30 ? 2 : 1;
+    if (w.animPh === undefined) w.animPh = animSeq++;
+    if ((animFrame + w.animPh) % every === 0) { animateCharacter(w.ch, w.animDt, anim); w.animDt = 0; }
     if (w.dog && !w.dead) {
       const dg = w.dog, side = 0.8;
       const tx = w.x - Math.sin(w.h) * 1.1 + Math.cos(w.h) * side, tz = w.z - Math.cos(w.h) * 1.1 - Math.sin(w.h) * side;

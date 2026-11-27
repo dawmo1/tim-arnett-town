@@ -307,6 +307,8 @@ export function setUnderwater(on) {
   muffle.frequency.setTargetAtTime(on ? 520 : 22000, ac.currentTime, 0.08);
 }
 export function setVolume(v) { volume = v; if (master) master.gain.value = v; if (musicOn) fadeMusic(); }
+// tabbed out: silence (engine and ambience loops would otherwise drone on, frozen at their last level)
+export function suspendAudio(on) { if (!ac) return; (on ? ac.suspend() : ac.resume()).catch(() => {}); }
 export function unlockAudio() {
   if (ac) { ac.resume(); return; }
   try {

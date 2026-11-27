@@ -36,7 +36,7 @@ import { planeSpots, planeVisual } from './planes.js';
 import { initBreakables, updateBreakables, setBreakQuality, hitByCar, blast as blastProps, shot as shootProps, benchNear } from './breakables.js';
 import * as fx from './fx.js';
 import * as ui from './ui.js';
-import { net, connect, joinWorld, startPlaying, sendState, setVehicle, removeVehicle, setCops, sendEvent, sendChat, hostUid, setLook as netSetLook, setName as netSetName, setArea, loadProfile, saveProfile } from './net.js';
+import { net, connect, joinWorld, startPlaying, sendState, ensurePresence, watchCops, setVehicle, removeVehicle, setCops, sendEvent, sendChat, hostUid, setLook as netSetLook, setName as netSetName, setArea, loadProfile, saveProfile } from './net.js';
 import { clamp, angDiff, rayOBB, raySphere, fmtDist } from './util.js';
 import { wanted, crime, updateWanted as tickWanted, resetWanted, cones, initWanted, callCops } from './wanted.js';
 import * as cj from './carjack.js';
@@ -68,7 +68,7 @@ const WEAPONS = [
 const W_MODEL = { Fists: null, Bat: 'bat', Pistol: 'pistol', SMG: 'smg', Shotgun: 'shotgun', Rifle: 'rifle', Grenade: 'grenade', Knife: 'knife', Crowbar: 'crowbar', Sniper: 'sniper', Molotov: 'molotov', RPG: 'rpg' };
 const TWO_HANDED = new Set(['SMG', 'Shotgun', 'Rifle', 'Sniper', 'RPG']);
 for (const w of WEAPONS) { w.model = W_MODEL[w.name]; w.long = TWO_HANDED.has(w.name); }
-const r1 = (n) => Math.round(n * 10) / 10, r2 = (n) => Math.round(n * 100) / 100;
+const r1 = (n) => Math.round(n * 10) / 10, r2 = (n) => Math.round(n * 100) / 100; const r3 = (n) => Math.round(n * 1000) / 1000;
 
 // ---------- renderer & scene ----------
 const canvas = document.getElementById('game');
@@ -745,7 +745,29 @@ function tickProfile(dt) {
   if (dirtyT > 0 && (dirtyT -= dt) <= 0) saveNow();
   if ((profT -= dt) <= 0) saveNow();
 }
-addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveNow(); });
+// Tabbed out: the browser stops drawing frames, so update() (and with it every network write) stops too. A slow timer
+// keeps our record alive and marked away (s[23] = 1: others keep showing you, and don't make you run their cops), and
+// coming back starts clean: our record is put back if the server dropped it, timers reset, no backlog replayed.
+let awayTimer = 0, lastState = null;
+const awayState = () => { if (!lastState) return null; const s = lastState.slice(); s[23] = 1; s[4] = 0; return s; };
+function onHidden() {
+  saveNow();
+  if (!playing) return;
+  fx.suspendAudio(true);
+  keys.clear(); mouseDown = false; // the key-up events go to the other tab
+  const s = awayState(); if (s) sendState(s);
+  if (isHost) { setCops(null); isHost = false; hostT = 0; } // the group picks another host while we're gone
+  clearInterval(awayTimer);
+  awayTimer = setInterval(() => { if (!document.hidden) return; ensurePresence(); const a = awayState(); if (a) sendState(a); }, 5000);
+}
+function onShown() {
+  clearInterval(awayTimer); awayTimer = 0;
+  fx.suspendAudio(false);
+  last = performance.now(); fpsWarm = 0; fpsAcc = 0; fpsFrames = 0; // no giant first frame, and the fps watcher waits
+  sendT = 0; crowdT = 0; snapRemotes = true;
+  ensurePresence();
+}
+addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') onHidden(); else onShown(); });
 addEventListener('pagehide', saveNow);
 const onlineBtn = document.getElementById('onlineBtn');
 function refreshOnline() {
@@ -756,8 +778,35 @@ function refreshOnline() {
   ui.renderPlayers(document.getElementById('mmPlayers'), list);
 }
 setInterval(refreshOnline, 1000);
-net.handlers.cops = (all) => { if (!isHost) police.applyRemote(all[hostUid()] || {}); }; // cops/{host}: only our group's host
-net.handlers.vehicle = (id, rec) => {
+// Snapshots are applied once per frame, newest only: a hidden or frozen tab (no frames) otherwise works through its
+// whole backlog in one go when you come back. cops/{host}: only our group's host.
+let pendingCops = null;
+const pendingVeh = new Map();
+net.handlers.cops = (all) => { pendingCops = all; };
+net.handlers.vehicle = (id, rec) => { if (rec) { rec.seen = net.now(); pendingVeh.set(id, rec); } };
+// Cars other players use far away (the whole map's worth: often 50+) are kept as plain records and only built once
+// you get near; built ones that end up far away go back to being records.
+const farVeh = new Map(), NET_NEAR = 650, NET_FAR = 900;
+let netCullT = 0;
+function applyNetSnapshots(dt) {
+  if (pendingCops) { const all = pendingCops; pendingCops = null; if (!isHost) police.applyRemote(all[hostUid()] || {}); }
+  const cx = camera.position.x, cz = camera.position.z;
+  if (pendingVeh.size) {
+    for (const [id, rec] of pendingVeh) {
+      if (!vehById.has(id) && Number.isFinite(+rec.x) && Math.hypot(rec.x - cx, rec.z - cz) > NET_NEAR) farVeh.set(id, rec);
+      else { farVeh.delete(id); applyVehicle(id, rec); }
+    }
+    pendingVeh.clear();
+  }
+  if ((netCullT -= dt) > 0) return;
+  netCullT = 1;
+  for (const [id, rec] of farVeh) if (Math.hypot(rec.x - cx, rec.z - cz) < NET_NEAR) { farVeh.delete(id); applyVehicle(id, rec); }
+  for (const v of [...vehicles]) {
+    if (!v.netRec || v === me.veh || v.localSim || v.fire || me.enter?.v === v || Math.hypot(v.x - cx, v.z - cz) < NET_FAR) continue;
+    farVeh.set(v.id, v.netRec); resetVehicle(v);
+  }
+}
+function applyVehicle(id, rec) {
   let v = vehById.get(id);
   if (!v && rec && Number.isInteger(rec.ti) && rec.ti >= 0 && rec.ti < V_COUNT) {
     // a car another player is using that we haven't seen yet
@@ -766,15 +815,15 @@ net.handlers.vehicle = (id, rec) => {
     v.mode = 'free'; v.remote = true; scene.add(v.mesh); vehicles.push(v); vehById.set(id, v);
   }
   if (!v || !rec) return;
-  v.touchedAt = net.now();
+  v.touchedAt = net.now(); v.netRec = rec;
   if (me.veh === v && !me.seat) { // (riding as a passenger: take the driver's updates like any remote car)
-    if (rec.d && rec.d !== net.uid) { v.driver = rec.d; ejectMe(); v.tgt = { x: rec.x, z: rec.z, h: rec.h, y: rec.y || 0 }; }
+    if (rec.d && rec.d !== net.uid) { v.driver = rec.d; ejectMe(); v.tgt = netTarget(rec); }
     return;
   }
   if (v.localSim && !rec.d) return; // echo of our own sliding writes
   if (v.mode === 'traffic' || v.mode === 'parked') { v.x = rec.x; v.z = rec.z; v.h = rec.h; }
   v.mode = 'free'; v.localSim = false;
-  v.tgt = { x: rec.x, z: rec.z, h: rec.h, y: rec.y || 0 };
+  v.tgt = netTarget(rec);
   v.hp = rec.hp; v.driver = rec.d || ''; v.burnAt = rec.b || 0; v.burnBy = rec.bb || '';
   if (!v.burnAt && v.fire) { fx.stopFire(v.fire); v.fire = null; } // put out (extinguisher or a repair) on the owner's side
   if (rec.e) v.exploded = true;
@@ -791,8 +840,35 @@ net.handlers.vehicle = (id, rec) => {
   }
   if (typeof rec.l === 'number') { const l = rec.l; v.sirenOn = !!(l & 1); v.netBrake = !!(l & 2); v.netRev = !!(l & 4); v.doorOpen = l & 8 ? 1 : 0; v.flat = !!(l & 16); v.brokenHead = !!(l & 32); v.brokenTail = !!(l & 64); v.netPedal = !!(l & 128); cj.applyBits(v, l); }
   if (Array.isArray(rec.dz)) { const [f, b, l, r] = rec.dz; if (f !== Math.round(v.dz.f) || b !== Math.round(v.dz.b) || l !== Math.round(v.dz.l) || r !== Math.round(v.dz.r)) { if (f + b + l + r === 0) { repair(v); applyMods(v); } else { v.dz = { f, b, l, r }; applyDamageVisual(v); } } } // all zero = repaired at Arnett Auto
-};
-net.handlers.vehicleGone = (id) => { const v = vehById.get(id); if (!v) return; if (me.veh === v && me.seat) ejectMe(); resetVehicle(v); };
+}
+// Where a car someone else drives is heading: its spot, velocity and turn rate when they wrote it (t, on the shared
+// server clock). followNet() extrapolates from there, so the car glides between the 10 Hz writes instead of
+// stepping toward each one (that stepping was the jerky ride a passenger got, with the camera shaking along).
+function netTarget(rec) {
+  const t = { x: +rec.x || 0, z: +rec.z || 0, h: +rec.h || 0, y: +rec.y || 0, vel: typeof rec.vx === 'number' };
+  if (t.vel) { t.vx = rec.vx; t.vz = +rec.vz || 0; t.vy = +rec.vy || 0; t.w = +rec.w || 0; t.t = typeof rec.t === 'number' ? rec.t : net.now() - 60; }
+  return t;
+}
+const NET_LEAD = 0.5; // extrapolate at most this far (s) when writes stop coming
+function followNet(v, dt) {
+  const t = v.tgt;
+  if (!t.vel) { // an older client's record: no velocity, ease toward it as before
+    const k = Math.min(1, dt * 8), ox = v.x, oz = v.z;
+    v.x += (t.x - v.x) * k; v.z += (t.z - v.z) * k; v.h += angDiff(v.h, t.h) * k; v.y = t.y || 0;
+    v.vx = (v.x - ox) / dt; v.vz = (v.z - oz) / dt;
+    return;
+  }
+  const age = clamp((net.now() - t.t) / 1000, 0, NET_LEAD), ff = age < NET_LEAD ? dt : 0;
+  v.x += t.vx * ff; v.z += t.vz * ff; v.y += t.vy * ff; v.h += t.w * ff; // carry on at their speed...
+  const px = t.x + t.vx * age, pz = t.z + t.vz * age, ph = t.h + t.w * age, py = t.y + t.vy * age;
+  const ex = px - v.x, ez = pz - v.z;
+  if (ex * ex + ez * ez > 144) { v.x = px; v.z = pz; v.h = ph; v.y = py; } // way off (respawned, teleported): jump
+  else { const k = Math.min(1, dt * 4); v.x += ex * k; v.z += ez * k; v.h += angDiff(v.h, ph) * k; v.y += (py - v.y) * Math.min(1, dt * 10); } // ...and ease out the error
+  v.vx = t.vx; v.vz = t.vz;
+  v.speed = t.vx * Math.sin(v.h) + t.vz * Math.cos(v.h); // wheels, speedo, the passenger's camera
+}
+net.handlers.reconnected = () => { sendT = 0; if (me.veh && !me.seat) writeVeh(me.veh, true); }; // net.js already put our player record back
+net.handlers.vehicleGone = (id) => { pendingVeh.delete(id); farVeh.delete(id); const v = vehById.get(id); if (!v) return; if (me.veh === v && me.seat) ejectMe(); resetVehicle(v); };
 net.handlers.event = (e) => {
   switch (e.type) {
     case 'hit': if (e.to === net.uid && !shotBlocked(e)) damageMe(+e.dmg || 0, String(e.by || 'someone'), e.from, e.ix !== undefined ? { x: +e.ix, y: 3.5, z: +e.iz } : null); break;
@@ -829,9 +905,14 @@ function distCam(x, z) { return Math.hypot(camera.position.x - x, camera.positio
 function writeVeh(v, force) {
   const n = performance.now();
   if (!force && n - v.lastWrite < (crowd ? 100 : 1000)) return; // 10 Hz with someone near, 1 Hz alone
-  v.lastWrite = n;
+  // velocity and turn rate let the other screens extrapolate between writes (followNet); w and vy are averaged
+  // over the time since the last write so a wobble in one frame doesn't get sent
+  const gap = (n - (v.lastWrite || 0)) / 1000, ok = gap > 0.02 && gap < 1.5 && v.wH !== undefined;
+  const w = ok ? angDiff(v.wH, v.h) / gap : 0, vy = ok ? (v.y - v.wY) / gap : 0;
+  v.lastWrite = n; v.wH = v.h; v.wY = v.y;
   v.touchedAt = net.now();
-  const rec = { ti: v.ti, c: v.color, x: r1(v.x), y: r2(v.y), z: r1(v.z), h: r2(v.h), hp: Math.round(v.hp), d: v.driver || '', b: v.burnAt || 0, bb: v.burnBy || '', e: v.exploded ? 1 : 0, dz: [v.dz.f, v.dz.b, v.dz.l, v.dz.r].map(Math.round), l: vehBits(v) };
+  const still = !v.vx && !v.vz && !w;
+  const rec = { ti: v.ti, c: v.color, x: r2(v.x), y: r2(v.y), z: r2(v.z), h: r3(v.h), vx: still ? 0 : r2(v.vx || 0), vz: still ? 0 : r2(v.vz || 0), vy: Math.abs(vy) < 0.05 ? 0 : r2(vy), w: Math.abs(w) < 0.01 ? 0 : r3(w), t: Math.round(net.now()), hp: Math.round(v.hp), d: v.driver || '', b: v.burnAt || 0, bb: v.burnBy || '', e: v.exploded ? 1 : 0, dz: [v.dz.f, v.dz.b, v.dz.l, v.dz.r].map(Math.round), l: vehBits(v) };
   if (v.T.plane || v.T.heli) { rec.p = r2(v.pitch || 0); rec.r = r2(v.roll || 0); }
   if (v.mods) rec.m = modBits(v.mods);
   setVehicle(v.id, rec);
@@ -1718,6 +1799,7 @@ function updateTraffic(dt, tSec) {
 // beyond this distance a car is drawn as a simple instanced silhouette
 const farCarDist = () => (activeQuality === 'low' ? 45 : activeQuality === 'medium' ? 70 : 95) * (weather.night > 0.5 ? 1.6 : 1);
 function updateVehicles(dt, tSec, nowMs) {
+  applyNetSnapshots(dt);
   updateTraffic(dt, tSec);
   farCarsBegin();
   const FAR = farCarDist(), cx = camera.position.x, cz = camera.position.z;
@@ -1747,11 +1829,7 @@ function updateVehicles(dt, tSec, nowMs) {
         collideAround(v, true);
         if (Math.hypot(v.vx, v.vz) < 0.3 && Math.abs(v.frV || 0) + Math.abs(v.fpV || 0) < 0.2 && !(v.air > 0)) { v.localSim = false; v.vx = v.vz = 0; writeVeh(v, true); }
         else writeVeh(v);
-      } else if (v.tgt) {
-        const k = Math.min(1, dt * 8), ox = v.x, oz = v.z;
-        v.x += (v.tgt.x - v.x) * k; v.z += (v.tgt.z - v.z) * k; v.h += angDiff(v.h, v.tgt.h) * k; v.y = v.tgt.y || 0;
-        v.vx = (v.x - ox) / dt; v.vz = (v.z - oz) / dt;
-      }
+      } else if (v.tgt) followNet(v, dt);
     }
     if (v.burnAt && !v.exploded) {
       if (!v.fire) v.fire = fx.startFire(v.mesh);
@@ -2194,6 +2272,7 @@ function driveUpdate(dt, fwd, side) {
   }
 }
 
+let snapRemotes = false; // back from a hidden tab: put everyone where they are now instead of sliding them there
 function updateRemotes(dt) {
   for (const [uid, p] of Object.entries(net.players)) {
     if (uid === net.uid || !p || !Array.isArray(p.s)) continue;
@@ -2207,14 +2286,17 @@ function updateRemotes(dt) {
       remotes.set(uid, r);
       ui.addFeed(`${r.name} joined`);
     }
-    const nm = String(p.n || '?').slice(0, 16);
-    if (nm !== r.name) { r.ch.g.remove(r.tag); r.tag = nameTag(nm); r.ch.g.add(r.tag); r.name = nm; } // renamed in Settings
-    const lk = JSON.stringify(p.c || null);
-    if (r.lookKey === undefined) r.lookKey = lk;
-    else if (r.lookKey !== lk && Array.isArray(p.c) && !r.ch.rag) { r.lookKey = lk; const pos = r.ch.g.position.clone(); scene.remove(r.ch.g); r.ch = makeCharacter(p.c); r.ch.g.add(r.tag); r.ch.g.position.copy(pos); scene.add(r.ch.g); }
-    const k = Math.min(1, dt * 10), ox = r.x, oz = r.z;
+    if (p !== r.pRef) { // (a new record arrives up to 10 times a second: name and outfit are checked then, not every frame)
+      const nm = String(p.n || '?').slice(0, 16);
+      if (nm !== r.name) { r.ch.g.remove(r.tag); r.tag = nameTag(nm); r.ch.g.add(r.tag); r.name = nm; } // renamed in Settings
+      const lk = JSON.stringify(p.c || null);
+      if (r.lookKey === undefined) r.lookKey = lk;
+      else if (r.lookKey !== lk && Array.isArray(p.c) && !r.ch.rag) { r.lookKey = lk; const pos = r.ch.g.position.clone(); scene.remove(r.ch.g); r.ch = makeCharacter(p.c); r.ch.g.add(r.tag); r.ch.g.position.copy(pos); scene.add(r.ch.g); }
+      if (r.lookKey === lk || !Array.isArray(p.c)) r.pRef = p; // (in a ragdoll: try again next frame)
+    }
+    const k = snapRemotes ? 1 : Math.min(1, dt * 10), ox = r.x, oz = r.z;
     r.x += (s[0] - r.x) * k; r.y += (s[1] - r.y) * k; r.z += (s[2] - r.z) * k; r.h += angDiff(r.h, s[3]) * k;
-    r.vx = (r.x - ox) / dt; r.vz = (r.z - oz) / dt;
+    r.vx = snapRemotes ? 0 : (r.x - ox) / dt; r.vz = snapRemotes ? 0 : (r.z - oz) / dt;
     r.speed = s[4]; r.veh = s[5] || ''; r.hp = s[6]; r.dead = s[6] <= 0; r.stars = s[7] || 0; r.weapon = s[8] || 0;
     r.search = !!s[13]; r.lkx = s[14] ?? r.x; r.lkz = s[15] ?? r.z;
     if (s[9] !== r.seq) {
@@ -2234,8 +2316,10 @@ function updateRemotes(dt) {
       else if (vo.T.ebike) { animateCharacter(r.ch, dt, { ...ebikes.rideEbike(r.ch, vo, dt, !!vo.netPedal), weapon: wk }); ebikes.afterRide(r.ch); }
       else if (vo.T.bike) { r.ch.g.position.set(vo.x - Math.sin(vo.h) * 0.25, vo.y + 0.2, vo.z - Math.cos(vo.h) * 0.25); r.ch.g.rotation.set(0, vo.h, 0); animateCharacter(r.ch, dt, { sit: true, weapon: wk }); }
       else { const sp = seatPos(vo, 0); r.ch.g.position.set(sp.x, sp.y, sp.z); r.ch.g.rotation.set(0, vo.h, 0); animateCharacter(r.ch, dt, ra && ra.n === 'carShut' ? { act: ra } : { drive: true, steer: vo.steerVis || 0 }); }
+    } else if (r.veh && farVeh.has(r.veh) && !r.dead) {
+      r.ch.g.visible = false; // in a car too far off to be built (a speck at that range): don't stand them in the road
     } else if ((r.dead || s[16]) && !r.ch.rag) {
-      ragdoll(r.ch, { x: r.vx * 0.6, y: 2, z: r.vz * 0.6 }, { dead: true }); // their computer simulates the real fall
+      r.ch.g.visible = true; ragdoll(r.ch, { x: r.vx * 0.6, y: 2, z: r.vz * 0.6 }, { dead: true }); // their computer simulates the real fall
     } else if (r.ch.rag) {
       if (!r.dead && !s[16]) standUp(r.ch); // they're back up: play the get-up
     } else {
@@ -2258,6 +2342,7 @@ function updateRemotes(dt) {
     r.tag.visible = !!r.tagOn;
   }
   for (const [uid, r] of remotes) if (!net.players[uid]) { scene.remove(r.ch.g); remotes.delete(uid); ui.addFeed(`${r.name} left`); }
+  snapRemotes = false;
 }
 
 let peakStars = 0, survive5 = 0, robberyPrompt = '', robberyBar = null;
@@ -2781,7 +2866,7 @@ police.initPolice(scene, {
   explode: (x, y, z, by) => boom(x, y, z, by, 'police'),
   copShot: (from, s) => { fx.tracer(from, { x: s[0], y: s[1], z: s[2] }); fx.muzzleFlash(from); fx.soundShot('pistol', distCam(from.x, from.z)); },
   announce: (uid, text) => { if (uid === net.uid) ui.announce(text, '', '#ff5e5b'); },
-  sync: (obj) => setCops(obj),
+  sync: (obj) => setCops(net.group.size > 1 ? obj : null), // nobody else in our group: nobody to send them to
   arrest: (uid) => { if (uid === net.uid) bustMe(); else sendEvent('bust', { to: uid }); },
 });
 
@@ -2796,6 +2881,10 @@ function hostChores(dt, nowMs) {
     const wrecked = v.exploded && nowMs - (v.burnAt || 0) > 60000;
     const abandoned = v.mode === 'free' && !v.exploded && nowMs - (v.touchedAt || nowMs) > 180000;
     if ((wrecked || abandoned) && !anyoneNear(v, 90)) { removeVehicle(v.id); resetVehicle(v); }
+  }
+  for (const [id, rec] of farVeh) { // the same for the far-away ones we only hold as records
+    const wrecked = rec.e && nowMs - (rec.b || 0) > 60000, abandoned = !rec.d && !rec.e && nowMs - (rec.seen || nowMs) > 180000;
+    if ((wrecked || abandoned) && !anyoneNear(rec, 90)) { farVeh.delete(id); removeVehicle(id); }
   }
 }
 
@@ -2925,7 +3014,7 @@ function poseForMinigame() {
   lastMg = mg;
   if (mg && MG_POSE[mg] && !me.veh) anim.play(MG_POSE[mg][0], MG_POSE[mg][1], { loop: true });
 }
-let movingVehicles = [], physT = 0;
+let movingVehicles = [], physT = 0, hostT = 0;
 function update(dt, t) {
   dt *= adm.slowmo;
   { // combat feel (combat.js): aim blend, recoil, crosshair spread and shake run on real time; a hit pause slows the rest
@@ -2950,7 +3039,7 @@ function update(dt, t) {
   updateRoute(dt);
   physT -= dt; if (physT <= 0) { physT = 0.5; syncPhysics(fxp, fzp); }
   const wasHost = isHost;
-  isHost = hostUid() === net.uid;
+  if ((hostT -= dt) <= 0) { hostT = 0.25; const h = hostUid(); isHost = h === net.uid; watchCops(isHost ? null : h); } // (a flood fill over every player: 4 Hz is plenty)
   if (wasHost && !isHost) setCops(null); // another player's group took over: drop our copy of the cops
   updateVehicles(dt, tSec, nowMs);
   poseForMinigame();
@@ -2990,7 +3079,8 @@ function update(dt, t) {
   sendT -= dt;
   if (sendT <= 0) {
     sendT = crowd ? 0.1 : 1;
-    sendState([r1(me.x), r2(me.y), r1(me.z), r2(me.h), r1(me.moveSpeed), me.veh ? me.veh.id : '', Math.round(me.hp), wanted.stars, me.weapon, me.shotSeq, r1(me.shot[0]), r1(me.shot[1]), r1(me.shot[2]), wanted.search ? 1 : 0, r1(wanted.lk.x), r1(wanted.lk.z), me.ch.rag && !me.dead ? 1 : 0, me.netPose || 0, me.netPitch || 0, me.netK || 0, me.seat || 0, ...actNet()]);
+    lastState = [r1(me.x), r2(me.y), r1(me.z), r2(me.h), r1(me.moveSpeed), me.veh ? me.veh.id : '', Math.round(me.hp), wanted.stars, me.weapon, me.shotSeq, r1(me.shot[0]), r1(me.shot[1]), r1(me.shot[2]), wanted.search ? 1 : 0, r1(wanted.lk.x), r1(wanted.lk.z), me.ch.rag && !me.dead ? 1 : 0, me.netPose || 0, me.netPitch || 0, me.netK || 0, me.seat || 0, ...actNet(), 0]; // s[23]: 1 = tabbed out
+    sendState(lastState);
   }
   updateCrowd(dt);
   tickProfile(dt);

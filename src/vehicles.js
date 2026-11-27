@@ -277,8 +277,16 @@ export function makeVehicle(id, ti, color, home) {
     hp: T.hp, driver: '', mode: 'parked', burnAt: 0, burnBy: '', exploded: false, sinkT: 0,
     home, tgt: null, lastWrite: 0, localSim: false, loop: null, slot: 0, charred: false, tilt: 0,
     dz: { f: 0, b: 0, l: 0, r: 0 }, hit: null,
+    ...LATE,
   };
 }
+// Fields other modules add to a vehicle later on, declared up front (as undefined, so every read is the same as
+// before): each one added afterwards gave the object a new hidden class, and the hot loops over vehicles (traffic,
+// updateVehicles) kept seeing new shapes, deoptimizing and falling back to slow baseline code.
+const LATE = Object.fromEntries(('vy pitch roll air frV fpV spV syV srV slip ag patrol braking signal gp gr grRate fr fp sy sr sp steerVis steerIn ' +
+  'prevH touchedAt netRec remote wH wY crew sirenOn doorOpen doorAng doorCloseAt fire keep stolenOnce npcDriver jackHold mods flat ' +
+  'brokenHead brokenTail netBrake netRev netPedal headFor modKey spotKey lastGh lastDy lastAir landed dock unlocked needsHotwire hotwireT ' +
+  'handsUp ko alarmUntil rough upset thr boosting pending npcOutT crankA lastStep').split(' ').map((k) => [k, undefined]));
 
 // ---------- damage you can see ----------
 const crackTex = (() => {
