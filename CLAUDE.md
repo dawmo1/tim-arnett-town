@@ -128,33 +128,23 @@ python3 tools/serve.py 8765
 - Shadow-pass shaders and the tracer material aren't prewarmed.
 - Licence plate and taxi-sign text use the same fix as the bus sign, which reads correctly in-game ("12 ARNETT AVE"); the plates and taxi sign weren't checked in-game themselves.
 
-## Session status (2026-11-27)
+## Session status (2026-11-27, end of day)
 
-- Everything below is merged into `main` and live, including take cover (F, `src/cover.js`), NPC melee turn-taking (`npc.js` `brawl()`) and swimming (`src/swim.js`).
-- **Roadmap items done:** 1 e-bikes, 2 car models, 3 animations, 4 character models, 5 enterable landmarks (Riverdale HS skipped: outside the map).
-- **Also done:**
-  - Carjacking and street mechanics (`src/carjack.js`).
-  - Combat feel (`src/combat.js`).
-  - Take cover on F (`src/cover.js`): faces of the city's wall boxes, parked cars and solid street props; low = crouch, high = flat against it; slide, pop out to aim, blind fire, swap cover, vault. Shots from the far side are stopped by the cover (`cover.blocks`, checked in main.js `coverSaves` for NPC, police and player shots). Gang gunmen use `cover.spotFor` and duck / pop up; cops already crouch behind cruisers.
-  - NPC melee (`npc.js` `brawl`): the player's combo moves and timing (combat.js MOVES) with a stretched wind-up (TELE), damage on the contact frame only if still in reach and in front, a hit during the wind-up staggers and cancels it (`flinch` -> `interrupt`), one attacker per target at a time while the rest circle.
-  - Swimming (`src/swim.js`): breaststroke / freestyle (Shift, stamina) / treading water, C to dive, 3D swimming underwater, a breath meter in the armor bar's place and drowning, climbing out over low banks and walls, wading out on beaches, plunging under from a fall, cars sinking to the river bed (E gets you out underwater), splashes, bubbles, CC0 water sounds, murky underwater view and muffled sound. Pose and sync through `anim.js` state codes (`swim*`, `cover*`, appended to LIST).
-  - Online fixes: shared admin time/weather/slowmo, passenger-seat clash, stale event cleanup.
-  - GTA V-style top-right HUD with new weapon icons (`src/weapon-icons.js`).
-- **People and animations** (`src/anim.js`, `src/people/pose.js`):
-  - San Andreas style.
-  - Confirmed headless: car in/out, get-up, doors, counters, sitting (bar seats and street benches), phone, pool, slots, e-bike pedalling.
-  - Sync between players checked only with a simulated remote player (`s[21]`/`s[22]`).
-- **Not done / loose ends:**
-  - Cover, NPC melee and swimming were tested headless (with a simulated remote player for the pose sync), not with two real browsers.
-  - The map's river banks are smooth slopes, so swimming out is mostly wading out; the climb-out animation needs a quay wall, a dock or a low wall at the water (tested with a test wall box).
-  - Cops still only shoot (no cop melee).
-  - Two players breaking into the same parked car each run their own copy.
-  - Alarm timing on remote screens is local.
-  - A stolen station cruiser's spot can get a new cruiser.
-  - The window-smash pose reads as a forearm more than an elbow.
-  - Nothing new has been tested with two real browsers.
+- **Merged and live before today's playtest:** roadmap items 1-5 (e-bikes, car models, animations, San Andreas people, enterable landmarks; Riverdale HS skipped, outside the map), carjacking (`carjack.js`), combat feel (`combat.js`), take cover (`cover.js`), NPC melee (`npc.js` `brawl`), swimming (`swim.js`), witness police (`wanted.js`, units from real stations, 1 star = arrest), casino / phone-car / store-counter fixes, solid bridge decks with piers, tab-out reconnect, smooth shared cars, the GTA V top-right HUD.
+- **Playtest pass (branch `claude/modest-mayer-aphv17`, headless with the Firebase mock):** every vehicle type, all 12 weapons and melee, all 47 street events, witness 911 calls, arrest, cop arrival, store counter and hold-up, bars (drinks, pool, darts, seats, passing out), the Arnett Belle and Isle Casino games, 13 walk-in landmarks, phone apps and car buying, pause and main-menu panels, the admin console (every command), radio, mechanic, taxi side job, Tim's Threads, Arnett Arms, e-bike dock rental, swimming, cover, profile save and reload, and two players (passenger ride, tab-out, the host's cops hitting and busting the other player).
+- **Fixed in that pass:**
+  - Corner store hold-ups need a real aim (right mouse), like the casino and bars: walking up to the counter with the pistol out used to start a robbery, even inside the counter menu.
+  - The roof helicopter never appeared (the helipad wanted a 25 m OSM roof; the towers are landmark models now). `landmarks.js` `buildHelipad` takes the tallest flat roof from 15 m up that fits the pad and the stair hut.
+  - Cop melee (`police.js` `officerStep`; synced as cop record fields 15-16; lands through the `hit` event): at 1 star a suspect who won't stand still is shoved down and cuffed, from 2 stars it's a pistol-whip. Officers jog after a walking suspect.
+  - A broken-into station cruiser leaves its spot empty (`s.gone`) until everyone has left.
+  - Bridge piers have collision (`pier` boxes, skipped by height-less pushes so people on the deck aren't shoved).
+  - Arnett Auto ring: after the mod shop, E gets you out (`v.modAt`).
+  - Casino and bar games fit 640-780 px tall windows; main-menu Controls descriptions were pushed out of sight; the feed showed through shop menus; the window smash is a side-on elbow; no crouch prompt; README and Credits cover the whole Quad Cities.
+- **Checked, left alone:** `tools/scan-solids.mjs` lists 12 landmark boxes on OSM service lanes (Express Lane forecourt, Camden Park path, convention centre drive, alleys). They match the models, and traffic doesn't use service lanes.
+- **Not verified:** anything with two real browsers or real frame rates (headless renders at about 1 fps); plane take-off (the parked prop plane crashed on the apron in the test); a boat hitting a pier mid-river (few piers stand in open water); how the new smash pose looks beyond headless shots.
+- **Still open:** river banks are slopes, so climbing out needs a quay wall; two players breaking into the same car each run their own copy; alarm timing on remote screens is local.
 - **Dain:**
-  - Publish the new `database.rules.json` (adds the `world` node and old-event deletion; backward compatible).
-  - Run `cd tools && npm run checks` on the Mac (check-roads needs `tools/cache`).
+  - Publish the `database.rules.json` from the earlier session if that's not done yet (no rules change today).
+  - Run `cd tools && npm run checks` on the Mac (scan-placement passes here; check-roads needs `tools/cache`).
 - The dark-blue box in headless screenshots is a quirk of headless software rendering (Dain doesn't see it).
 - Blender 5.2.5 is installed in the cloud container at `/opt/blender-dl`; scripts read the repo root from `TAT_ROOT` (`TAT_ROOT=$PWD/ blender -b -P assets/src/<script>.py`).
