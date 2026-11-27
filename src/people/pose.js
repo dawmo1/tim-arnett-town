@@ -290,12 +290,14 @@ function mechPose(P, ch, n, k, t) {
     case 'carTry': // grab the handle, haul on it twice; it won't give
       keys(P, k, [[0, (Q) => stand(Q, t, ch)], [0.25, reach], [0.42, yank], [0.58, reach], [0.74, yank], [1, (Q) => { stand(Q, t, ch); set(Q, 'head', 4, 20); }]]);
       return 20;
-    case 'carSmash': // look about, cock the elbow back and up, drive it through the glass, shake the arm off
+    case 'carSmash': // look about, turn side-on with the elbow cocked high, drive the point of it through the glass, shake it off
+      // (the hips turn the right side to the car and the upper arm is raised out sideways, so whichever way the forearm
+      // folds, what meets the window is the elbow)
       keys(P, k, [
         [0, (Q) => { stand(Q, t, ch); set(Q, 'head', 4, 20); }],
-        [0.38, (Q) => { stand(Q, t, ch); armsUp(Q, 'R', -45, 25, 60, -150); set(Q, 'handR', 0, 0, 30); set(Q, 'spine', -4, -32); set(Q, 'chest', 0, -14); set(Q, 'head', 0, 18); set(Q, 'thighR', 12); set(Q, 'thighL', -6); Q.root[2] -= 0.06; }],
-        [0.5, (Q) => { stand(Q, t, ch); armsUp(Q, 'R', -88, -10, 12, -150); set(Q, 'handR', 0, 0, 30); set(Q, 'spine', 14, 30); set(Q, 'chest', 6, 12); set(Q, 'head', 6, -6); set(Q, 'thighL', -26); set(Q, 'shinL', 16); set(Q, 'thighR', 14); Q.root[2] += 0.1; }],
-        [0.68, (Q) => { stand(Q, t, ch); armsUp(Q, 'R', -80, -6, 18, -140); set(Q, 'spine', 12, 24); set(Q, 'head', 10); set(Q, 'thighL', -22); set(Q, 'shinL', 14); Q.root[2] += 0.08; }],
+        [0.38, (Q) => { stand(Q, t, ch); set(Q, 'hips', 0, 18); set(Q, 'spine', -4, -26); set(Q, 'chest', 0, -12); set(Q, 'head', 0, 10); armsUp(Q, 'R', -25, 0, 75, -145); set(Q, 'handR', 0, 0, 30); armsUp(Q, 'L', -40, 0, 20, -90); set(Q, 'thighR', 12); set(Q, 'thighL', -6); Q.root[2] -= 0.06; }],
+        [0.5, (Q) => { stand(Q, t, ch); set(Q, 'hips', 0, 55); set(Q, 'spine', 10, 32); set(Q, 'chest', 4, 10); set(Q, 'head', 6, -70); armsUp(Q, 'R', -12, 0, 84, -150); set(Q, 'handR', 0, 0, 30); armsUp(Q, 'L', -55, 0, 10, -110); set(Q, 'thighL', -20); set(Q, 'shinL', 14); set(Q, 'thighR', 10); Q.root[2] += 0.08; }],
+        [0.68, (Q) => { stand(Q, t, ch); set(Q, 'hips', 0, 45); set(Q, 'spine', 8, 24); set(Q, 'head', 8, -55); armsUp(Q, 'R', -10, 0, 70, -130); armsUp(Q, 'L', -45, 0, 12, -95); set(Q, 'thighL', -16); set(Q, 'shinL', 10); Q.root[2] += 0.06; }],
         [1, (Q) => { stand(Q, t, ch); armsUp(Q, 'R', -30, 0, 22, -40); set(Q, 'spine', 4, 6); }],
       ]);
       return 26;
