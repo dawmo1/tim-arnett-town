@@ -281,7 +281,7 @@ button { font: inherit; }
 #resumeBtn:hover { text-decoration: underline; text-underline-offset: 3px; }
 
 /* shop: GTA V store menu, top-left: Pricedown banner, sub bar with your cash, black label-box rows, white selection, green prices */
-#shop { position: absolute; inset: 0; pointer-events: auto; padding: 8vh 3vw; background: linear-gradient(90deg, rgba(0,0,0,.45), rgba(0,0,0,0) 60%); }
+#shop { position: absolute; inset: 0; z-index: 3; pointer-events: auto; padding: 8vh 3vw; background: linear-gradient(90deg, rgba(0,0,0,.45), rgba(0,0,0,0) 60%); }
 .shopCard { width: min(440px, 100%); display: grid; }
 .shopCard h2 { margin: 0; padding: 24px 18px 18px; font: 400 46px/1 var(--display); text-align: center; letter-spacing: 1px; color: #fff; -webkit-text-stroke: 2px #000; paint-order: stroke fill; text-shadow: 0 3px 6px rgba(0,0,0,.5); background: linear-gradient(125deg, #2f7a46, #133a22 70%); }
 .shopSub { display: flex; justify-content: space-between; align-items: baseline; padding: 7px 14px; background: #000; font-size: 17px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; }

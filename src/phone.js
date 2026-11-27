@@ -223,14 +223,23 @@ function callScreen() { return { title: call ? call.name : '', color: call ? col
 const thenClose = (f, ms = 1100) => later(() => { close(); if (!ctx.player().dead) f(); }, ms);
 
 function mechanic() { thenClose(() => ctx.mechanic()); return 'Mechanic here. Which ride do you want dropped off?'; }
-async function arnettAuto() {
+// bring a garage car (slot i, or the last one out) to the nearest street
+async function arnettAuto(i) {
   const g = await garage();
   if (g && g.deliver) {
-    if (!g.cars().length) return 'No personal vehicle yet: save one at Arnett Auto';
-    if (g.blips().length) return "Your car is already out — it's on your map";
-    thenClose(() => g.deliver()); return "Arnett Auto. Your car's on the way, follow the GPS.";
+    const cars = g.cars(), c = cars[i ?? cars.findIndex((x) => x.selected)];
+    if (!c) return 'No personal vehicle yet. Buy one online or save one at Arnett Auto';
+    if (g.blips().length && c.selected) return `Your ${c.name} is already out. It's on your map`;
+    if (ctx.player().inHall) return "We'll bring it round to the street. Step outside and call back."; // (deep in a mall or terminal; from a shop or the casino it comes to the street by the door)
+    thenClose(() => g.deliver(c.i)); return `Arnett Auto. Your ${c.name} is on the way, follow the GPS.`;
   }
   return "Arnett Auto: Garage coming soon. We're still sweeping the floor.";
+}
+// Arnett Auto: with more than one car in the garage, pick which one first
+async function garageMenu() {
+  const g = await garage();
+  if (!g || g.cars().length < 2) { dial('Arnett Auto', arnettAuto); return; }
+  push(() => ({ title: 'Arnett Auto', color: colorOf('Arnett Auto'), rows: g.cars().map((c) => ({ label: c.name, sub: c.selected ? 'Your last ride' : 'In the garage', act: () => dial('Arnett Auto', () => arnettAuto(c.i)) })) }));
 }
 function taxi() {
   const p = ctx.player(), wp = ctx.waypoint();
@@ -269,7 +278,7 @@ function emergency(kind) {
   return { cop: 'Dispatch: Police are on the way.', amb: 'Dispatch: An ambulance is on the way.', fire: 'Dispatch: A fire truck is on the way.' }[kind];
 }
 const CONTACTS = () => [
-  { name: 'Arnett Auto', answer: arnettAuto },
+  { name: 'Arnett Auto', menu: garageMenu },
   { name: 'Mechanic', answer: mechanic },
   { name: 'Quad City Cab', answer: taxi },
   { name: '911 Emergency', menu: () => push(nineOneOne) },
@@ -319,13 +328,26 @@ function dealer() {
     return { label: T.name, sub: eco.cash < price ? 'Not enough cash' : 'Delivered today. No refunds. No questions.', right: '$' + price.toLocaleString('en-US'), dim: eco.cash < price, act: () => buyCar(ti, T.name, price) };
   }) };
 }
+// Bought cars are yours to keep: saved in the garage (the profile's gar) and dropped off on the nearest street right
+// away (or when you're back outside). Call Arnett Auto to bring any of them round again.
+const PAINT = [0xc62828, 0x1565c0, 0x111214, 0xf2f2f0, 0xe0a526, 0x2e7d32, 0x6a1b9a, 0x9ea3a8];
+let buying = false;
 async function buyCar(ti, name, price) {
-  if (!spend(price)) { note('Not enough cash'); return; }
-  fx.soundCash();
-  const g = await garage();
-  if (g && g.addCar && g.addCar(ti) >= 0) { text("Tim's Discount Wheels", `Your ${name} is in your garage at Arnett Auto. Thanks for buying from Tim!`); }
-  else { ctx.deliver(ti, name); text("Tim's Discount Wheels", `Your ${name} has been dropped off nearby. Follow the GPS. Thanks for buying from Tim!`); }
-  render();
+  if (buying) return;
+  if (eco.cash < price) { note('Not enough cash'); return; }
+  buying = true;
+  try {
+    const g = await garage();
+    if (g && g.cars && g.cars().length >= 12) { note('Your garage is full (12 cars)'); return; }
+    if (!spend(price)) { note('Not enough cash'); return; }
+    fx.soundCash();
+    const slot = g && g.addCar ? g.addCar(ti, PAINT[Math.floor(Math.random() * PAINT.length)]) : -1;
+    if (slot < 0) { ctx.deliver(ti, name); text("Tim's Discount Wheels", `Your ${name} has been dropped off nearby. Follow the GPS. Thanks for buying from Tim!`); render(); return; }
+    if (ctx.player().inHall) { text("Tim's Discount Wheels", `Your ${name} is in your garage. Call Arnett Auto when you're outside and they'll bring it round. Thanks for buying from Tim!`); render(); return; }
+    note(`Sold! Your ${name} is on its way`);
+    thenClose(() => g.deliver(slot), 900);
+    text("Tim's Discount Wheels", `Your ${name} is parked nearby, follow the GPS. It's in your garage too: call Arnett Auto any time. Thanks for buying from Tim!`);
+  } finally { buying = false; }
 }
 function arms() {
   return { title: 'Arnett Arms', color: '#a3261f', rows: ctx.ammoItems().map((it) => {

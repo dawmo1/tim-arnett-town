@@ -94,7 +94,7 @@ let root = null;
 function dom() {
   if (root) return root;
   const css = document.createElement('style');
-  css.textContent = `#lsc{position:absolute;inset:0;pointer-events:auto;padding:8vh 3vw;background:linear-gradient(90deg,rgba(0,0,0,.4),rgba(0,0,0,0) 50%)}
+  css.textContent = `#lsc{position:absolute;inset:0;z-index:3;pointer-events:auto;padding:8vh 3vw;background:linear-gradient(90deg,rgba(0,0,0,.4),rgba(0,0,0,0) 50%)}
 #lsc h2{background:linear-gradient(125deg,#1d5c9e,#0b2240 70%)}
 #lscItems{list-style:none;margin:0;padding:0;display:grid;max-height:52vh;overflow:auto;font:500 19px/1.2 var(--hud)}
 #lscItems li{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:8px 14px;background:var(--box);color:#fff;cursor:pointer}

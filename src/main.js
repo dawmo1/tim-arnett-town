@@ -2277,8 +2277,10 @@ function updateRobbery(dt) {
   const R = interior.room;
   if (!R || !R.clerk || (R.kind !== 'rob' && R.kind !== 'casino' && R.kind !== 'bar')) return;
   const st = R.store, w = WEAPONS[me.weapon], c = R.clerk, casino = R.kind === 'casino', who = casino ? 'cashier' : R.kind === 'bar' ? 'bartender' : 'clerk', till = casino ? 'cage' : 'till';
-  const gun = w.kind === 'gun' && !me.dead, facing = Math.abs(angDiff(camYaw, Math.atan2(c.x - me.x, c.z - me.z))) < 0.6 && Math.hypot(c.x - me.x, c.z - me.z) < 16;
-  const started = (st.progress || 0) > 0, pointing = gun && facing && !(st.cooldown > 0);
+  // corner stores: a gun pointed the clerk's way is enough. The casino and bars are places you go to play and drink with a
+  // gun on your hip, so there it takes a real aim (right mouse). Nothing happens while a table or machine has you.
+  const gun = w.kind === 'gun' && !me.dead && !minigames.isOpen() && !phone.isOpen(), facing = Math.abs(angDiff(camYaw, Math.atan2(c.x - me.x, c.z - me.z))) < 0.6 && Math.hypot(c.x - me.x, c.z - me.z) < 16;
+  const started = (st.progress || 0) > 0, pointing = gun && facing && !(st.cooldown > 0) && (R.kind === 'rob' || aiming);
   me.robAim = pointing;
   R.held = pointing || (started && !(st.cooldown > 0));
   if (!R.held && (interior.nearExit(me.x, me.z) || canBuyAtCounter())) return; // let "E: Leave" / "E: Buy ammo" show
@@ -2316,6 +2318,7 @@ function enterRoom(st) {
   setTimeout(() => {
     me.outside = { x: st.x, z: st.z, y: W.groundHeight(st.x, st.z), h: st.face + Math.PI };
     const p = interior.enter(st, me.outside.y);
+    if (me.swim) { me.swim = false; swim.reset(); } // (from the water's edge: the room floor is dry)
     me.x = p.x; me.y = p.y; me.z = p.z; me.vy = 0; me.h = 0; camYaw = 0;
     fadeEl.style.opacity = '0';
   }, 350);
@@ -2366,6 +2369,12 @@ function useStore() {
   if (!st) return false;
   if (st.kind === 'body' && me.veh && !me.seat && !me.veh.T.boat && !me.veh.T.heli) { bodyShop(me.veh); return true; }
   if (me.veh) return false;
+  if (st.kind === 'body' && !nearestVehicle(1.3)) { // on foot at Arnett Auto (no car to get into right there): pick up a car from your garage
+    const mine = () => garage.cars().map((c) => ({ label: c.name, sub: c.selected ? 'Your last ride · brought round to the street' : 'Brought round to the street', price: 0, buy: () => { closeShop(); garage.deliver(c.i); } }));
+    if (!garage.cars().length) { ui.flashPrompt('Arnett Auto: your garage is empty'); return true; }
+    openShop('Arnett Auto: your garage', mine());
+    return true;
+  }
   if (st.kind === 'casino') { enterRoom(st); return true; } // other shops are buildings you walk into (interiors.js)
   if (st.kind === 'food') { if (me.hp >= 100) { ui.flashPrompt("You're not hungry"); return true; } if (!spend(8)) { ui.flashPrompt('A hot dog is $8'); return true; } me.hp = Math.min(100, me.hp + 30); fx.soundCash(); ui.flashPrompt('Hot dog: +30 health'); me.h = Math.atan2(st.x - me.x, st.z - me.z); anim.play('give', 0.55).then('eat', 1.8); return true; }
   if (st.kind === 'meds') { openShop('Hospital Pharmacy', [{ label: 'Patch me up', sub: 'Full health', price: 60, ok: () => me.hp < 100, buy: () => { me.hp = 100; } }]); return true; }
@@ -2465,7 +2474,8 @@ async function taxiTo(x, z) {
   setTimeout(() => loading(false), 300);
 }
 function deliverCar(ti, label, color = [0xc62828, 0x1565c0, 0x111214, 0xf2f2f0, 0xe0a526][Math.floor(Math.random() * 5)]) {
-  const sp = W.roadSpot(me.x, me.z, 25, 60) || { x: me.x + 6, z: me.z, h: 0 };
+  const o = (interior.room && me.outside) || me; // (in the casino: the street by its door, not under it)
+  const sp = W.roadSpot(o.x, o.z, 25, 60) || { x: o.x + 6, z: o.z, h: 0 };
   const v = makeVehicle(newId('d'), ti, color, sp);
   v.stolenOnce = true; v.keep = true; scene.add(v.mesh); vehicles.push(v); vehById.set(v.id, v);
   waypoint = { x: sp.x, z: sp.z }; gpsRoute = null; routeT = 0;
@@ -2737,7 +2747,7 @@ initEmergency(scene, {
 interior.initInteriors(scene);
 initVenues({ openShop, clothingItems });
 phone.initPhone({
-  player: () => ({ x: me.veh ? me.veh.x : me.x, z: me.veh ? me.veh.z : me.z, dead: me.dead, inVeh: !!me.veh, inRoom: !!interior.room, speed: me.veh ? Math.abs(me.veh.speed || 0) : 0 }),
+  player: () => ({ x: me.veh ? me.veh.x : me.x, z: me.veh ? me.veh.z : me.z, dead: me.dead, inVeh: !!me.veh, inRoom: !!interior.room, inHall: !!interior.room?.hall, speed: me.veh ? Math.abs(me.veh.speed || 0) : 0 }),
   waypoint: () => waypoint,
   mechanic: () => callMechanic(),
   taxi: (x, z) => taxiTo(x, z),
@@ -2758,7 +2768,7 @@ initEvents({
   extinguish: (v) => { v.burnAt = 0; v.burnBy = ''; fx.stopFire(v.fire); v.fire = null; v.hp = Math.max(v.hp, -v.T.hp * 0.3); writeVeh(v, true); },
 });
 initLandmarks(scene, {
-  onCasino: (door, face) => stores.push({ name: 'The Arnett Belle', kind: 'casino', x: door.x, z: door.z, face, cooldown: 0, progress: 0 }),
+  onCasino: (door, face) => { const st = { name: 'The Arnett Belle', kind: 'casino', x: door.x, z: door.z, face, cooldown: 0, progress: 0 }; stores.push(st); return st; },
   addHeli: (x, y, z) => { const v = makeVehicle('heli-roof', V.HELI, 0x263238, { x, z, h: 0 }); v.y = y; v.keep = true; scene.add(v.mesh); vehicles.push(v); vehById.set(v.id, v); },
   addBoat: (x, z, h) => { const v = makeVehicle(`boat_${Math.round(x)}_${Math.round(z)}`, V.BOAT, [0xffffff, 0xe5484d, 0x1e88e5][Math.floor(Math.random() * 3)], { x, z, h }); v.y = W.WATER_Y - 0.35; v.keep = true; scene.add(v.mesh); vehicles.push(v); vehById.set(v.id, v); },
   horn: (x, z) => fx.soundHorn(distCam(x, z) * 0.6),

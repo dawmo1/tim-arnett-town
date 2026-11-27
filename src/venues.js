@@ -2,8 +2,8 @@
 // The rooms themselves are built by interiors.js (it hands us R.spots and R.seats); main.js calls useVenue() on E
 // inside a room and updateVenues() each frame after updateWalkers().
 // Games run through src/minigames/index.js start(kind, { bet }); the minigame takes the bet and pays out.
-// Until that module exists a machine or table just says "Out of order".
 import * as interior from './interiors.js';
+import * as minigames from './minigames/index.js';
 import { stores } from './economy.js';
 import { drink } from './drunk.js';
 import { addScripted, dropScripted, say } from './npc.js';
@@ -15,10 +15,11 @@ export function initVenues(h) { hooks = { ...hooks, ...h }; }
 // ---------- games ----------
 const BET = { pool: 20, darts: 10, slots: 5, blackjack: 25, roulette: 25 };
 let gaming = false;
-async function play(kind) {
+async function play(kind, R) {
   if (gaming) return;
   gaming = true;
-  try { const mg = await import('./minigames/index.js'); await mg.start(kind, { bet: BET[kind] }); }
+  const sub = R.kind === 'casino' ? R.store.name + (kind === 'roulette' ? ' · European wheel' : '') : undefined; // which casino you're in
+  try { await minigames.start(kind, { bet: BET[kind], sub }); }
   catch (e) { console.warn('minigame', kind, e); ui.flashPrompt('Out of order'); }
   gaming = false;
 }
@@ -66,7 +67,7 @@ export function useVenue(me) {
   if (!best) return false;
   if (best.act === 'menu') hooks.openShop(best.title, menuItems(best.menu, me));
   else if (best.act === 'clothes') hooks.openShop(best.title, hooks.clothingItems ? hooks.clothingItems() : []);
-  else if (best.act !== 'drinks') play(best.act);
+  else if (best.act !== 'drinks') play(best.act, R);
   else if (R.kind === 'bar' && (R.store.alarmed || R.store.cooldown > 0)) ui.flashPrompt("The bartender won't serve you");
   else hooks.openShop(R.kind === 'casino' ? (R.hall ? 'Lone Wolf Bar' : 'Belle Bar') : R.store.name, drinkMenu(R));
   return true;

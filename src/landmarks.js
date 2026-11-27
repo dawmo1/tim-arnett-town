@@ -371,9 +371,24 @@ function buildCasino(x0) {
   const hx = Math.sin(h), hz = Math.cos(h);
   addBoxes('casino', [makeBox(x, z, hz, -hx, 9, 35, WATER_Y - 3, 6)].map((b) => b));
   const gw = group(x, WATER_Y + 1.2, w.z + 12, 0); box(gw, 0x8d6e63, 3, 0.3, 26, 0, 0, 0); box(gw, 0x5d4037, 0.1, 1, 26, 1.4, 0.6, 0); box(gw, 0x5d4037, 0.1, 1, 26, -1.4, 0.6, 0);
-  casino.x = x; casino.z = z; casino.door = { x: w.x, z: w.z - 3 };
-  ctx.onCasino?.(casino.door, Math.PI);
+  casino.x = x; casino.z = z; casino.door = { x: w.x, z: w.z - 3 }; casino.gw = gw;
+  casino.store = ctx.onCasino?.(casino.door, 0) || null; // face 0: the boat is +z of the door, you come back out facing the shore
   return true;
+}
+// The bank found at build time can be the coarse one (the detailed tiles further along weren't in yet), which left the
+// door and the gangway out in the river. Once the tiles by the boat are in, find the real bank and move them to it.
+function settleCasino(focus) {
+  if (casino.settled || !casino.gw || !focus || Math.hypot(focus.x - casino.x, focus.z - casino.z) > 500) return;
+  const x = casino.x, edge = casino.z - 9; // the boat's shore side
+  for (const z of [edge, edge - 60]) if (!W.tiles.has(`${Math.floor(x / 200)}_${Math.floor(z / 200)}`)) return;
+  casino.settled = true;
+  let bank = edge;
+  while (bank > edge - 200 && !W.isLand(x, bank)) bank -= 0.5;
+  if (bank <= edge - 200) return;
+  const len = Math.max(4, edge - bank + 1); // from just up the bank to the boat
+  casino.gw.position.z = bank - 1 + len / 2; casino.gw.scale.z = len / 26;
+  casino.door.x = x; casino.door.z = bank - 2;
+  if (casino.store) { casino.store.x = x; casino.store.z = bank - 2; }
 }
 
 // ---------- rooftop helicopter (stairs from the street) ----------
@@ -586,6 +601,7 @@ export function updateLandmarks(dt, tSec, focus, n) {
   if (ferris) { ferris.rotation.z += dt * 0.12; for (const c of ferris.children) if (c.userData.gondola) c.rotation.z = -ferris.rotation.z; }
   if (fountain) { fountain.scale.y = 0.85 + Math.sin(tSec * 2.1) * 0.15; }
   if (casino.wheel) casino.wheel.rotation.z += dt * 0.6;
+  settleCasino(focus);
   updateFerry(tSec, focus);
   // barges
   if (riverPath) for (const b of barges) {

@@ -42,7 +42,7 @@ function open(kind, def, opts, resolve) {
     </div>`);
   const $ = (s) => root.querySelector(s);
   $('.mg-title').textContent = opts.title || def.title;
-  $('.mg-subt').textContent = def.sub;
+  $('.mg-subt').textContent = opts.sub || def.sub;
   const cashEl = $('.mg-cash'), msgEl = $('.mg-msg'), betsEl = $('.mg-bets');
 
   // ---------- bet selector ----------
