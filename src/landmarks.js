@@ -394,17 +394,29 @@ function settleCasino(focus) {
 // ---------- rooftop helicopter (stairs from the street) ----------
 export const helipad = { x: 0, z: 0, y: 0, ready: false };
 function buildHelipad() {
-  // the tallest flat roof downtown
-  let best = null;
+  // the tallest flat roof downtown that the pad fits on (the towers are landmark models now, so the OSM roofs left
+  // standing top out around 20-25 m: any flat roof from 15 m up will do)
+  // (wait for every downtown tile, so it's the same roof for everyone whichever way they came in)
+  for (let tx = -1; tx <= 1; tx++) for (let tz = -1; tz <= 1; tz++) if (D.tileSet?.has(`${tx}_${tz}`) && !W.tiles.has(`${tx}_${tz}`)) return false;
+  const cands = [];
   for (const t of W.tiles.values()) {
-    if (t.ox < -300 || t.ox > 500 || t.oz < -300 || t.oz > 300) continue;
+    if (t.tx < -1 || t.tx > 1 || t.tz < -1 || t.tz > 1) continue;
     for (const [rel, by, h, pitched] of t.b) {
-      if (pitched || h < 25) continue;
+      if (pitched || h < 15) continue;
       let cx = 0, cz = 0; const n = rel.length / 2; for (let i = 0; i < rel.length; i += 2) { cx += rel[i]; cz += rel[i + 1]; } cx = cx / n + t.ox; cz = cz / n + t.oz;
-      if (!best || by + h > best.top) best = { x: cx, z: cz, top: by + h };
+      cands.push({ x: cx, z: cz, top: by + h });
     }
   }
-  if (!best || W.roofAt(best.x, best.z) < best.top - 0.5) return false;
+  // the pad fits, and there's roof for the stair hut on the side facing the street (else the helicopter can't be reached)
+  const onRoof = (c, x, z) => W.roofAt(x, z) >= c.top - 0.5;
+  const fits = (c) => {
+    if (![[0, 0], [6, 0], [-6, 0], [0, 6], [0, -6]].every(([dx, dz]) => onRoof(c, c.x + dx, c.z + dz))) return false;
+    const q = W.nearestEdge(c.x, c.z, 120); if (!q) return false;
+    const l = Math.hypot(q.x - c.x, q.z - c.z) || 1;
+    return onRoof(c, c.x + ((q.x - c.x) / l) * 7.5, c.z + ((q.z - c.z) / l) * 7.5);
+  };
+  const best = cands.sort((a, b) => b.top - a.top).find(fits);
+  if (!best) return false;
   const g = group(best.x, best.top + 0.05, best.z);
   const pad = new THREE.Mesh(new THREE.CircleGeometry(7, 32).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ map: textTexture('H', { w: 256, h: 256, bg: '#3b4048', fg: '#ffc94a', size: 200, border: '#ffc94a' }) }));
   g.add(pad);
