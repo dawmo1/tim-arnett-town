@@ -48,7 +48,7 @@ export function pushOutCircle(x, z, r, y = -Infinity) {
   let hit = false, nx = 0, nz = 0;
   boxesNear(x, z, r + 0.5, near);
   for (const b of near) {
-    if (y > b.y0 + b.h - 0.4 || (y > -1e9 && y + 2 < b.y0)) continue;
+    if (y > b.y0 + b.h - 0.4 || (y > -1e9 && y + 2 < b.y0) || (b.pier && y === -Infinity)) continue; // (no height given: could be up on the deck over a pier)
     const dx = x - b.cx, dz = z - b.cz;
     if (Math.abs(dx) > b.br + r || Math.abs(dz) > b.br + r) continue;
     const lu = dx * b.ux + dz * b.uz, lv = dx * b.vx + dz * b.vz;

@@ -163,7 +163,7 @@ const DECK_T = { motor: 1.8, trunk: 1.6, primary: 1.3, secondary: 1.1 }; // slab
 const DECK_UNDER = lin(0x8f7a86), DECK_SIDE = lin(0xb1ada4), DECK_LIP = lin(0xc4c0b7), PIER = lin(0x9e9a92);
 const PIER_STEP = 40;
 // one 5 m piece of a bridge's slab (dense segment k of e, fractions fa..fb), from offset oL to oR across the road
-function bridgeSlab(B, e, d, k, fa, fb, span, oL, oR, t) {
+function bridgeSlab(B, e, d, k, fa, fb, span, oL, oR, t, solid) {
   const T = DECK_T[e.cls] || 0.9, LIP = 0.35;
   const at = (f, o) => { // [x, top y, z, bottom y, ground]
     const s = d.s[k] + span * f, xa = d.x[k] + d.nx[k] * o * d.sc[k], za = d.z[k] + d.nz[k] * o * d.sc[k], xb = d.x[k + 1] + d.nx[k + 1] * o * d.sc[k + 1], zb = d.z[k + 1] + d.nz[k + 1] * o * d.sc[k + 1];
@@ -190,11 +190,15 @@ function bridgeSlab(B, e, d, k, fa, fb, span, oL, oR, t) {
     const cols = w > 13 ? [oL + 2.6, oR - 2.6] : [(oL + oR) / 2];
     const spots = cols.map((o) => at(f, o));
     if (spots.some((q) => roadHit(q[0], q[2], 1.2))) continue; // never a column in a road underneath
-    for (const q of spots) obox(B, q[0], q[2], hx, hz, 0.9, w > 13 ? 0.9 : Math.min(2.2, w * 0.18), q[4] - 1.5, c[3] - 1.1, PIER, PLAIN);
+    for (const q of spots) {
+      const hp = w > 13 ? 0.9 : Math.min(2.2, w * 0.18);
+      obox(B, q[0], q[2], hx, hz, 0.9, hp, q[4] - 1.5, c[3] - 1.1, PIER, PLAIN);
+      if (solid) { const bx = makeBox(q[0], q[2], hx, hz, 0.9, hp, q[4] - 1.5, c[3] - 1.1 - (q[4] - 1.5)); bx.pier = true; solid.push(bx); } // boats, swimmers and cars below hit the column
+    }
     obox(B, c[0], c[2], -hz, hx, w / 2 - 0.6, 0.95, c[3] - 1.2, c[3], PIER, PLAIN, 4, true); // cap beam under the slab
   }
 }
-function buildRoads(t, roadB, roadLoB, walkB, markB, groundB, lite = false, deckB = null) { // lite: no paint (far LOD)
+function buildRoads(t, roadB, roadLoB, walkB, markB, groundB, lite = false, deckB = null, pierSolid = null) { // lite: no paint (far LOD)
   const WHITE = lin(0xeeeeea), YELLOW = lin(0xe8b923), CURB = lin(0xbdb8ae), WALKC = lin(0xc9c5bd), BRICKW = lin(0x9a5a48), GRASS = lin(0x80a359);
   const C3 = [CURB, WALKC, BRICKW, GRASS, walkB, groundB];
   const deckY = (e, s, x, z) => (e.bridge ? pointOnEdge(e, s).y : terrainHeight(x, z));
@@ -243,7 +247,7 @@ function buildRoads(t, roadB, roadLoB, walkB, markB, groundB, lite = false, deck
         const [c0, c1] = row(B, fa, o0, o1, lift, c, us), [d0, d1] = row(B, fb, o0, o1, lift, c, us);
         B.quad(c0, c1, d1, d0);
       }
-      if (deckB && e.bridge) bridgeSlab(deckB, e, d, k, fa, fb, span, -hw - (L.sw.includes(-1) ? lay.at(-1)[1] : 0) - 0.25, hw + (L.sw.includes(1) ? lay.at(-1)[1] : 0) + 0.25, t);
+      if (deckB && e.bridge) bridgeSlab(deckB, e, d, k, fa, fb, span, -hw - (L.sw.includes(-1) ? lay.at(-1)[1] : 0) - 0.25, hw + (L.sw.includes(1) ? lay.at(-1)[1] : 0) + 0.25, t, pierSolid);
       // markings (skipped inside junctions and on gravel and brick)
       if (lite || L.gravel || L.brick || e.cls === 'track') continue;
       const s0 = d.s[k], s1 = d.s[k + 1];
@@ -1000,7 +1004,7 @@ export function buildTile(t) {
   // boxes: the old per-prop boxes (not registered; stream.js makes walls from the data). solid: new things that block
   // (utility poles, walls, billboards, silos, towers, sheds, pylons), registered by stream.js with the tile
   const boxes = [], solid = [], foot = [], junk = [], trees = [], wires = [], newK = [], bigBoxes = [], yards = [], dealers = [], posts = [];
-  const deckB = new Buf(); buildRoads(t, roadB, roadLoB, walkB, markB, groundB, false, deckB);
+  const deckB = new Buf(); buildRoads(t, roadB, roadLoB, walkB, markB, groundB, false, deckB, solid);
   const lightsMapped = [];
   const has = dataPoints(t, junk, lightsMapped, solid, solidB, namesB, trees, posts);
   Object.assign(has, dataLines(t, junk, solid, solidB, lotB));
