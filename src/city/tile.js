@@ -8,7 +8,7 @@ import { M, CELL, STYLE_CELL, SIGN_NAMES } from './mats.js';
 import { Buf, face, tri, obox, panel, lin, hash, PLAIN } from './geom.js';
 import { applyArchetypes, edgeArea, coreAt, HOUSE, pointsOf } from './areas.js';
 import { nameUV, displayName, STRIP_FOOD, GHOST } from './names.js';
-import { streetSigns, powerLines, parkingDetail, crops, dataPoints, dataLines, placeOff, validatePlacements, regionPlaces } from './detail.js';
+import { streetSigns, powerLines, parkingDetail, crops, dataPoints, dataLines, placeOff, validatePlacements, regionPlaces, roadHit } from './detail.js';
 
 // ---------- ground colours ----------
 const GROUND = [];
@@ -154,7 +154,47 @@ function walkLayers(L, big, C3) {
       : [[-0.2, 0.15, CURB, walkB, 1.5], [0.15, WALK_W, WALKC, walkB, 1.5]];
 }
 
-function buildRoads(t, roadB, roadLoB, walkB, markB, groundB, lite = false) { // lite: no paint (far LOD)
+// Bridge decks are solid slabs, not just a top surface: seen from the water or a road below, every raised deck has an
+// underside, a fascia down each side with a low kerb lip on top, and concrete piers (a cap beam on one or two columns)
+// every 40 m where it stands more than 5 m up. All in one plain vertex-coloured buffer (deckB, M.lod): about 6 quads per
+// 5 m of deck and 14 per pier.
+const DECK_T = { motor: 1.8, trunk: 1.6, primary: 1.3, secondary: 1.1 }; // slab + girder depth under the road surface
+// (the underside colour is a little pink: the sky light from below is green-tinted, main.js hemi, so it reads as grey concrete)
+const DECK_UNDER = lin(0x8f7a86), DECK_SIDE = lin(0xb1ada4), DECK_LIP = lin(0xc4c0b7), PIER = lin(0x9e9a92);
+const PIER_STEP = 40;
+// one 5 m piece of a bridge's slab (dense segment k of e, fractions fa..fb), from offset oL to oR across the road
+function bridgeSlab(B, e, d, k, fa, fb, span, oL, oR, t) {
+  const T = DECK_T[e.cls] || 0.9, LIP = 0.35;
+  const at = (f, o) => { // [x, top y, z, bottom y, ground]
+    const s = d.s[k] + span * f, xa = d.x[k] + d.nx[k] * o * d.sc[k], za = d.z[k] + d.nz[k] * o * d.sc[k], xb = d.x[k + 1] + d.nx[k + 1] * o * d.sc[k + 1], zb = d.z[k + 1] + d.nz[k + 1] * o * d.sc[k + 1];
+    const x = xa + (xb - xa) * f, z = za + (zb - za) * f, y = pointOnEdge(e, s).y, g = terrainHeight(x, z);
+    return [x, Math.max(y, g) + 0.06, z, y - T, g];
+  };
+  const aL = at(fa, oL), aR = at(fa, oR), bL = at(fb, oL), bR = at(fb, oR);
+  if (Math.max(aL[1] - aL[4], aR[1] - aR[4], bL[1] - bL[4], bR[1] - bR[4]) < 0.5) return; // sitting on the ground: nothing shows
+  const uv = [[0, 0], [1, 0], [1, 1], [0, 1]], P = (q, y) => [q[0], y, q[2]];
+  face(B, [P(aL, aL[3]), P(aR, aR[3]), P(bR, bR[3]), P(bL, bL[3])], [0, -1, 0], DECK_UNDER, PLAIN, uv);
+  for (const [a, b, sg] of [[aL, bL, -1], [aR, bR, 1]]) {
+    const nx = d.nx[k] * sg, nz = d.nz[k] * sg, ix = -nx * 0.3, iz = -nz * 0.3;
+    face(B, [P(a, a[3]), P(b, b[3]), P(b, b[1] + LIP), P(a, a[1] + LIP)], [nx, 0, nz], DECK_SIDE, PLAIN, uv); // fascia
+    face(B, [P(a, a[1] + LIP), P(b, b[1] + LIP), [b[0] + ix, b[1] + LIP, b[2] + iz], [a[0] + ix, a[1] + LIP, a[2] + iz]], [0, 1, 0], DECK_LIP, PLAIN, uv); // lip top
+    face(B, [[a[0] + ix, a[1], a[2] + iz], [b[0] + ix, b[1], b[2] + iz], [b[0] + ix, b[1] + LIP, b[2] + iz], [a[0] + ix, a[1] + LIP, a[2] + iz]], [-nx, 0, -nz], DECK_LIP, PLAIN, uv); // lip, road side
+  }
+  // piers at every 40 m mark along the edge that falls in this piece (and this tile), where the deck stands high enough
+  const s0 = d.s[k] + span * fa, s1 = d.s[k] + span * fb;
+  for (let sp = Math.ceil(s0 / PIER_STEP) * PIER_STEP; sp < s1; sp += PIER_STEP) {
+    if (sp < 12 || sp > e.len - 12) continue; // the abutments carry the ends
+    const f = (sp - d.s[k]) / span, c = at(f, (oL + oR) / 2);
+    if (!inTile(t, c[0], c[2]) || c[3] - c[4] < 5) continue;
+    const ux = d.x[k + 1] - d.x[k], uz = d.z[k + 1] - d.z[k], ul = Math.hypot(ux, uz) || 1, hx = ux / ul, hz = uz / ul, w = oR - oL;
+    const cols = w > 13 ? [oL + 2.6, oR - 2.6] : [(oL + oR) / 2];
+    const spots = cols.map((o) => at(f, o));
+    if (spots.some((q) => roadHit(q[0], q[2], 1.2))) continue; // never a column in a road underneath
+    for (const q of spots) obox(B, q[0], q[2], hx, hz, 0.9, w > 13 ? 0.9 : Math.min(2.2, w * 0.18), q[4] - 1.5, c[3] - 1.1, PIER, PLAIN);
+    obox(B, c[0], c[2], -hz, hx, w / 2 - 0.6, 0.95, c[3] - 1.2, c[3], PIER, PLAIN, 4, true); // cap beam under the slab
+  }
+}
+function buildRoads(t, roadB, roadLoB, walkB, markB, groundB, lite = false, deckB = null) { // lite: no paint (far LOD)
   const WHITE = lin(0xeeeeea), YELLOW = lin(0xe8b923), CURB = lin(0xbdb8ae), WALKC = lin(0xc9c5bd), BRICKW = lin(0x9a5a48), GRASS = lin(0x80a359);
   const C3 = [CURB, WALKC, BRICKW, GRASS, walkB, groundB];
   const deckY = (e, s, x, z) => (e.bridge ? pointOnEdge(e, s).y : terrainHeight(x, z));
@@ -203,6 +243,7 @@ function buildRoads(t, roadB, roadLoB, walkB, markB, groundB, lite = false) { //
         const [c0, c1] = row(B, fa, o0, o1, lift, c, us), [d0, d1] = row(B, fb, o0, o1, lift, c, us);
         B.quad(c0, c1, d1, d0);
       }
+      if (deckB && e.bridge) bridgeSlab(deckB, e, d, k, fa, fb, span, -hw - (L.sw.includes(-1) ? lay.at(-1)[1] : 0) - 0.25, hw + (L.sw.includes(1) ? lay.at(-1)[1] : 0) + 0.25, t);
       // markings (skipped inside junctions and on gravel and brick)
       if (lite || L.gravel || L.brick || e.cls === 'track') continue;
       const s0 = d.s[k], s1 = d.s[k + 1];
@@ -265,6 +306,10 @@ function buildRoads(t, roadB, roadLoB, walkB, markB, groundB, lite = false) { //
     const r = J.r, onBridge = adj.some((e) => e.bridge), yAt = onBridge ? () => N.y[k] : terrainHeight;
     let top = adj[0]; for (const e of adj) if (RANKC[e.cls] > RANKC[top.cls]) top = e;
     fan(roadB, J.poly, x, z, yAt, 0.07, lin(surfCol(top, roadLook(top, t))), 6); // a hair over the legs where a short leg's end falls inside the polygon
+    if (deckB && onBridge && N.y[k] - terrainHeight(x, z) > 0.6) { // the slab's underside under a junction on a deck
+      const yb = N.y[k] - (DECK_T[top.cls] || 0.9), P = J.poly, c = deckB.v(x, yb, z, 0, -1, 0, ...DECK_UNDER, 0, 0), ids = P.map(([px, pz]) => deckB.v(px, yb, pz, 0, -1, 0, ...DECK_UNDER, 0, 0));
+      for (let i = 0; i < P.length; i++) { const j = (i + 1) % P.length, cr = (P[i][0] - x) * (P[j][1] - z) - (P[i][1] - z) * (P[j][0] - x); if (cr > 0) deckB.i.push(c, ids[i], ids[j]); else deckB.i.push(c, ids[j], ids[i]); }
+    }
     // sidewalk corners: the same polygon out to the back of each leg's sidewalk, under the road
     if (adj.some((e) => roadLook(e, t).sw.length)) {
       const ring = [[x, z]];
@@ -955,7 +1000,7 @@ export function buildTile(t) {
   // boxes: the old per-prop boxes (not registered; stream.js makes walls from the data). solid: new things that block
   // (utility poles, walls, billboards, silos, towers, sheds, pylons), registered by stream.js with the tile
   const boxes = [], solid = [], foot = [], junk = [], trees = [], wires = [], newK = [], bigBoxes = [], yards = [], dealers = [], posts = [];
-  buildRoads(t, roadB, roadLoB, walkB, markB, groundB);
+  const deckB = new Buf(); buildRoads(t, roadB, roadLoB, walkB, markB, groundB, false, deckB);
   const lightsMapped = [];
   const has = dataPoints(t, junk, lightsMapped, solid, solidB, namesB, trees, posts);
   Object.assign(has, dataLines(t, junk, solid, solidB, lotB));
@@ -974,6 +1019,7 @@ export function buildTile(t) {
   add(roadLoB.geometry(), M.roadLo || M.road, false);
   add(roadB.geometry(), M.road, false);
   add(markB.geometry(), M.mark, false);
+  add(deckB.geometry(), M.lod, true);
   add(bB.geometry(), M.building, true);
   add(sB.geometry(), M.signs, false);
   add(gB.geometry(), M.graffiti, false);
@@ -1002,7 +1048,7 @@ export function buildTileLite(t) {
   const add = (geo, mat, shadow) => { if (!geo) return; const m = new THREE.Mesh(geo, mat); m.castShadow = shadow; m.receiveShadow = true; m.matrixAutoUpdate = false; group.add(m); };
   const groundB = new Buf(), roadB = new Buf(), roadLoB = new Buf(), walkB = new Buf(), bB = new Buf();
   buildTerrain(t, groundB, 8);
-  buildRoads(t, roadB, roadLoB, walkB, null, groundB, true);
+  const deckB = new Buf(); buildRoads(t, roadB, roadLoB, walkB, null, groundB, true, deckB);
   const foot = [], trees = [], FLAT = lin(0x9a9893);
   t.b.forEach((rec, bi) => {
     const [rel, baseY, hgt, pitched, style] = rec, a = rec.arch || {}, n = rel.length / 2; if (n < 3 || a.canopy) return;
@@ -1041,5 +1087,6 @@ export function buildTileLite(t) {
   add(roadLoB.geometry(), M.roadLo || M.road, false);
   add(roadB.geometry(), M.road, false);
   add(bB.geometry(), M.lod, true);
+  add(deckB.geometry(), M.lod, true);
   return { group, boxes: [], solid: [], trees, lights: [], foot, junk: [], posts: [], lite: true };
 }

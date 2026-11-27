@@ -222,7 +222,7 @@ export default {
     { file: 'campbell', x: 11757, z: -1637, ground: true, load: 600, clear: [], solid: [[11757, -1637, 2, 2, 4]] },
     // 15th Ave arches: the 7th St gateway and the 13th St end; h turns the span square to the avenue
     { file: 'emarch', x: 11078, z: 857, h: 0.099, ground: true, load: 500, clear: [], solid: [[11078.7, 864.5, 0.6, 0.6, 6], [11077.3, 849.5, 0.6, 0.6, 6]] },
-    { file: 'emarch', x: 12007.4, z: 742.2, h: 0.212, ground: true, load: 500, clear: [], solid: [[12009, 749.6, 0.6, 0.6, 6], [12005.8, 734.8, 0.6, 0.6, 6]] },
+    { file: 'emarch', x: 12007.4, z: 738.6, h: 0.212, ground: true, load: 500, clear: [], solid: [[12009, 746, 0.6, 0.6, 6], [12005.8, 731.2, 0.6, 0.6, 6]] }, // centred on 15th Ave (it stood 3.6 m north, one leg in the eastbound lane)
   ],
   notes: 'Research + sources: docs/regions/east-moline.md. Water towers come from OSM (core draws them with the town name). '
     + 'To do: the 8th St / 15th Ave event stage (2017) and the 649 15th Ave public lot are unplaced (design / exact lot unknown); '

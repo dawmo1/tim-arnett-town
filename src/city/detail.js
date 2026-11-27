@@ -5,7 +5,7 @@
 // - street-name blades (real names) and stop signs at junctions
 // - utility poles and wires: OSM power lines where mapped, else local practice (down the alleys in the pre-war grid,
 //   one side of the street elsewhere, buried in post-1975 subdivisions and downtowns)
-// - OSM fences / walls / hedges, driveways, parking aisles, drive-throughs, farm tracks, tree rows
+// - OSM fences / walls / hedges (never across a carriageway), driveways, parking aisles, drive-throughs, farm tracks, tree rows
 // - parking-lot striping, lot lights, cart corrals, dealership rows; crop rows on farmland fields
 import { TILE, C, G, tiles, terrainHeight, pointOnEdge, nearestEdge, townAt, edgesNear, closestOnEdge } from './data.js';
 import { makeBox } from './collide.js';
@@ -144,11 +144,11 @@ export function dataPoints(t, junk, lights, boxes, SB, NB, trees, posts) {
     if (xb) { const nx = Math.sin(h), nz = Math.cos(h); panel(NB, p.x + nx * 0.06, y + 3.0, p.z + nz * 0.06, nx, nz, 1.6, 0.34, xb); }
   }
   // silos / storage tanks, water towers (with the town's name), chimneys and masts
-  for (const p of pointsOf(t, 'sl')) { const y = terrainHeight(p.x, p.z), hh = p.v || 14, r = hh >= 10 ? 2.8 : 5; lathe(SB, p.x, y, p.z, [[r, -0.5], [r, hh], [r * 0.7, hh + r * 0.35], [0.01, hh + r * 0.55]], lin(hh >= 10 ? 0xcfcabd : 0xd9dbdc)); boxes.push(makeBox(p.x, p.z, 1, 0, r, r, y - 1, hh)); }
-  for (const p of pointsOf(t, 'wt')) waterTower(t, SB, NB, boxes, p.x, p.z, p.v || 38, (townAt?.(p.x, p.z)?.name || t.st?.town?.name || ''));
-  for (const p of pointsOf(t, 'ch')) { const y = terrainHeight(p.x, p.z), hh = p.v || 30; lathe(SB, p.x, y, p.z, [[1.4, -0.5], [0.8, hh], [0.01, hh]], lin(hh > 60 ? 0xc8442f : 0x8a4a3a), 8); boxes.push(makeBox(p.x, p.z, 1, 0, 1.2, 1.2, y - 1, hh)); }
+  for (const p of pointsOf(t, 'sl')) { if (roadHit(p.x, p.z, (p.v || 14) >= 10 ? 2.8 : 5)) continue; const y = terrainHeight(p.x, p.z), hh = p.v || 14, r = hh >= 10 ? 2.8 : 5; lathe(SB, p.x, y, p.z, [[r, -0.5], [r, hh], [r * 0.7, hh + r * 0.35], [0.01, hh + r * 0.55]], lin(hh >= 10 ? 0xcfcabd : 0xd9dbdc)); boxes.push(makeBox(p.x, p.z, 1, 0, r, r, y - 1, hh)); }
+  for (const p of pointsOf(t, 'wt')) if (!roadHit(p.x, p.z, 1.8)) waterTower(t, SB, NB, boxes, p.x, p.z, p.v || 38, (townAt?.(p.x, p.z)?.name || t.st?.town?.name || ''));
+  for (const p of pointsOf(t, 'ch')) { if (roadHit(p.x, p.z, 1.4)) continue; const y = terrainHeight(p.x, p.z), hh = p.v || 30; lathe(SB, p.x, y, p.z, [[1.4, -0.5], [0.8, hh], [0.01, hh]], lin(hh > 60 ? 0xc8442f : 0x8a4a3a), 8); boxes.push(makeBox(p.x, p.z, 1, 0, 1.2, 1.2, y - 1, hh)); }
   // OSM tree rows (windbreaks along farm fields, rows along drives)
-  for (const l of linesOf(t, 'tr')) walk(l, 7, (x, z) => { if (inTile(t, x, z)) trees.push({ x, z, y: terrainHeight(x, z), kind: hash(x * 1.3 + z) < 0.35 ? 1 : 0, s: 0.85 + hash(x + z * 3) * 0.4, seed: hash(x * 3.1 + z) }); });
+  for (const l of linesOf(t, 'tr')) walk(l, 7, (x, z) => { if (inTile(t, x, z) && !roadHit(x, z, 0.5)) trees.push({ x, z, y: terrainHeight(x, z), kind: hash(x * 1.3 + z) < 0.35 ? 1 : 0, s: 0.85 + hash(x + z * 3) * 0.4, seed: hash(x * 3.1 + z) }); });
   return has;
 }
 // a water tower (tank on a pedestal) with the town's name round the tank
@@ -301,10 +301,15 @@ export function dataLines(t, junk, boxes, SB, roadB) {
   for (const key of ['wa', 'rw']) for (const P of linesOf(t, key)) {
     const tint = lin(key === 'rw' ? 0xb7ad99 : 0x9a5444), hgt = key === 'rw' ? 1.0 : 1.4;
     for (let i = 2; i < P.length; i += 2) {
-      const ax = P[i - 2], az = P[i - 1], bx = P[i], bz = P[i + 1], L = Math.hypot(bx - ax, bz - az); if (L < 0.3) continue;
-      const ux = (bx - ax) / L, uz = (bz - az) / L, mx = (ax + bx) / 2, mz = (az + bz) / 2, y = Math.min(terrainHeight(ax, az), terrainHeight(bx, bz));
-      obox(SB, mx, mz, ux, uz, L / 2, 0.15, y - 0.4, y + hgt, tint, PL);
-      boxes.push(makeBox(mx, mz, -uz, ux, 0.2, L / 2, y - 0.4, hgt + 0.4));
+      const ax0 = P[i - 2], az0 = P[i - 1], bx0 = P[i], bz0 = P[i + 1], L0 = Math.hypot(bx0 - ax0, bz0 - az0); if (L0 < 0.3) continue;
+      const n = Math.ceil(L0 / 6); // in pieces of up to 6 m, so the bit of a wall that crosses a road can go
+      for (let q = 0; q < n; q++) {
+        const ax = ax0 + (bx0 - ax0) * q / n, az = az0 + (bz0 - az0) * q / n, bx = ax0 + (bx0 - ax0) * (q + 1) / n, bz = az0 + (bz0 - az0) * (q + 1) / n, L = L0 / n;
+        const ux = (bx - ax) / L, uz = (bz - az) / L, mx = (ax + bx) / 2, mz = (az + bz) / 2, y = Math.min(terrainHeight(ax, az), terrainHeight(bx, bz));
+        if (roadHit(mx, mz, 0.2)) continue; // OSM walls drawn across a carriageway (a gate line, a mis-snapped way)
+        obox(SB, mx, mz, ux, uz, L / 2, 0.15, y - 0.4, y + hgt, tint, PL);
+        boxes.push(makeBox(mx, mz, -uz, ux, 0.2, L / 2, y - 0.4, hgt + 0.4));
+      }
     }
   }
   // paved strips that aren't in the road graph

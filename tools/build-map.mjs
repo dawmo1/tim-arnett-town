@@ -37,6 +37,7 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { PNG } from 'pngjs';
 import { BBOX, ORIGIN, TILE, ROAD_CHUNK, project } from './map-config.mjs';
+import { roadIndex, inRing } from './road-clear.mjs';
 
 const here = (p) => fileURLToPath(new URL(p, import.meta.url));
 const OUT = process.env.MAP_OUT || here('../data/');
@@ -413,6 +414,26 @@ const elen = (e) => { let l = 0; for (let i = 1; i < e.pts.length; i++) l += dis
   for (const e of edges) if (compLen[comp[e.a]] <= 400 && elen(e) > 15) lineFeat.push({ key: e.cl === 'track' ? 'tk' : 'sv', pts: e.pts });
   edges = edges.filter((e) => compLen[comp[e.a]] > 400);
 }
+// roads over water: a through road that isn't tagged as a bridge but crosses water cells (a causeway or a levee road the
+// water polygon overlaps) would sit on the river bed (-3 m), under the water plane and invisible. The 8 m height nodes
+// under it and PAD m beside it come up to LIFT m over the river. Service roads and tracks are left alone (boat ramps go
+// into the water on purpose). scan-river-roads.mjs --write does the same to a built data/ folder.
+{
+  const LIFT = 0.3, PAD = 3; let n = 0;
+  for (const e of edges) {
+    if (e.bridge || e.flags & 1 || e.cl === 'service' || e.cl === 'track') continue;
+    const r = e.width / 2 + PAD;
+    for (let k = 1; k < e.pts.length; k++) {
+      const [ax, az] = e.pts[k - 1], [bx, bz] = e.pts[k], dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz || 1;
+      for (let gx = Math.floor((Math.min(ax, bx) - r - GX0) / 8); gx <= Math.ceil((Math.max(ax, bx) + r - GX0) / 8); gx++) for (let gz = Math.floor((Math.min(az, bz) - r - GZ0) / 8); gz <= Math.ceil((Math.max(az, bz) + r - GZ0) / 8); gz++) {
+        if (gx < 0 || gz < 0 || gx >= HW || gz >= HH || height[gz * HW + gx] >= LIFT) continue;
+        const x = GX0 + gx * 8, z = GZ0 + gz * 8, t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / L2));
+        if (Math.hypot(ax + dx * t - x, az + dz * t - z) <= r) { height[gz * HW + gx] = LIFT; n++; }
+      }
+    }
+  }
+  log(`roads over water: ${n} height nodes lifted under causeways and levee roads`);
+}
 const used = new Map(), nodes2 = [];
 for (const e of edges) for (const k of ['a', 'b']) { if (!used.has(e[k])) { used.set(e[k], nodes2.length); nodes2.push(nodes[e[k]]); } e[k] = used.get(e[k]); }
 for (const e of edges) { nodes2[e.a].deg++; nodes2[e.b].deg++; }
@@ -428,6 +449,8 @@ for (const e of edges) { nodes2[e.a].deg++; nodes2[e.b].deg++; }
     n.y = s / w;
   });
   nodes2.forEach((n, i) => { if (free[i] && clsAt(n.x, n.z) === C.water) n.y = Math.max(n.y, badj[i].some((e) => e.cl === 'motor') ? 16 : 10); });
+  // a short creek bridge whose ends sit in water cells would ramp down under the river: its ends stay 0.3 m over it
+  nodes2.forEach((n, i) => { if (badj[i].some((e) => e.cl !== 'service' && e.cl !== 'track')) n.y = Math.max(n.y, 0.3); });
 }
 // bridge edges over water arch up between their ends (edge.rise: extra metres at mid-span, a parabola; src/city/data.js edgeY)
 for (const e of edges) {
@@ -997,6 +1020,29 @@ let river = [];
   lines.sort((a, b) => len(b) - len(a));
   if (lines.length) river = simplifyLine(lines[0].filter(([x, z]) => inBox(x, z)), 5).flatMap(([x, z]) => [Math.round(x), Math.round(z)]);
   log(`Mississippi centre line ${(len(lines[0] || []) / 1000).toFixed(1)} km`);
+}
+
+// ---------- nothing standing on a carriageway (road-clear.mjs; fix-road-overlaps.mjs makes the same call on built data) ----------
+// OSM and Microsoft footprints that sit in a road (misplaced traces, trucks, sheds mapped over a lane) and trees whose trunk
+// is on one (OSM natural=tree points, street trees the 4 m raster let through) are dropped; the building cells a dropped
+// footprint painted go back to road (or lawn) so no grey pad is left under the street.
+{
+  const RX = roadIndex(edges.map((e) => ({ pts: e.pts, width: e.width, flags: e.flags, bridge: !!e.bridge, ya: nodes2[e.a].y, yb: nodes2[e.b].y, rise: e.rise || 0, cls: e.cl })));
+  const why = {}; let cells = 0;
+  const keep = bld.filter((b) => {
+    const hit = RX.buildingHit(b.pts, b.y, b.h, { type: b.type, kind: b.kind, ms: b.ms, area: b.area }); if (!hit) return true;
+    why[hit.why] = (why[hit.why] || 0) + 1;
+    const [a, c, d, f] = bboxOf(b.pts), [i0, j0] = cellOf(a, d), [i1, j1] = cellOf(c, f);
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+      if (!inGrid(i, j) || cls[j * GW + i] !== C.building) continue;
+      const x = GX0 + (i + 0.5) * CELL, z = GZ0 + (j + 0.5) * CELL; if (!inRing(x, z, b.pts)) continue;
+      cls[j * GW + i] = RX.pointHit(x, z, -1) ? C.road : C.lawn; cells++;
+    }
+    return false;
+  });
+  const nb = bld.length - keep.length; bld.length = 0; for (const b of keep) bld.push(b);
+  const nt = trees.length; let w = 0; for (const tr of trees) if (!RX.pointHit(tr[0], tr[1], 0.4, heightAt(tr[0], tr[1]))) trees[w++] = tr; trees.length = w;
+  log(`off the roads: ${nb} buildings dropped ${JSON.stringify(why)} (${cells} ground cells repainted), ${nt - trees.length} trees dropped`);
 }
 
 // ---------- write tiles ----------

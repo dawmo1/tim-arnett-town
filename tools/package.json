@@ -7,7 +7,8 @@
     "fetch": "node fetch-map.mjs",
     "map": "node --max-old-space-size=3500 build-map.mjs",
     "ms": "node --max-old-space-size=1500 ms-extract.mjs",
-    "checks": "node map-stats.mjs now && node check-roads.mjs now && node --max-old-space-size=2500 scan-placement.mjs",
+    "checks": "node map-stats.mjs now && node check-roads.mjs now && node --max-old-space-size=1024 fix-road-overlaps.mjs && node --max-old-space-size=2500 scan-placement.mjs",
+    "roadclear": "node --max-old-space-size=1024 fix-road-overlaps.mjs --write",
     "pbf": "node --max-old-space-size=6000 pbf-extract.mjs"
   },
   "devDependencies": {

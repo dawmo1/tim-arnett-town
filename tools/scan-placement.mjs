@@ -1,5 +1,5 @@
 // Placement scan: builds a sample of tiles with the game's own tile builder (headless) and counts street props, signs,
-// poles, yard items, lights and parked cars that sit on a road carriageway, inside a junction, or inside a building.
+// poles, yard items, lights, trees and parked cars that sit on a road carriageway, inside a junction, or inside a building.
 // The tests here are independent of the builder's own placement checks (src/city/detail.js), so they check them.
 //   node scan-placement.mjs                      ~25 tiles round each town centre
 //   node scan-placement.mjs --box x0,z0,x1,z1    every tile in a box (game metres)   (--region <id>: a region's bounds)
@@ -67,6 +67,7 @@ for (const [tx, tz, town] of want) {
   for (const j of rec.junk) if (!ROOFY.has(j.kind)) check(j.kind, j.x, j.z, LINEAR.has(j.kind) ? 0.3 : 0.05, j.kind !== 'corral');
   for (const l of rec.lights) check(l.lot ? 'lotlight' : l.mapped ? 'lamp(osm)' : 'streetlight', l.x, l.z, 0.05);
   for (const p of rec.posts || []) check(p.kind, p.x, p.z, 0.05);
+  for (const tr of rec.trees) check('tree', tr.x, tr.z, 0.4, false); // trunks (OSM trees, tree rows, generated ones)
   for (let i = 0; i < t.k.length; i += 4) check(t.k[i + 3] ? 'car(lot/drive)' : 'car(kerb)', t.k[i] + t.ox, t.k[i + 1] + t.oz, t.k[i + 3] ? 0.3 : 1.6);
 }
 console.log(`tiles built ${built} (${want.length} wanted); items checked ${V.items}; violations: road ${V.road}, junction ${V.junction}, building ${V.building}`);
