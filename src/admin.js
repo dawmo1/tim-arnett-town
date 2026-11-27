@@ -225,11 +225,12 @@ async function tryCode(code) {
   const now = Date.now(); while (tries.length && now - tries[0] > 60000) tries.shift();
   if (!code || code.length > 64) return err('Unknown command. Type help.');
   if (tries.length >= 5) return err(`Too many tries. Wait ${Math.ceil((60000 - (now - tries[0])) / 1000)} s.`);
+  if (!net.online) return err('Not connected to the online world, so admin login can\'t be checked.');
   tries.push(now);
   try {
     if (await tryAdminCode(code)) { ok('Admin access granted. Type help.'); fx(); }
     else err('Unknown command. Type help.');
-  } catch (e) { err('Unknown command. Type help.'); console.warn('admin check failed', e); }
+  } catch (e) { err('Admin check failed: ' + (e.code || e.message)); console.warn('admin check failed', e); }
 }
 const fx = () => ui.announce('ADMIN', 'Access granted', '#ffc94a');
 
