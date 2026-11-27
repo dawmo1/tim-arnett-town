@@ -160,6 +160,8 @@ export function buildCarMesh(ti, color, opts = {}) {
       else if (n === 'lamp_tail') { m.material = LAMP.tailOff; parts.lampMeshes.push([m, 'tail']); }
       else if (n === 'decal' || n === 'plate') m.material = DECAL;
       else if (n === 'interior') m.castShadow = false;
+      // small bits inside the body's own shadow (lamps, plates, chrome) skip the shadow pass: a draw call each, per car
+      if (SHADOWLESS.has(n)) m.castShadow = false;
       parts.meshes.push(m);
     });
   }
@@ -185,6 +187,7 @@ export function buildCarMesh(ti, color, opts = {}) {
   g.userData.lamps = { head: parts.lamps.head, tail: parts.lamps.tail, bar: parts.lamps.bar || null, size: ti === 4 || ti === 5 ? 0.9 : 1.25 };
   return g;
 }
+const SHADOWLESS = new Set(['lamp_head', 'lamp_tail', 'decal', 'plate', 'chrome', 'rim', 'caliper']);
 function makeWheel(src, p, part, key) {
   const w = new THREE.Group(); // steering pivot
   const spin = src.clone(true); spin.position.set(0, 0, 0);
@@ -201,7 +204,7 @@ function makeWheel(src, p, part, key) {
   if (cal) { spin.remove(cal); cal.scale.multiply(spin.scale); cal.userData.caliper = true; w.add(cal); }
   w.userData.front = part.includes('F');
   w.userData.r = r;
-  spin.traverse((m) => { if (m.isMesh) m.castShadow = true; });
+  spin.traverse((m) => { if (m.isMesh) m.castShadow = !SHADOWLESS.has(m.material?.name); }); // the tyre's shadow covers the rim
   return w;
 }
 

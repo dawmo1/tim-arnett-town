@@ -135,6 +135,7 @@ export function ragPos(ch) { const b = ch.rag && ch.rag.map.body; if (!b || ch.r
 
 export function updateRagdolls(dt) {
   if (!ready) return;
+  if (!active.length) { acc = 0; return; } // only ragdolls move in this world: with none, a step is pure overhead (~1 ms)
   acc = Math.min(acc + dt, STEP * 4);
   let steps = 0;
   while (acc >= STEP && steps < 4) { world.step(); acc -= STEP; steps++; }

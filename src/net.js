@@ -6,11 +6,32 @@ import { firebaseConfig } from './firebase-config.js';
 const V = '10.12.2';
 export const ROOM = 'WORLD';
 export const net = {
-  online: false, uid: 'me', offset: 0, room: ROOM, players: {}, admins: {}, error: '',
-  handlers: { player() {}, playerGone() {}, vehicle() {}, vehicleGone() {}, cops() {}, event() {}, chat() {}, world() {} },
+  online: false, connected: false, uid: 'me', offset: 0, room: ROOM, players: {}, admins: {}, error: '',
+  handlers: { player() {}, playerGone() {}, vehicle() {}, vehicleGone() {}, cops() {}, event() {}, chat() {}, world() {}, reconnected() {} },
   now() { return Date.now() + this.offset; },
 };
 let db, M, roomRef, meRef;
+// Our own presence record as we last wrote it ({ n, c, a, j, s }). When the socket drops (a tab left in the
+// background long enough, sleep, a network blip) the server runs onDisconnect and deletes players/{uid}. The SDK
+// does not put it back on reconnect, and the rules refuse a lone s write without n, so without this we would stay
+// invisible to everyone for the rest of the session while every state write failed.
+const mine = {};
+let myJ = null, copsCleanup = false, warned = 0;
+const quiet = (what) => (e) => { if (warned++ < 5) console.warn(what + ' failed', e && (e.code || e.message)); };
+function restorePresence() {
+  if (!meRef || !mine.n) return;
+  M.onDisconnect(meRef).remove();
+  copsCleanup = false; lastCops = ''; // re-armed and re-sent on the next setCops
+  const rec = { ...mine };
+  if (typeof myJ === 'number') rec.j = myJ; else delete rec.j;
+  M.set(meRef, rec).catch(quiet('presence restore'));
+}
+// back from a hidden tab: make sure our record is still on the server (it may have been removed while we were away)
+export function ensurePresence() {
+  if (!net.online || !meRef || !net.connected) return;
+  const p = net.players[net.uid];
+  if (!p || !p.n || (mine.s && !Array.isArray(p.s))) restorePresence();
+}
 
 export async function connect() {
   if (!firebaseConfig || !firebaseConfig.databaseURL) { net.error = 'Firebase not set up yet: solo mode.'; return false; }
@@ -30,6 +51,11 @@ export async function connect() {
       M.onValue(M.ref(db, '.info/serverTimeOffset'), (s) => { net.offset = s.val() || 0; clearTimeout(t); res(); });
     });
     net.online = true;
+    M.onValue(M.ref(db, '.info/connected'), (s) => {
+      const up = s.val() === true, was = net.connected;
+      net.connected = up;
+      if (up && !was && meRef) { restorePresence(); net.handlers.reconnected(); }
+    });
     M.onValue(M.ref(db, 'admins'), (s) => { net.admins = s.val() || {}; }, () => {}); // live: who may use admin commands (rules gate admins/{uid})
     return true;
   } catch (e) {
@@ -44,21 +70,27 @@ export async function joinWorld(name, look) {
   if (!net.online) { net.players[net.uid] = { n: name, c: look, a: '' }; return; }
   roomRef = M.ref(db, 'rooms/' + ROOM);
   meRef = M.child(roomRef, 'players/' + net.uid);
-  await M.set(meRef, { n: name, c: look, a: '' });
+  Object.assign(mine, { n: name, c: look, a: '' });
   M.onDisconnect(meRef).remove();
+  await M.set(meRef, { n: name, c: look, a: '' });
   const pl = M.child(roomRef, 'players');
-  const up = (s) => { net.players[s.key] = s.val(); net.handlers.player(s.key, s.val()); };
+  const up = (s) => { const v = s.val(); if (s.key === net.uid && v && typeof v.j === 'number') myJ = v.j; net.players[s.key] = v; net.handlers.player(s.key, v); };
   M.onChildAdded(pl, up);
   M.onChildChanged(pl, up);
-  M.onChildRemoved(pl, (s) => { delete net.players[s.key]; net.handlers.playerGone(s.key); });
+  M.onChildRemoved(pl, (s) => {
+    delete net.players[s.key]; net.handlers.playerGone(s.key);
+    // only we can delete our record, and we never do: the server ran a stale onDisconnect (the old socket of a
+    // connection we already replaced). Put it back.
+    if (s.key === net.uid) setTimeout(() => { if (net.connected && !net.players[net.uid]) restorePresence(); }, 500);
+  });
   const vh = M.child(roomRef, 'vehicles');
   M.onChildAdded(vh, (s) => net.handlers.vehicle(s.key, s.val()));
   M.onChildChanged(vh, (s) => net.handlers.vehicle(s.key, s.val()));
   M.onChildRemoved(vh, (s) => net.handlers.vehicleGone(s.key));
-  M.onValue(M.child(roomRef, 'cops'), (s) => net.handlers.cops(s.val() || {}));
   M.onValue(M.child(roomRef, 'world'), (s) => net.handlers.world(s.val() || {}), () => {}); // admin time, weather, game speed
   const evq = M.query(M.child(roomRef, 'events'), M.orderByChild('t'), M.startAt(net.now() - 1000));
-  M.onChildAdded(evq, (s) => { const e = s.val(); if (e && e.from !== net.uid) net.handlers.event(e); });
+  // (a tab that was frozen in the background gets its whole backlog at once: old bangs and hits are dropped)
+  M.onChildAdded(evq, (s) => { const e = s.val(); if (e && e.from !== net.uid && !(typeof e.t === 'number' && net.now() - e.t > 4000)) net.handlers.event(e); });
   M.onChildAdded(M.query(M.child(roomRef, 'chat'), M.limitToLast(30)), (s) => net.handlers.chat(s.val()));
   pruneChat(); pruneEvents();
   setInterval(() => { if (hostUid() === net.uid) { pruneChat(); pruneEvents(); } }, 600000);
@@ -93,27 +125,44 @@ export function startPlaying() {
   else if (net.players[net.uid]) net.players[net.uid].j = 0;
 }
 const setMine = (k, val) => {
+  mine[k] = val;
   if (net.players[net.uid]) net.players[net.uid][k] = val;
-  if (net.online && meRef) M.set(M.child(meRef, k), val);
+  if (net.online && meRef && net.connected) M.set(M.child(meRef, k), val).catch(quiet('presence ' + k));
 };
 export const setLook = (look) => setMine('c', look); // a new outfit from the clothing store
 export const setName = (name) => setMine('n', name);
 export const setArea = (area) => setMine('a', String(area).slice(0, 40));
+// While the socket is down nothing is queued: the SDK would replay every 10 Hz write in one burst on reconnect.
+// restorePresence() sends the latest state instead.
 export function sendState(arr) {
-  if (net.online && meRef) M.set(M.child(meRef, 's'), arr);
+  mine.s = arr;
+  if (net.online && meRef) { if (net.connected) M.set(M.child(meRef, 's'), arr).catch(quiet('state')); }
   else if (net.players[net.uid]) net.players[net.uid].s = arr;
 }
 // shared time, weather and game speed (the rules let only admins write it)
 export function setWorld(w) { if (net.online && roomRef) M.set(M.child(roomRef, 'world'), w).catch((e) => console.warn('world write failed', e)); }
-export function setVehicle(id, rec) { if (net.online && roomRef) M.set(M.child(roomRef, 'vehicles/' + id), rec); }
+export function setVehicle(id, rec) { if (net.online && roomRef && net.connected) M.set(M.child(roomRef, 'vehicles/' + id), rec).catch(quiet('vehicle')); }
 export function removeVehicle(id) { if (net.online && roomRef) M.remove(M.child(roomRef, 'vehicles/' + id)); }
-// each group host writes its own units to cops/{uid} (null clears them when it stops hosting)
-let copsCleanup = false;
+// each group host writes its own units to cops/{uid} (null clears them when it stops hosting). The same
+// snapshot twice in a row (no cops around: {} every 0.2 s) isn't sent again.
+let lastCops = '';
 export function setCops(obj) {
-  if (!net.online || !roomRef) return;
+  if (!net.online || !roomRef || !net.connected) return;
+  const js = JSON.stringify(obj ?? null);
+  if (js === lastCops) return;
+  lastCops = js;
   const r = M.child(roomRef, 'cops/' + net.uid);
   if (!copsCleanup) { copsCleanup = true; M.onDisconnect(r).remove(); }
-  M.set(r, obj);
+  M.set(r, obj).catch((e) => { lastCops = ''; quiet('cops')(e); });
+}
+// Listen to our group's host only (cops/{host}), not the whole cops node: every host on the map writes theirs
+// five times a second, and each client used to download all of them. null = we host (or play alone): no listener.
+let copsHost = null, copsOff = null;
+export function watchCops(host) {
+  if (!net.online || !roomRef || host === copsHost) return;
+  if (copsOff) { copsOff(); copsOff = null; }
+  copsHost = host;
+  if (host) copsOff = M.onValue(M.child(roomRef, 'cops/' + host), (s) => { if (copsHost === host) net.handlers.cops({ [host]: s.val() || {} }); }, () => {});
 }
 export function sendEvent(type, data) {
   if (!net.online || !roomRef) return;
@@ -176,9 +225,12 @@ export function hostUid() {
     }
   } else for (const uid of play) group.add(uid);
   linked = net.group = group;
+  // a player who has tabbed out (s[23] = 1) stays in the group but doesn't host: their game isn't running the cops
   let best = null, bj = Infinity;
   for (const uid of group) {
-    const p = net.players[uid], j = typeof p.j === 'number' ? p.j : Infinity;
+    const p = net.players[uid];
+    if (uid !== net.uid && p.s[23] === 1 && group.size > 1) continue;
+    const j = typeof p.j === 'number' ? p.j : Infinity;
     if (j < bj || (j === bj && (best === null || uid < best))) { bj = j; best = uid; }
   }
   return best || net.uid;
