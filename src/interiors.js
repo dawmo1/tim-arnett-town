@@ -138,7 +138,7 @@ function buildRoom(store, x, y, z, rot, under, bare) {
     box(g, 0x212121, 0.5, 0.35, 0.4, w * 0.22, 1.22, d / 2 - 2.6); // register
     cb(w * 0.18, d / 2 - 2.6, 0, 1, 0.45, w * 0.23, 2.1);
     clerk = person([0xe0ac69, kind === 'guns' ? 0x4e342e : kind === 'clothes' ? 0xad1457 : 0xc62828, 0x263238, 0x3b2314, 8 | 64], w * 0.18, d / 2 - 1.7, Math.PI, 'stand');
-    counter = { x: wx(w * 0.18, d / 2 - 3.4), z: wz(w * 0.18, d / 2 - 3.4) };
+    counter = { x: wx(w * 0.18, d / 2 - 3.4), z: wz(w * 0.18, d / 2 - 3.4), seg: [w * 0.18 - w * 0.225 + 0.3, w * 0.18 + w * 0.225 - 0.3, d / 2 - 3.45] }; // seg: [x0, x1, z] the line you stand on along its front
   }
   if (kind === 'rob') {
     // shelves of snacks, a drinks cooler down the side
@@ -158,8 +158,9 @@ function buildRoom(store, x, y, z, rot, under, bare) {
     for (let i = 0; i < 4; i++) box(g, 0x8bc34a, 0.3, 0.3, 0.5, -w * 0.25 - 1.5 + i, 1.15, -1); // ammo boxes
     sign(g, 'ARNETT ARMS', 6, 0.9, 0, 3.4, d / 2 - 0.2, Math.PI, '#b71c1c', '#ffffff');
   } else if (kind === 'clothes') {
-    for (let r = 0; r < 4; r++) for (let k = 0; k < 6; k++) box(g, [0xe53935, 0x1e88e5, 0xfdd835, 0x43a047, 0x212121, 0xffffff, 0x8e24aa][(r + k) % 7], 0.3, 0.9, 0.5, -w / 2 + 3 + r * 3, 1.3, -d / 2 + 3 + k * 0.6);
-    for (let r = 0; r < 4; r++) { box(g, 0x9e9e9e, 0.05, 0.05, 4, -w / 2 + 3 + r * 3, 1.85, -d / 2 + 4.5); cb(-w / 2 + 3 + r * 3, -d / 2 + 4.5, 1, 0, 0.3, 2, 2); }
+    const RX = [-6.6, -3.6, 3.6, 6.6]; // racks either side of an aisle from the door to the counter
+    for (let r = 0; r < 4; r++) for (let k = 0; k < 6; k++) box(g, [0xe53935, 0x1e88e5, 0xfdd835, 0x43a047, 0x212121, 0xffffff, 0x8e24aa][(r + k) % 7], 0.3, 0.9, 0.5, RX[r], 1.3, -d / 2 + 3 + k * 0.6);
+    for (let r = 0; r < 4; r++) { box(g, 0x9e9e9e, 0.05, 0.05, 4, RX[r], 1.85, -d / 2 + 4.5); cb(RX[r], -d / 2 + 4.5, 1, 0, 0.3, 2, 2); }
     box(g, 0xb0bec5, 1.4, 2.4, 0.05, w / 2 - 0.3, 1.3, 1, MIRROR); // mirror
     sign(g, store.name.toUpperCase(), 7, 0.9, 0, 3.4, d / 2 - 0.2, Math.PI, '#ad1457', '#ffffff');
     person(randomLook(), -w / 2 + 4.5, -d / 2 + 5, 1, 'browse');
@@ -271,7 +272,7 @@ function buildRoom(store, x, y, z, rot, under, bare) {
     for (let i = -5; i <= 5; i += 0.5) box(g, 0xffd54f, 0.04, 2.6, 0.04, i, 2.5, D2 - 3);
     box(g, 0xffd54f, 10, 0.08, 0.08, 0, 3.8, D2 - 3);
     clerk = person([0xe0ac69, 0xffffff, 0x111111, 0x3b2314, 8 | 64], 0, D2 - 1.8, Math.PI, 'stand');
-    counter = { x: wx(0, D2 - 4), z: wz(0, D2 - 4) };
+    counter = { x: wx(0, D2 - 4), z: wz(0, D2 - 4), seg: [-4.6, 4.6, D2 - 3.9] };
     sign(g, store.name.toUpperCase(), 10, 1.2, 0, 3.5, D2 - 0.2, Math.PI, '#1a0033', '#ffd54f');
     sign(g, 'CASHIER', 3, 0.5, 0, 3.1, D2 - 3.1, Math.PI, '#ffd54f', '#1a0033');
     neon(g, 'Slots', '#ff4081', 3, -W2 + 0.16, 3, 0, Math.PI / 2); neon(g, 'Blackjack', '#40c4ff', 3.4, -9, 3, D2 - 0.16, Math.PI); neon(g, bare ? 'Lone Wolf' : 'Belle Bar', '#ffd54f', 3, W2 - 0.16, 3.1, -6, -Math.PI / 2);
@@ -371,5 +372,12 @@ function clerkAct(R) {
   return null;
 }
 export function nearExit(x, z) { return room && room.exit && Math.hypot(room.exit.x - x, room.exit.z - z) < 2.2; }
-export function nearCounter(x, z) { return room && room.counter && Math.hypot(room.counter.x - x, room.counter.z - z) < 2.6; }
+// at the counter: anywhere along its front (a shop counter is 7 m long), else within reach of its middle
+export function nearCounter(x, z) {
+  const c = room && room.counter;
+  if (!c) return false;
+  if (!c.seg) return Math.hypot(c.x - x, c.z - z) < 2.6;
+  const dx = x - room.x, dz = z - room.z, lx = dx * room.cs - dz * room.sn, lz = dx * room.sn + dz * room.cs;
+  return Math.hypot(lx - Math.max(c.seg[0], Math.min(c.seg[1], lx)), lz - c.seg[2]) < 1.3;
+}
 export const roomFloor = () => (room ? room.y : null);
