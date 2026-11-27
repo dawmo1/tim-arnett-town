@@ -9,7 +9,7 @@ import { makeCharacter, animateCharacter, placeCharacter, randomLook, nameTag, m
 import { SKIN as SKIN_TONES, TOPS, BOTTOMS, HAIRS, HATS, CLOTH, HAIRC, SHOES, BEARDS, GLASSES, MASKS } from './people/looks.js';
 import { createAllVehicles, makeParked, makeVehicle, V, TYPES, initFarCars, farCarsBegin, farCarAdd, farCarsEnd, stepVehicle, collideVehicles, pushCharOut, circles, charVehicle, damageZone, applyDamageVisual, repair, applyBump, animateDamage, tipLift } from './vehicles.js';
 import { initTraffic, updateTraffic as tickTraffic, bumpTraffic, scareTraffic, updateSignals, traffic, patrolViewers } from './traffic.js';
-import { initWalkers, updateWalkers, walkers, panicNear, spawnFleeing, scare, provoke, setNpcContext, cartNear, revive, incident } from './npc.js';
+import { initWalkers, updateWalkers, walkers, panicNear, spawnFleeing, scare, provoke, setNpcContext, cartNear, revive, incident, witnessFlee } from './npc.js';
 import { joinTraffic } from './traffic.js';
 import { GANGS } from './gangs.js';
 import { initEmergency, updateEmergency, reportDown } from './emergency.js';
@@ -807,6 +807,7 @@ net.handlers.event = (e) => {
     case 'nade': spawnNade({ x: e.x, y: e.y, z: e.z, vx: e.vx, vy: e.vy, vz: e.vz, t: e.k === 'molotov' ? 6 : e.k === 'rocket' ? 4 : 2.4, mine: false, kind: e.k || 'nade' }); break;
     case 'kill': ui.addFeed(String(e.text || '').slice(0, 80)); if (e.ku === net.uid) report('kill'); break;
     case 'adm': if (net.admins[e.from] === true) onAdminEvent(e); break; // the rules make from = the sender's real uid
+    case 'bust': if (e.to === net.uid && wanted.stars > 0) bustMe(); break; // the police host's officer cuffed me
     case 'jack': if (e.to === net.uid && me.veh && me.veh.id === e.id) { me.veh.driver = e.from; ejectMe(); ui.addFeed('Someone stole your ride!'); } break;
   }
 };
@@ -821,7 +822,7 @@ function copBump(i, x, z) {
   if (i <= 2 || performance.now() - (copBump.t || 0) < 1000) return;
   copBump.t = performance.now(); report(i > 7 ? 'ramcop' : 'bumpcop', x, z);
 }
-initWanted({ announce: (t) => ui.announce(t, '', '#ff5e5b') });
+initWanted({ announce: (t) => ui.announce(t, '', '#ff5e5b'), feed: (t) => ui.addFeed(t), witness: witnessFlee });
 function nameOf(uid) { if (uid === net.uid) return me.name; if (uid === 'police') return 'the police'; return net.players[uid]?.n || 'someone'; }
 function distCam(x, z) { return Math.hypot(camera.position.x - x, camera.position.z - z); }
 
@@ -1090,6 +1091,28 @@ function die() {
 }
 // After dying you wake up outside the nearest hospital (the streets there load first).
 let respawning = false;
+// BUSTED: cuffed at 1 star. Booked at the nearest station: stars gone, a fine, back out on the sidewalk outside.
+async function bustMe() {
+  if (respawning || me.dead) return;
+  respawning = true;
+  if (me.veh) ejectMe();
+  cancelEnter(); closeWheel(false); minigames.close();
+  ui.announce('BUSTED', '', '#ff5e5b');
+  resetWanted(); me.busted = true; // the stars go at once (the cops stand down) while you're led off
+  const st = police.stations().map((s) => [Math.hypot(s.x - me.x, s.z - me.z), s]).sort((a, b) => a[0] - b[0])[0]?.[1];
+  await new Promise((r) => setTimeout(r, 1800));
+  await loading(true, '', 'fade');
+  if (st) await W.preload(st.x, st.z, 200, loadProgress);
+  const sp = st ? { ...W.sidewalkSpot({ x: st.x, z: st.z, r: 70 }), name: st.name } : W.hospitalSpawn(me.x, me.z);
+  if (!st) await W.preload(sp.x, sp.z, 200, loadProgress);
+  manageParked(0, sp.x, sp.z, true);
+  respawn(true, sp); // (no hospital bill)
+  const fine = Math.min(eco.cash, Math.max(100, Math.round(eco.cash * 0.08)));
+  eco.cash -= fine;
+  ui.addFeed(`Released from ${sp.name || 'jail'}${fine ? `: fined $${fine}` : ''}`);
+  setTimeout(() => { loading(false); startSpawnCam(); }, 300);
+  respawning = false;
+}
 async function beginRespawn() {
   if (respawning) return;
   respawning = true;
@@ -1107,7 +1130,7 @@ function respawn(first, sp) {
   interior.leave(); me.outside = null;
   me.x = sp.x; me.z = sp.z; me.h = sp.h; me.y = W.groundHeight(sp.x, sp.z); me.vy = 0;
   if (!first && eco.cash > 0) { const bill = Math.min(eco.cash, Math.max(50, Math.round(eco.cash * 0.1))); eco.cash -= bill; ui.addFeed(`Hospital bill: -$${bill}`); }
-  me.hp = 100; me.dead = false; resetWanted(); resetDrunk(); me.enter = null; me.exitT = 0; me.reloadT = 0; me.swim = false; swim.reset(); cover.leave(); deathSpin = 0; me.rag = null;
+  me.hp = 100; me.dead = false; me.busted = false; resetWanted(); resetDrunk(); me.enter = null; me.exitT = 0; me.reloadT = 0; me.swim = false; swim.reset(); cover.leave(); deathSpin = 0; me.rag = null;
   release(me.ch);
   me.ch.body.rotation.set(0, 0, 0); me.ch.body.position.y = 0;
   camYaw = sp.h;
@@ -1683,8 +1706,12 @@ function updateTraffic(dt, tSec) {
   const count = Math.round((q === 'low' ? 14 : q === 'medium' ? 30 : 42) * (night ? 0.6 : 1));
   const patrols = wanted.stars > 0 ? 0 : Math.round((q === 'low' ? 1 : q === 'medium' ? 2 : 3) * (night ? 1.5 : 1));
   tickTraffic(dt, { x: fxp, z: fzp }, { x: camera.position.x, z: camera.position.z, fx: tmpDir.x, fz: tmpDir.z }, obs, sirens, tSec, { radius: q === 'low' ? 200 : q === 'medium' ? 260 : 320, count, night, patrols });
-  // patrol cars nearby join the chase once you're wanted
-  if (wanted.stars > 0 && isHost) for (const v of [...traffic]) if (v.patrol && v.mode === 'traffic' && Math.hypot(v.x - fxp, v.z - fzp) < 260) adoptPatrol(v);
+  // once you're wanted, the nearest patrol car out on the streets takes the call (one at a time, while the response is short)
+  if (wanted.stars > 0 && isHost) {
+    let best = null, bd = 420;
+    for (const v of traffic) { const d = v.patrol && v.mode === 'traffic' ? Math.hypot(v.x - fxp, v.z - fzp) : 1e9; if (d < bd) { bd = d; best = v; } }
+    if (best && police.wantsUnit(net.uid)) adoptPatrol(best);
+  }
   updateSignals(tSec);
 }
 
@@ -1772,6 +1799,11 @@ function updatePlayer(dt) {
     me.ch.g.visible = true;
     placeCharacter(me.ch, me.x, me.y, me.z, me.h);
     if (me.deadT <= 0) beginRespawn();
+    return;
+  }
+  if (me.busted) { // hands up while they cuff you (bustMe)
+    animateCharacter(me.ch, dt, { handsUp: true }); me.ch.g.visible = true;
+    placeCharacter(me.ch, me.x, me.y, me.z, me.h); me.vx = me.vz = 0; me.moveSpeed = 0;
     return;
   }
   me.cd -= dt; me.hitCd -= dt; me.aimT = Math.max(0, me.aimT - dt); lastDt = dt;
@@ -2638,7 +2670,7 @@ function updateThreat(dt) {
     // pointing a gun at a cop is a crime all by itself
     const cop = me.lockOn && me.lockOn.ref && police.cops.has(me.lockOn.ref.id) ? me.lockOn.ref : null;
     aimCopT = cop ? aimCopT + 0.15 : 0;
-    if (aimCopT > 1 && wanted.stars === 0) { report('assault', me.x, me.z); aimCopT = -5; }
+    if (aimCopT > 1 && wanted.stars === 0) { report('aimcop', me.x, me.z); aimCopT = -5; }
   }
   threatState = armed ? { x: me.x, z: me.z, armed: w.kind === 'gun', aimAt } : null;
 }
@@ -2740,6 +2772,7 @@ police.initPolice(scene, {
   copShot: (from, s) => { fx.tracer(from, { x: s[0], y: s[1], z: s[2] }); fx.muzzleFlash(from); fx.soundShot('pistol', distCam(from.x, from.z)); },
   announce: (uid, text) => { if (uid === net.uid) ui.announce(text, '', '#ff5e5b'); },
   sync: (obj) => setCops(obj),
+  arrest: (uid) => { if (uid === net.uid) bustMe(); else sendEvent('bust', { to: uid }); },
 });
 
 let cleanT = 5;
@@ -2767,7 +2800,7 @@ function updateHud(dt, t) {
     ui.setBreath((me.swim && swim.under() && !me.dead) || swim.breath() < 1 ? swim.breath() : null); // underwater: the breath meter takes the armor bar
     ui.setSpecial(me.veh ? me.veh.nitro ?? 1 : me.swim ? swim.stamina() : drunk.lvl); // yellow bar: nitro while driving, swimming stamina, drunkenness on foot
     // drunk driving where a cop can see it: 1 star (same rule as assault: only counts if seen)
-    if (me.veh && !me.seat && drunk.lvl > 0.6 && Math.abs(me.veh.speed) > 5 && wanted.stars === 0 && Math.random() < 0.1) crime('assault', me.veh.x, me.veh.y, me.veh.z);
+    if (me.veh && !me.seat && drunk.lvl > 0.6 && Math.abs(me.veh.speed) > 5 && wanted.stars === 0 && Math.random() < 0.1) crime('drunk', me.veh.x, me.veh.y, me.veh.z);
     if (wanted.stars >= 5 && !me.dead) { survive5 += 0.2; if (survive5 >= 60) goalDone('survive5'); } else survive5 = 0;
     if (ui.setStars(wanted.stars, wanted.search)) fx.soundWanted(); // no banner: the stars alone show it
     ui.setSpeedo(me.veh, me.veh && !me.veh.T.bike ? currentStation().name : '', me.veh ? me.veh.nitro ?? 1 : 0);

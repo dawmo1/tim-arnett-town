@@ -383,6 +383,15 @@ function startFlee(w, x, z, short) {
   }
 }
 const CALM = new Set(['walk', 'link', 'fixed', 'watch', 'enter', 'tocar']);
+// A witness phoning the cops (wanted.js): backs away from (x, z) at a brisk walk, phone to the ear, for the length of the call.
+export function witnessFlee(w, x, z) {
+  if (w.dead || w.ch.rag) return;
+  w.pending = null;
+  if (w.mode === 'cower' || w.mode === 'flee') return; // already getting away: just dials as well
+  if (Math.random() < 0.5) say(w, pick(['I\'m calling the cops!', 'Police! Hurry!', 'Hello, 911?', 'Oh my god... 911!']), 2.6);
+  startFlee(w, x, z, true);
+  w.modeT = 9 + Math.random() * 3; w.fleeSp = 3.4;
+}
 // take cover behind a parked car (on the far side from the danger), else crouch where you are
 function hideFrom(w, x, z) {
   let best = null, bd = 12;
