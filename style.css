@@ -215,6 +215,8 @@ button { font: inherit; }
 /* ---------- pause menu & map (GTA V: dimmed game, centred panel, title + player card, tab row, dark rows, white selections) ---------- */
 /* GTA hides the HUD behind the pause menu */
 #hud:has(> #pause:not([hidden])) > :not(#pause) { visibility: hidden; }
+/* a shop or the Arnett Auto menu on the left: the feed underneath would show through its rows */
+body:has(#shop:not([hidden])) #feed, body:has(#lsc:not([hidden])) #feed { visibility: hidden; }
 #pause { --pf: 'Barlow Condensed', 'Arial Narrow', sans-serif; position: absolute; inset: 0; pointer-events: auto; background: rgba(0,0,0,.62); display: grid; grid-template-rows: auto auto 1fr auto; padding: 5vh max(16px, 10vw) 2.5vh; gap: 5px; font: 500 17px/1.25 var(--pf); letter-spacing: .4px; text-shadow: none; }
 .pauseTop { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; padding-bottom: 6px; }
 .pauseTop h2 { font: 500 clamp(22px, 2.1vw, 30px)/1 var(--pf); letter-spacing: .5px; margin: 0; color: #fff; }
