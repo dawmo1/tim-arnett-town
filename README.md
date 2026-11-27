@@ -1,6 +1,6 @@
 # Tim Arnett Town
 
-A free multiplayer 3D open-world sandbox that runs in the browser, set in **Davenport, Iowa at full 1:1 scale**: the real streets, hills, buildings and riverfront, streamed in as you move. Steal cars, rob stores, run from the cops, and keep an eye out for Mayor Tim Arnett's billboards.
+A free multiplayer 3D open-world sandbox that runs in the browser, set in **the Quad Cities at full 1:1 scale** (Davenport, Bettendorf, Rock Island, Moline and eight more towns on both sides of the Mississippi): the real streets, hills, buildings and riverfront, streamed in as you move. Steal cars, rob stores, run from the cops, and keep an eye out for Mayor Tim Arnett's billboards.
 
 **Play:** https://dawmo1.github.io/tim-arnett-town/
 
@@ -26,14 +26,15 @@ Everyone plays in one shared online world: open the link and you're in. Your mon
 | W + S (stopped) | Burnout. Flipped on a side or the roof: hold A or D to rock it back over. In the air: A / D roll, W / S tip the nose |
 | ↑ (up arrow) | Phone: contacts (mechanic, taxi to your waypoint, 911, Arnett Auto, locals), messages, internet. Arrows move, Enter picks, Backspace / Esc go back, ↓ on the bottom row puts it away |
 | P | Call the mechanic to drop off a car |
+| J | In a taxi, ambulance, fire truck, police car or on a scooter: start / quit that vehicle's side job |
 | G / H | Say hi / insult someone (some swing back). H while driving: horn |
 | N | Change radio station |
 | Esc or M | Pause menu: map and GPS, goals, players, controls, settings |
 | T | Chat |
 
-## What's in Davenport
+## What's in the Quad Cities
 
-- **The city:** downtown and the riverfront, the East Village, Hilltop and Vander Veer, Brady, Harrison and Main up to Kimberly Road and NorthPark, and west Davenport. Real elevation, so the bluffs are steep. Illinois is across the river; the Centennial and Government bridges end at **ROAD CLOSED** halfway over.
+- **The city:** downtown and the riverfront, the East Village, Hilltop and Vander Veer, Brady, Harrison and Main up to Kimberly Road and NorthPark, and west Davenport, then Bettendorf, Le Claire and Port Byron upriver and Rock Island, Moline, East Moline, Milan, Silvis, Colona, Coal Valley and Geneseo across the river in Illinois. Real elevation, so the bluffs are steep, and every river bridge is drivable (solid decks on piers, boats pass underneath).
 - **Landmarks:** Centennial Bridge's arches, the Skybridge (lit at night), Modern Woodmen Park with its Ferris wheel, the LeClaire Park bandshell, the Adler Theatre, Hotel Blackhawk, the Figge, Palmer College, the Vander Veer fountain, NorthPark, and a freight train down 5th Street with crossing gates. Barge tows work the Mississippi. Shops have made-up names; public landmarks keep theirs.
 - **Traffic** follows the real lanes, one-way streets, traffic lights and stop signs, pulls over for sirens and floors it away from gunfire. Lots of parked cars to steal, plus taxis, buses, garbage and tow trucks, limos, muscle cars and the odd monster truck.
 - **People** walk the sidewalks and cross at corners on the walk signal: office workers downtown, students by Palmer, shoppers at NorthPark, joggers and dog walkers on the riverfront, bus stops, buskers, hot dog carts (buy one to heal), road crews, crowds at the ballpark and bandshell in the evening and outside bars at night. Squirrels, rabbits and cats too.

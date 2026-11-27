@@ -341,7 +341,7 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyH' && me.veh && !me.seat && !me.dead) { if (me.veh.T.ebike) ebikes.bell(); else modHorn(me.veh); } // horn (carmods.js: the car's own horn mod)
   else if (e.code === 'KeyG' || e.code === 'KeyH') talk(e.code === 'KeyG');
   if (e.code === 'KeyC' && me.swim && !me.veh && !me.dead) swim.dive(me); // (held: swim down)
-  else if (e.code === 'KeyC' && playing && !me.veh && !me.dead && !typing && !cover.active()) { me.crouch = !me.crouch; ui.flashPrompt(me.crouch ? 'Crouching (C to stand)' : 'Standing'); }
+  else if (e.code === 'KeyC' && playing && !me.veh && !me.dead && !typing && !cover.active()) me.crouch = !me.crouch;
   if (e.code === 'KeyF' && !me.veh && !me.dead && !me.swim && !me.enter && !me.move && !me.ch.rag && !me.rag && !anim.busy()) { if (cover.press(me, Math.sin(camYaw), Math.cos(camYaw))) me.crouch = false; } // take cover (src/cover.js)
 });
 addEventListener('keyup', (e) => { keys.delete(e.code); if ((e.code === 'Tab' || e.code === 'KeyQ') && wheelOpen) closeWheel(true); });
@@ -2452,7 +2452,8 @@ function useStore() {
   if (bench && !nearestVehicle(1.0)) { me.sitAt = { x: bench.x - Math.sin(bench.h) * 0.12, z: bench.z - Math.cos(bench.h) * 0.12, h: bench.h, bench: bench.ref }; me.y = bench.y; me.vy = 0; anim.play('sit', 6, { loop: true }); return true; }
   const st = storeAt(me.veh ? me.veh.x : me.x, me.veh ? me.veh.z : me.z, me.veh ? 7 : 3.2);
   if (!st) return false;
-  if (st.kind === 'body' && me.veh && !me.seat && !me.veh.T.boat && !me.veh.T.heli) { bodyShop(me.veh); return true; }
+  // in a car on the ring: the first E opens the mod shop; once you've been in, E gets you out until you drive off the ring
+  if (st.kind === 'body' && me.veh && !me.seat && !me.veh.T.boat && !me.veh.T.heli && !(me.veh.modAt && Math.hypot(me.veh.x - me.veh.modAt.x, me.veh.z - me.veh.modAt.z) < 9)) { me.veh.modAt = { x: me.veh.x, z: me.veh.z }; bodyShop(me.veh); return true; }
   if (me.veh) return false;
   if (st.kind === 'body' && !nearestVehicle(1.3)) { // on foot at Arnett Auto (no car to get into right there): pick up a car from your garage
     const mine = () => garage.cars().map((c) => ({ label: c.name, sub: c.selected ? 'Your last ride · brought round to the street' : 'Brought round to the street', price: 0, buy: () => { closeShop(); garage.deliver(c.i); } }));
