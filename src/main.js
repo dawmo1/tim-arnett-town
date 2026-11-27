@@ -2362,10 +2362,11 @@ function updateRobbery(dt) {
   const R = interior.room;
   if (!R || !R.clerk || (R.kind !== 'rob' && R.kind !== 'casino' && R.kind !== 'bar')) return;
   const st = R.store, w = WEAPONS[me.weapon], c = R.clerk, casino = R.kind === 'casino', who = casino ? 'cashier' : R.kind === 'bar' ? 'bartender' : 'clerk', till = casino ? 'cage' : 'till';
-  // corner stores: a gun pointed the clerk's way is enough. The casino and bars are places you go to play and drink with a
-  // gun on your hip, so there it takes a real aim (right mouse). Nothing happens while a table or machine has you.
-  const gun = w.kind === 'gun' && !me.dead && !minigames.isOpen() && !phone.isOpen(), facing = Math.abs(angDiff(camYaw, Math.atan2(c.x - me.x, c.z - me.z))) < 0.6 && Math.hypot(c.x - me.x, c.z - me.z) < 16;
-  const started = (st.progress || 0) > 0, pointing = gun && facing && !(st.cooldown > 0) && (R.kind === 'rob' || aiming);
+  // it takes a real aim at the clerk (right mouse): everyone walks round with a gun in hand, and a corner store is also
+  // where you buy rounds at the counter, the casino and the bars places you go to play and drink. Nothing happens while a
+  // table, a machine or a shop menu has you.
+  const gun = w.kind === 'gun' && !me.dead && !minigames.isOpen() && !phone.isOpen() && !shopOpen, facing = Math.abs(angDiff(camYaw, Math.atan2(c.x - me.x, c.z - me.z))) < 0.6 && Math.hypot(c.x - me.x, c.z - me.z) < 16;
+  const started = (st.progress || 0) > 0, pointing = gun && facing && !(st.cooldown > 0) && aiming;
   me.robAim = pointing;
   R.held = pointing || (started && !(st.cooldown > 0));
   if (!R.held && (interior.nearExit(me.x, me.z) || canBuyAtCounter())) return; // let "E: Leave" / "E: Buy ammo" show
